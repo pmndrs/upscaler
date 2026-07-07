@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>FSR3 × three.js WebGPU — Test Bench</title>
+        <style>
+            html,
+            body {
+                margin: 0;
+                height: 100%;
+                overflow: hidden;
+                background: #0b0d10;
+                font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+            }
+            canvas {
+                display: block;
+            }
+            #stats {
+                position: fixed;
+                left: 12px;
+                top: 12px;
+                padding: 10px 12px;
+                background: rgba(8, 10, 14, 0.82);
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                border-radius: 8px;
+                color: #cfd8e3;
+                font-size: 11px;
+                line-height: 1.55;
+                white-space: pre;
+                pointer-events: none;
+                z-index: 10;
+            }
+            #stats b {
+                color: #7dd3fc;
+            }
+            #fatal {
+                position: fixed;
+                inset: 0;
+                display: none;
+                place-items: center;
+                color: #fda4af;
+                font-size: 14px;
+                text-align: center;
+                padding: 24px;
+                z-index: 20;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="stats"></div>
+        <div id="fatal"></div>
+        <script type="module" src="/src/main.ts"></script>
+    </body>
+</html>

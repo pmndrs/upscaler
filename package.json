@@ -1,0 +1,62 @@
+{
+    "name": "three-fsr3",
+    "version": "0.1.0",
+    "description": "AMD FidelityFX Super Resolution (FSR1 spatial + FSR2/3-style temporal upscaling) for three.js WebGPURenderer, implemented as raw WGSL compute passes",
+    "author": "Dennis Smolek <dennis@smolek.dev>",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/DennisSmolek/fsr3.git"
+    },
+    "keywords": [
+        "three",
+        "threejs",
+        "webgpu",
+        "wgsl",
+        "fsr",
+        "fsr3",
+        "upscaling",
+        "temporal",
+        "taa",
+        "anti-aliasing",
+        "fidelityfx"
+    ],
+    "type": "module",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "files": [
+        "dist",
+        "src"
+    ],
+    "scripts": {
+        "dev": "vite --config bench/vite.config.ts",
+        "bench": "vite --config bench/vite.config.ts",
+        "build": "vite build && tsc --declaration --emitDeclarationOnly -p tsconfig.build.json",
+        "lint": "eslint .",
+        "typecheck": "tsc --noEmit",
+        "test": "vitest run",
+        "prepublishOnly": "npm run lint && npm run typecheck && npm run test && npm run build"
+    },
+    "peerDependencies": {
+        "three": ">=0.184.0"
+    },
+    "devDependencies": {
+        "@eslint/js": "^9.18.0",
+        "@types/three": "^0.184.0",
+        "@webgpu/types": "^0.1.64",
+        "eslint": "^9.18.0",
+        "globals": "^15.14.0",
+        "lil-gui": "^0.20.0",
+        "three": "^0.184.0",
+        "typescript": "^5.7.0",
+        "typescript-eslint": "^8.20.0",
+        "vite": "^6.1.0",
+        "vitest": "^3.0.0"
+    }
+}

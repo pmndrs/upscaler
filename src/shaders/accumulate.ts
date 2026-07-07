@@ -1,0 +1,187 @@
+import { WGSL_COLOR, WGSL_CONSTANTS, WGSL_TONEMAP } from './common';
+import { assembleShader } from './wgsl';
+
+/**
+ * Reproject & accumulate — the core temporal upscaling pass (FSR2/3's
+ * "accumulate" stage, simplified: luminance-stability locks and the
+ * shading-change detector are Phase 3 work; see shaders README).
+ *
+ * Per display pixel:
+ * 1. Upsample the current jittered frame with a jitter-aware separable
+ *    Lanczos2 kernel over the 3×3 render-texel footprint. Because the
+ *    jitter moves the sample grid every frame, integrating these kernels
+ *    over time converges to a super-sampled image.
+ * 2. Reproject last frame's history through the dilated motion vector with
+ *    a Catmull-Rom filter (sharper than bilinear, avoids history blur).
+ * 3. Rein in stale history: clip it to the YCoCg variance AABB of the
+ *    current neighborhood, and cut its weight by the disocclusion mask.
+ * 4. Blend, tracking the accumulated sample count in the alpha channel so
+ *    fresh regions converge fast while stable ones stay smooth.
+ *
+ * Accumulation happens in invertible-tonemap space (see `WGSL_TONEMAP`) so
+ * HDR fireflies cannot dominate the running average.
+ *
+ * Bindings:
+ * - 1: scene color, render size (linear HDR)
+ * - 2: dilated motion, render size (UV delta in .xy)
+ * - 3: masks, render size (r = disocclusion)
+ * - 4: history in, display size (rgba16float; rgb tonemapped, a = age)
+ * - 5: linear clamp sampler
+ * - 6: history out (rgba16float storage, display size)
+ */
+export const ACCUMULATE_SHADER = assembleShader(
+    WGSL_CONSTANTS,
+    WGSL_COLOR,
+    WGSL_TONEMAP,
+    /* wgsl */ `
+@group(0) @binding(1) var inputColor : texture_2d<f32>;
+@group(0) @binding(2) var dilatedMotion : texture_2d<f32>;
+@group(0) @binding(3) var masks : texture_2d<f32>;
+@group(0) @binding(4) var historyIn : texture_2d<f32>;
+@group(0) @binding(5) var linearSampler : sampler;
+@group(0) @binding(6) var historyOut : texture_storage_2d<rgba16float, write>;
+
+const PI : f32 = 3.14159265358979;
+// Variance-clip gamma: how many standard deviations of the current
+// neighborhood the history may stray before being clipped.
+const CLIP_GAMMA : f32 = 1.0;
+
+// Lanczos2 kernel (the same window FSR2 uses for its upsample taps).
+fn lanczos2(x : f32) -> f32 {
+    let ax = abs(x);
+    if (ax < 1.0e-4) { return 1.0; }
+    if (ax >= 2.0) { return 0.0; }
+    let px = PI * ax;
+    return 2.0 * sin(px) * sin(px * 0.5) / (px * px);
+}
+
+// Catmull-Rom history sampling via 5 bilinear fetches (Jimenez SIGGRAPH'16).
+// Bicubic keeps reprojected history crisp where bilinear would smear it.
+fn sampleHistoryCatmullRom(uv : vec2f) -> vec4f {
+    let samplePos = uv * C.displaySize;
+    let texPos1 = floor(samplePos - 0.5) + 0.5;
+    let f = samplePos - texPos1;
+
+    let w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+    let w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+    let w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+    let w3 = f * f * (-0.5 + 0.5 * f);
+    let w12 = w1 + w2;
+    let offset12 = w2 / w12;
+
+    let texPos0 = (texPos1 - 1.0) * C.displaySizeInv;
+    let texPos3 = (texPos1 + 2.0) * C.displaySizeInv;
+    let texPos12 = (texPos1 + offset12) * C.displaySizeInv;
+
+    var result =
+        textureSampleLevel(historyIn, linearSampler, vec2f(texPos0.x, texPos12.y), 0.0) * (w0.x * w12.y) +
+        textureSampleLevel(historyIn, linearSampler, vec2f(texPos12.x, texPos0.y), 0.0) * (w12.x * w0.y) +
+        textureSampleLevel(historyIn, linearSampler, texPos12, 0.0) * (w12.x * w12.y) +
+        textureSampleLevel(historyIn, linearSampler, vec2f(texPos3.x, texPos12.y), 0.0) * (w3.x * w12.y) +
+        textureSampleLevel(historyIn, linearSampler, vec2f(texPos12.x, texPos3.y), 0.0) * (w12.x * w3.y);
+    // Corner taps are dropped, so renormalize by the weight actually used.
+    let wSum = w0.x * w12.y + w12.x * w0.y + w12.x * w12.y + w3.x * w12.y + w12.x * w3.y;
+    result = result / wSum;
+    return max(result, vec4f(0.0));
+}
+
+// Clips a color toward the AABB center (Playdead's variance clipping) —
+// gentler than a hard clamp, no hue snapping at box corners.
+fn clipToAABB(center : vec3f, extents : vec3f, color : vec3f) -> vec3f {
+    let dir = color - center;
+    let scale = extents / max(abs(dir), vec3f(1.0e-6));
+    let t = min(1.0, min(scale.x, min(scale.y, scale.z)));
+    return center + dir * t;
+}
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) gid : vec3u) {
+    if (any(vec2f(gid.xy) >= C.displaySize)) { return; }
+
+    let uv = (vec2f(gid.xy) + 0.5) * C.displaySizeInv;
+    let renderCoord = clamp(vec2i(uv * C.renderSize), vec2i(0), vec2i(C.renderSize) - 1);
+    let motion = textureLoad(dilatedMotion, renderCoord, 0).xy;
+    let disocclusion = textureLoad(masks, renderCoord, 0).r;
+
+    //* Current Frame Upsample (jitter-aware Lanczos2)
+    // srcPos is the display pixel in render texel-index space, shifted by
+    // the jitter so distances are measured to where samples actually landed.
+    let srcPos = uv * C.renderSize - 0.5 - C.jitter;
+    let baseTexel = vec2i(round(srcPos));
+    let maxCoord = vec2i(C.renderSize) - 1;
+
+    var colorSum = vec3f(0.0);
+    var weightSum = 0.0;
+    var m1 = vec3f(0.0); // YCoCg first moment
+    var m2 = vec3f(0.0); // YCoCg second moment
+    var boxMin = vec3f(1.0e5);
+    var boxMax = vec3f(-1.0e5);
+
+    for (var y = -1; y <= 1; y++) {
+        for (var x = -1; x <= 1; x++) {
+            let coord = clamp(baseTexel + vec2i(x, y), vec2i(0), maxCoord);
+            let d = srcPos - vec2f(coord);
+            let w = lanczos2(d.x) * lanczos2(d.y);
+            let c = tonemapInvertible(textureLoad(inputColor, coord, 0).rgb * C.exposure);
+            colorSum += c * w;
+            weightSum += w;
+
+            let ycc = rgbToYCoCg(c);
+            m1 += ycc;
+            m2 += ycc * ycc;
+            boxMin = min(boxMin, ycc);
+            boxMax = max(boxMax, ycc);
+        }
+    }
+
+    // Lanczos lobes go negative — dering by clamping into the local box.
+    var current = yCoCgToRgb(clamp(
+        rgbToYCoCg(colorSum / max(weightSum, 1.0e-4)),
+        boxMin, boxMax,
+    ));
+
+    // Confidence in the current sample: 1 when a jittered sample landed on
+    // this display pixel, lower when we're interpolating between samples.
+    let sampleDist = length(srcPos - vec2f(baseTexel));
+    let confidence = clamp(1.0 - sampleDist, 0.25, 1.0);
+
+    //* History Reprojection
+    let prevUV = uv - motion;
+    let offscreen = any(prevUV < vec2f(0.0)) || any(prevUV > vec2f(1.0));
+
+    if (hasFlag(FLAG_RESET) || offscreen) {
+        textureStore(historyOut, gid.xy, vec4f(current, 1.0 / C.maxAccumulation));
+        return;
+    }
+
+    let history = sampleHistoryCatmullRom(prevUV);
+    var sampleCount = history.a * C.maxAccumulation;
+
+    //* History Rectification
+    // Variance AABB of the current neighborhood in YCoCg; clip history into
+    // it so shading changes cannot ghost.
+    let mean = m1 / 9.0;
+    let variance = max(m2 / 9.0 - mean * mean, vec3f(0.0));
+    let extents = sqrt(variance) * CLIP_GAMMA;
+    let historyYcc = rgbToYCoCg(history.rgb);
+    let clippedYcc = clipToAABB(mean, extents, historyYcc);
+    let clipAmount = clamp(
+        length(clippedYcc - historyYcc) / max(length(extents), 1.0e-4),
+        0.0, 1.0,
+    );
+    let rectifiedHistory = yCoCgToRgb(clippedYcc);
+
+    // Disocclusion discards history outright; heavy clipping ages it so
+    // changed regions re-converge quickly instead of averaging with stale data.
+    sampleCount *= (1.0 - disocclusion);
+    sampleCount *= (1.0 - 0.5 * clipAmount);
+
+    //* Blend
+    let newCount = min(sampleCount + 1.0, C.maxAccumulation);
+    let alpha = clamp(confidence / newCount, 1.0 / C.maxAccumulation, 1.0);
+    let result = mix(rectifiedHistory, current, alpha);
+
+    textureStore(historyOut, gid.xy, vec4f(result, newCount / C.maxAccumulation));
+}
+`,
+);
