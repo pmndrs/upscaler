@@ -118,7 +118,7 @@ These were discovered by reading three's source; they're non-obvious and easy to
 ## Landmines still live (unverified — prime suspects when it misbehaves)
 
 - **Motion vector sign/scale.** `motionScale = (0.5, -0.5)` converts the `velocity` node's NDC delta to a UV delta, and reprojection is `prevUV = uv - motion`. This convention is **reasoned, not tested.** If history smears or the image tears under camera motion, flip signs / check this first. **Motion Vectors debug view is your friend.**
-- **Accumulation tuning.** Catmull-Rom history filter, YCoCg variance-clip gamma (`CLIP_GAMMA = 1.0`), disocclusion/clip weight falloffs in `accumulate.ts` are sensible defaults, not tuned. Ghosting → tighten; instability/shimmer → loosen.
+- **Accumulation tuning.** Catmull-Rom history filter, YCoCg variance-clip gamma (`CLIP_GAMMA = 1.0`), disocclusion/clip weight falloffs, **and the luminance-lock constants (`LOCK_*`)** in `accumulate.ts` are sensible defaults, not tuned. Ghosting → tighten (lower `LOCK_CLAMP_RELAX`/`LOCK_HISTORY_BOOST`, raise the peak/contrast thresholds); instability/shimmer or thin features dimming → loosen. Use `FSRDebugView.Locks` to see where locks form.
 - **Depth separation threshold** in `depthClip.ts` (`DEPTH_SEPARATION_SCALE`, `DEPTH_SIMILARITY_FLOOR`) is a guess. Too aggressive = history thrown away everywhere (no convergence); too slack = ghost trails behind moving objects.
 - **`timestamp-query`** may be absent; `GpuTimer` no-ops gracefully, but confirm the GPU-ms readout actually appears where supported.
 
@@ -131,6 +131,7 @@ These were discovered by reading three's source; they're non-obvious and easy to
 1. **Motion vectors** — static scene + moving camera should be smooth gradients, no per-object noise. Per-object flashing ⇒ previous model matrices not tracked (velocity node bypassed, or MRT not wired).
 2. **Disocclusion** — thin, stable outlines around moving silhouettes. Full-screen flashing ⇒ depth linearization / reversed-depth flag wrong.
 3. **Accumulation age** — should saturate to white within ~1s when still, reset along disocclusion trails. Never whitening ⇒ history not persisting (ping-pong or reset logic).
+4. **Locks** — lights up on thin high-contrast features (grid lines, wire/fence edges, specular silhouettes), black on flat surfaces. All-black ⇒ thresholds too high (thin features dim); lit everywhere ⇒ too low (ghosting).
 
 Full guide in `src/shaders/README.md`.
 
@@ -145,7 +146,7 @@ reactive mask on `05-transparency` (its explicit acceptance test), the RCAS-deno
 variant on `06-screenspace-gi`, and expose new toggles in `02-fsr1-vs-fsr3`. Remaining:
 
 - **Phase 3 — fidelity to real FSR3:**
-  - **Luminance-stability locks** (highest-value item). FSR tracks per-pixel luma stability over frames and protects locked thin features (wires, fence pickets) from rectification. We currently use Playdead variance clipping — robust but thin sub-pixel features still dim under motion. This is the biggest visible gap.
+  - ~~**Luminance-stability locks**~~ — **done & GPU-verified.** Persistent display-res lock buffer in `accumulate.ts` (r = lifetime, g = locked luma), reprojected through motion; detects thin luminance outliers, grows a lock while present, breaks on disocclusion/shading change, then widens the rectification AABB + boosts history for locked pixels. Toggle `settings.lockThinFeatures` (`FLAG_LOCKS`); inspect via `FSRDebugView.Locks`. Tuning constants (top of `accumulate.ts`) are defaults, not final — tighten if thin features ghost, loosen if they still dim.
   - Luminance pyramid (SPD-style downsample) + auto-exposure.
   - Shading-change detector.
   - Reactive-mask input for transparents/particles.

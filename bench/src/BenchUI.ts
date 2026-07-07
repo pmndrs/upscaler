@@ -11,6 +11,7 @@ export interface BenchState {
     sharpness: number;
     maxAccumulation: number;
     exposure: number;
+    lockThinFeatures: boolean;
     debugView: FSRDebugView;
     animate: boolean;
     autoOrbit: boolean;
@@ -49,6 +50,7 @@ export function createBenchUI(
     tuning.add(state, 'sharpness', 0, 1, 0.05);
     tuning.add(state, 'maxAccumulation', 4, 32, 1);
     tuning.add(state, 'exposure', 0.25, 4, 0.05);
+    tuning.add(state, 'lockThinFeatures').name('lock thin features');
 
     const debug = gui.addFolder('Debug');
     debug.add(state, 'debugView', {
@@ -57,6 +59,7 @@ export function createBenchUI(
         Disocclusion: FSRDebugView.Disocclusion,
         Depth: FSRDebugView.Depth,
         'Accumulation age': FSRDebugView.AccumulationAge,
+        Locks: FSRDebugView.Locks,
     });
     debug.add({ resetHistory: onResetHistory }, 'resetHistory').name('Reset history');
 

@@ -51,6 +51,8 @@ export enum FSRDebugView {
     Depth = 3,
     /** History accumulation age (white = fully converged history). */
     AccumulationAge = 4,
+    /** Luminance-stability locks (white = a locked thin feature). */
+    Locks = 5,
 }
 
 /**
@@ -110,6 +112,12 @@ export interface FSRRuntimeSettings {
     maxAccumulation: number;
     /** Pre-exposure applied before the invertible tonemap. */
     exposure: number;
+    /**
+     * Protect stable thin sub-pixel features (wires, fence pickets, foliage)
+     * from history rectification via luminance-stability locks. Reduces the
+     * dimming/shimmer such features otherwise show under motion. On by default.
+     */
+    lockThinFeatures: boolean;
     /** Debug visualization mode. */
     debugView: FSRDebugView;
 }

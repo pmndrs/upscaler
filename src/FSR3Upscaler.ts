@@ -12,6 +12,7 @@ import { BLIT_SHADER } from './shaders/blit';
 import {
     FLAG_INPUT_DISPLAY,
     FLAG_INPUT_REINHARD,
+    FLAG_LOCKS,
     FLAG_PERSPECTIVE,
     FLAG_RESET,
     FLAG_REVERSED_DEPTH,
@@ -61,6 +62,7 @@ export class FSR3Upscaler {
         sharpness: 0.8,
         maxAccumulation: 24,
         exposure: 1.0,
+        lockThinFeatures: true,
         debugView: FSRDebugView.None,
     };
 
@@ -105,6 +107,9 @@ export class FSR3Upscaler {
     private _output: StorageTexture | null = null;
     private _outputGPU: GPUTexture | null = null;
     private _history: [GPUTexture, GPUTexture] | null = null;
+    // Luminance-stability lock state (r = lock lifetime, g = locked luma),
+    // ping-ponged in lockstep with history.
+    private _locks: [GPUTexture, GPUTexture] | null = null;
     private _dilatedDepth: [GPUTexture, GPUTexture] | null = null;
     private _dilatedMotion: GPUTexture | null = null;
     private _masks: GPUTexture | null = null;
@@ -365,6 +370,8 @@ export class FSR3Upscaler {
         const depthPrev = this._dilatedDepth![1 - this._depthIndex];
         const historyIn = this._history![this._historyIndex];
         const historyOut = this._history![1 - this._historyIndex];
+        const locksIn = this._locks![this._historyIndex];
+        const locksOut = this._locks![1 - this._historyIndex];
 
         //* Dilate — nearest-depth motion/depth over 3×3
         const dilateBindGroup = this._dilatePass.createBindGroup([
@@ -415,6 +422,8 @@ export class FSR3Upscaler {
             historyIn.createView(),
             this._linearSampler,
             historyOut.createView(),
+            locksIn.createView(),
+            locksOut.createView(),
         ]);
         const accumulatePass = encoder.beginComputePass({
             label: 'fsr3-accumulate',
@@ -436,6 +445,7 @@ export class FSR3Upscaler {
                 this._masks!.createView(),
                 depthCur.createView(),
                 historyOut.createView(),
+                locksOut.createView(),
                 this._outputView(),
             ]);
             const debugPass = encoder.beginComputePass({
@@ -520,6 +530,7 @@ export class FSR3Upscaler {
         if ((camera as PerspectiveCamera).isPerspectiveCamera) flags |= FLAG_PERSPECTIVE;
         if (this._path === 'temporal') flags |= FLAG_INPUT_REINHARD;
         if (this._path === 'spatial') flags |= FLAG_INPUT_DISPLAY;
+        if (this.settings.lockThinFeatures) flags |= FLAG_LOCKS;
         c.setFlags(flags);
     }
 
@@ -567,6 +578,10 @@ export class FSR3Upscaler {
                 this._createTexture('history-0', dw, dh, 'rgba16float'),
                 this._createTexture('history-1', dw, dh, 'rgba16float'),
             ];
+            this._locks = [
+                this._createTexture('locks-0', dw, dh, 'rgba16float'),
+                this._createTexture('locks-1', dw, dh, 'rgba16float'),
+            ];
             this._dilatedDepth = [
                 this._createTexture('dilated-depth-0', rw, rh, 'r32float'),
                 this._createTexture('dilated-depth-1', rw, rh, 'r32float'),
@@ -585,6 +600,10 @@ export class FSR3Upscaler {
         if (this._history) {
             this._history.forEach((t) => t.destroy());
             this._history = null;
+        }
+        if (this._locks) {
+            this._locks.forEach((t) => t.destroy());
+            this._locks = null;
         }
         if (this._dilatedDepth) {
             this._dilatedDepth.forEach((t) => t.destroy());

@@ -166,6 +166,7 @@ export class BenchPipeline {
         sharpness: number;
         maxAccumulation: number;
         exposure: number;
+        lockThinFeatures: boolean;
         debugView: FSRDebugView;
     }): void {
         Object.assign(this.upscaler.settings, settings);

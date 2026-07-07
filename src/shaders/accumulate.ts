@@ -40,11 +40,27 @@ export const ACCUMULATE_SHADER = assembleShader(
 @group(0) @binding(4) var historyIn : texture_2d<f32>;
 @group(0) @binding(5) var linearSampler : sampler;
 @group(0) @binding(6) var historyOut : texture_storage_2d<rgba16float, write>;
+@group(0) @binding(7) var locksIn : texture_2d<f32>;
+@group(0) @binding(8) var locksOut : texture_storage_2d<rgba16float, write>;
 
 const PI : f32 = 3.14159265358979;
 // Variance-clip gamma: how many standard deviations of the current
 // neighborhood the history may stray before being clipped.
 const CLIP_GAMMA : f32 = 1.0;
+
+//* Luminance-stability lock tuning (FSR2/3's thin-feature protection).
+// A "lock" marks a stable sub-pixel luminance outlier (a wire, a fence
+// picket) and shields it from the variance clip that would otherwise drag its
+// bright/dark history toward the darker/brighter neighborhood — the exact
+// cause of thin features dimming and shimmering under motion.
+const LOCK_DECAY : f32 = 0.08;         // lifetime lost per frame when no feature present
+const LOCK_GROW : f32 = 0.5;           // lifetime gained per frame while a feature is present
+const LOCK_CONTRAST_LO : f32 = 0.02;   // YCoCg-Y contrast to start treating a pixel as a thin feature
+const LOCK_CONTRAST_HI : f32 = 0.12;
+const LOCK_PEAK_LO : f32 = 0.6;        // how many neighborhood std-devs marks an outlier
+const LOCK_PEAK_HI : f32 = 2.0;
+const LOCK_CLAMP_RELAX : f32 = 12.0;   // how much a full lock widens the variance AABB
+const LOCK_HISTORY_BOOST : f32 = 0.7;  // how much a full lock favors history in the blend
 
 // Lanczos2 kernel (the same window FSR2 uses for its upsample taps).
 fn lanczos2(x : f32) -> f32 {
@@ -151,18 +167,51 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
 
     if (hasFlag(FLAG_RESET) || offscreen) {
         textureStore(historyOut, gid.xy, vec4f(current, 1.0 / C.maxAccumulation));
+        textureStore(locksOut, gid.xy, vec4f(0.0));
         return;
     }
 
     let history = sampleHistoryCatmullRom(prevUV);
     var sampleCount = history.a * C.maxAccumulation;
 
-    //* History Rectification
-    // Variance AABB of the current neighborhood in YCoCg; clip history into
-    // it so shading changes cannot ghost.
+    //* Neighborhood Statistics (YCoCg)
     let mean = m1 / 9.0;
     let variance = max(m2 / 9.0 - mean * mean, vec3f(0.0));
-    let extents = sqrt(variance) * CLIP_GAMMA;
+    let curY = rgbToYCoCg(current).x;
+    let histY = rgbToYCoCg(history.rgb).x;
+    let contrast = boxMax.x - boxMin.x;
+
+    //* Luminance-Stability Lock
+    // Detect a thin feature (a luminance outlier vs the neighborhood) that is
+    // temporally stable, and grow a lock on it; the lock then shields the
+    // feature from rectification below. Locks reproject through motion just
+    // like the color history.
+    var lockLife = 0.0;
+    var lockedLuma = curY;
+    if (hasFlag(FLAG_LOCKS)) {
+        // Thin feature = a luminance outlier vs its neighborhood with real
+        // local contrast. Creation does NOT require frame-to-frame stability
+        // (thin features alias under motion); instability is what breaks it.
+        let peakiness = abs(curY - mean.x) / max(sqrt(variance.x), 1.0e-3);
+        let featureStrength =
+            smoothstep(LOCK_PEAK_LO, LOCK_PEAK_HI, peakiness) *
+            smoothstep(LOCK_CONTRAST_LO, LOCK_CONTRAST_HI, contrast);
+
+        let lockPrev = textureSampleLevel(locksIn, linearSampler, prevUV, 0.0);
+        lockedLuma = select(lockPrev.g, curY, lockPrev.r < 0.05);
+        // Grow the lock while a feature is present, decay it otherwise.
+        lockLife = lockPrev.r + select(-LOCK_DECAY, LOCK_GROW * featureStrength, featureStrength > 0.1);
+        // Break on disocclusion or a real shading change vs the locked luma.
+        let shading = smoothstep(max(contrast, 1.0e-3), max(contrast, 1.0e-3) * 2.0, abs(curY - lockedLuma));
+        lockLife = clamp(lockLife * (1.0 - disocclusion) * (1.0 - shading), 0.0, 1.0);
+    }
+
+    //* History Rectification
+    // Variance AABB of the current neighborhood in YCoCg; clip history into
+    // it so shading changes cannot ghost. A lock widens the box so a protected
+    // thin feature keeps its accumulated value instead of being pulled toward
+    // the (darker/brighter) neighborhood mean.
+    let extents = sqrt(variance) * CLIP_GAMMA * (1.0 + lockLife * LOCK_CLAMP_RELAX);
     let historyYcc = rgbToYCoCg(history.rgb);
     let clippedYcc = clipToAABB(mean, extents, historyYcc);
     let clipAmount = clamp(
@@ -172,16 +221,20 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
     let rectifiedHistory = yCoCgToRgb(clippedYcc);
 
     // Disocclusion discards history outright; heavy clipping ages it so
-    // changed regions re-converge quickly instead of averaging with stale data.
+    // changed regions re-converge quickly instead of averaging with stale data
+    // — but a lock protects its feature from that clip-driven aging.
     sampleCount *= (1.0 - disocclusion);
-    sampleCount *= (1.0 - 0.5 * clipAmount);
+    sampleCount *= (1.0 - 0.5 * clipAmount * (1.0 - lockLife));
 
-    //* Blend
+    //* Blend — locked features lean on the accumulated history so sub-pixel
+    //* detail persists under motion instead of dimming.
     let newCount = min(sampleCount + 1.0, C.maxAccumulation);
-    let alpha = clamp(confidence / newCount, 1.0 / C.maxAccumulation, 1.0);
+    let baseAlpha = clamp(confidence / newCount, 1.0 / C.maxAccumulation, 1.0);
+    let alpha = max(baseAlpha * (1.0 - LOCK_HISTORY_BOOST * lockLife), 1.0 / (C.maxAccumulation * 2.0));
     let result = mix(rectifiedHistory, current, alpha);
 
     textureStore(historyOut, gid.xy, vec4f(result, newCount / C.maxAccumulation));
+    textureStore(locksOut, gid.xy, vec4f(lockLife, lockedLuma, 0.0, 0.0));
 }
 `,
 );

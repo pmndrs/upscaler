@@ -56,6 +56,7 @@ const state = {
     tier: 'temporal' as Tier,
     ratio: 2.0,
     sharpen: true,
+    locks: true,
     debug: FSRDebugView.None,
     autoRotate: true,
 };
@@ -83,12 +84,14 @@ gui.add(state, 'tier', {
     .onChange(configure);
 addRenderScale(gui, state, configure);
 gui.add(state, 'sharpen').name('RCAS sharpen');
+gui.add(state, 'locks').name('lock thin features');
 gui.add(state, 'debug', {
     Off: FSRDebugView.None,
     'Motion vectors': FSRDebugView.MotionVectors,
     Disocclusion: FSRDebugView.Disocclusion,
     Depth: FSRDebugView.Depth,
     'Accumulation age': FSRDebugView.AccumulationAge,
+    Locks: FSRDebugView.Locks,
 }).name('debug view');
 gui.add(state, 'autoRotate').name('auto orbit');
 gui.add({ reset: () => presenter.upscaler.resetHistory() }, 'reset').name('reset history');
@@ -134,7 +137,11 @@ renderer.setAnimationLoop(() => {
     knot.rotation.y = t * 0.5;
 
     // Sharpening only applies on the spatial/temporal paths; bilinear ignores it.
-    presenter.applySettings({ sharpness: state.sharpen ? 0.8 : 0, debugView: state.debug });
+    presenter.applySettings({
+        sharpness: state.sharpen ? 0.8 : 0,
+        lockThinFeatures: state.locks,
+        debugView: state.debug,
+    });
     presenter.renderScene(scene, camera, dt);
     updateHud(fps);
 });

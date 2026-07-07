@@ -17,15 +17,28 @@ Every pass is a WGSL compute module assembled from shared chunks (`common.ts` + 
 | `rcas.ts`              | Faithful port of `FsrRcasF` (analytic lobe bound, `exp2` sharpness mapping)                                                                       | Denoise variant not wired up yet                                                                                                                                                    |
 | `dilate.ts`            | Same intent as _reconstruct & dilate_                                                                                                             | No scatter-based "reconstructed previous depth"; outputs linearized depth directly                                                                                                  |
 | `depthClip.ts`         | Same intent as _depth clip_                                                                                                                       | Compares against last frame's dilated depth (classic TAA style) rather than the reconstructed buffer; relative-depth threshold instead of plane-fit `Ksep`                          |
-| `accumulate.ts`        | Same structure as _reproject & accumulate_ (Lanczos2 upsample, kernel-confidence weighting, history rectification, accumulation counter in alpha) | Variance clipping (Playdead) instead of luminance-stability **locks**; no luminance pyramid/auto-exposure; no shading-change detector; Catmull-Rom (Jimenez 5-fetch) history filter |
+| `accumulate.ts`        | Same structure as _reproject & accumulate_ (Lanczos2 upsample, kernel-confidence weighting, history rectification, accumulation counter in alpha) + luminance-stability **locks** protecting thin features | Variance clipping (Playdead) as the base rectifier; no luminance pyramid/auto-exposure; no shading-change detector; Catmull-Rom (Jimenez 5-fetch) history filter |
 | `blit.ts` / `debug.ts` | — (bench/output utilities)                                                                                                                        |                                                                                                                                                                                     |
 
-The biggest visible gap to shipping FSR3 is **locks**: FSR tracks per-pixel luminance stability over time and lets locked thin features (wires, fence pickets) survive aggressive rectification. Variance clipping is the standard TAA substitute — robust, but thin sub-pixel features can still dim under motion. That's the first Phase 3 item for a reason.
+**Luminance-stability locks** (Phase 3, done) protect thin sub-pixel features (wires,
+fence pickets, foliage) from the variance clip that would otherwise drag their bright/dark
+history toward the neighborhood mean — the cause of thin features dimming and shimmering
+under motion. The accumulate pass keeps a persistent display-res lock buffer (r = lock
+lifetime, g = locked luma), reprojected through motion like the color history: it detects
+a thin feature as a luminance outlier vs its neighborhood (`peakiness` × `contrast`), grows
+a lock while the feature is present, and breaks it on disocclusion or a shading change.
+A locked pixel widens its rectification AABB (`LOCK_CLAMP_RELAX`) and leans on history in
+the blend (`LOCK_HISTORY_BOOST`). Toggle via `settings.lockThinFeatures` (the `FLAG_LOCKS`
+bit); inspect via `FSRDebugView.Locks`. The tuning constants at the top of `accumulate.ts`
+are sensible defaults, not final — tighten if you see thin features ghost, loosen if they
+still dim. Remaining accumulate gaps: luminance pyramid + auto-exposure and a shading-change
+detector.
 
 ## Debugging
 
-Set `settings.debugView` (`FSRDebugView`) to render pipeline internals instead of the final image: motion vectors, disocclusion mask, linearized depth, or accumulation age. When integrating a new scene, check in this order:
+Set `settings.debugView` (`FSRDebugView`) to render pipeline internals instead of the final image: motion vectors, disocclusion mask, linearized depth, accumulation age, or locks. When integrating a new scene, check in this order:
 
 1. **Motion vectors** — static scene + moving camera should produce smooth gradients, no per-object noise (if objects flash, their previous model matrices aren't tracked — did you bypass the `velocity` node?).
 2. **Disocclusion** — should outline moving silhouettes, thin and stable. Full-screen flashing means depth linearization flags are wrong (reversed-depth mismatch).
 3. **Accumulation age** — should saturate to white within ~a second when still, and reset along disocclusion trails.
+4. **Locks** — should light up on thin high-contrast features (grid lines, wire/fence edges, specular silhouettes) and stay black on flat surfaces. Locks everywhere ⇒ thresholds too low (expect ghosting); nothing lit ⇒ thresholds too high (thin features will dim).

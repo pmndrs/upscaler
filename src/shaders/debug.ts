@@ -10,7 +10,8 @@ import { assembleShader } from './wgsl';
  * - 2: masks (render size)
  * - 3: dilated view depth (render size)
  * - 4: history (display size)
- * - 5: output storage (rgba8unorm, display size)
+ * - 5: locks (display size; r = lock lifetime)
+ * - 6: output storage (rgba8unorm, display size)
  */
 export const DEBUG_SHADER = assembleShader(
     WGSL_CONSTANTS,
@@ -19,7 +20,8 @@ export const DEBUG_SHADER = assembleShader(
 @group(0) @binding(2) var masks : texture_2d<f32>;
 @group(0) @binding(3) var dilatedDepth : texture_2d<f32>;
 @group(0) @binding(4) var historyIn : texture_2d<f32>;
-@group(0) @binding(5) var outputColor : texture_storage_2d<rgba8unorm, write>;
+@group(0) @binding(5) var locksIn : texture_2d<f32>;
+@group(0) @binding(6) var outputColor : texture_storage_2d<rgba8unorm, write>;
 
 // Simple HSV-ish direction coloring for motion vectors.
 fn motionToColor(m : vec2f) -> vec3f {
@@ -51,6 +53,9 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
         }
         case 4u: { // Accumulation age
             c = vec3f(textureLoad(historyIn, vec2i(gid.xy), 0).a);
+        }
+        case 5u: { // Luminance-stability locks (r = lifetime)
+            c = vec3f(textureLoad(locksIn, vec2i(gid.xy), 0).r);
         }
         default: {}
     }

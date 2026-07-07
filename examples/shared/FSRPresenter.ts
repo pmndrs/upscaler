@@ -5,7 +5,7 @@ import {
     FSR3Upscaler,
     FSRQualityMode,
     getQualityModeRatio,
-    type FSRDebugView,
+    type FSRRuntimeSettings,
     type FSRUpscalePath,
 } from 'three-fsr3';
 
@@ -170,13 +170,8 @@ export class FSRPresenter {
         this.present();
     }
 
-    /** Applies runtime settings (sharpness / accumulation / exposure / debug). */
-    applySettings(settings: Partial<{
-        sharpness: number;
-        maxAccumulation: number;
-        exposure: number;
-        debugView: FSRDebugView;
-    }>): void {
+    /** Applies runtime settings (sharpness / accumulation / exposure / locks / debug). */
+    applySettings(settings: Partial<FSRRuntimeSettings>): void {
         Object.assign(this.upscaler.settings, settings);
     }
 
