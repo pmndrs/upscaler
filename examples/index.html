@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>three-fsr3 — Examples</title>
+        <style>
+            :root {
+                color-scheme: dark;
+                --bg: #0b0d10;
+                --card: #14181e;
+                --border: rgba(255, 255, 255, 0.1);
+                --text: #cfd8e3;
+                --muted: #8592a3;
+                --accent: #7dd3fc;
+            }
+            * {
+                box-sizing: border-box;
+            }
+            body {
+                margin: 0;
+                min-height: 100vh;
+                background: var(--bg);
+                color: var(--text);
+                font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+                padding: 48px 24px 64px;
+            }
+            .wrap {
+                max-width: 1000px;
+                margin: 0 auto;
+            }
+            h1 {
+                font-size: 22px;
+                margin: 0 0 6px;
+            }
+            h1 span {
+                color: var(--accent);
+            }
+            .sub {
+                color: var(--muted);
+                font-size: 13px;
+                line-height: 1.6;
+                margin: 0 0 8px;
+            }
+            .note {
+                color: var(--muted);
+                font-size: 12px;
+                line-height: 1.6;
+                margin: 0 0 32px;
+                border-left: 2px solid var(--border);
+                padding-left: 12px;
+            }
+            .grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+                gap: 16px;
+            }
+            a.card {
+                display: block;
+                background: var(--card);
+                border: 1px solid var(--border);
+                border-radius: 10px;
+                padding: 18px 18px 20px;
+                text-decoration: none;
+                color: inherit;
+                transition:
+                    border-color 0.15s,
+                    transform 0.15s;
+            }
+            a.card:hover {
+                border-color: var(--accent);
+                transform: translateY(-2px);
+            }
+            .num {
+                color: var(--accent);
+                font-size: 12px;
+            }
+            .title {
+                font-size: 15px;
+                margin: 6px 0 8px;
+            }
+            .desc {
+                color: var(--muted);
+                font-size: 12px;
+                line-height: 1.55;
+            }
+            .tag {
+                display: inline-block;
+                margin-top: 12px;
+                font-size: 10px;
+                color: var(--accent);
+                border: 1px solid var(--border);
+                border-radius: 999px;
+                padding: 2px 8px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="wrap">
+            <h1><span>three-fsr3</span> — Examples</h1>
+            <p class="sub">
+                FSR1 spatial + FSR2/3-style temporal upscaling for the three.js WebGPURenderer.
+            </p>
+            <p class="note">
+                WebGPU-only — open in Chrome/Edge 113+ (or a browser with WebGPU enabled). Each
+                demo renders the scene at a lower resolution and upscales it back to full size.
+            </p>
+            <div class="grid">
+                <a class="card" href="/01-hello/">
+                    <div class="num">01</div>
+                    <div class="title">Hello FSR3</div>
+                    <div class="desc">
+                        The minimal temporal upscale — one model, a slow orbit, no UI. The
+                        copy-paste starting point.
+                    </div>
+                    <span class="tag">starter</span>
+                </a>
+                <a class="card" href="/02-fsr1-vs-fsr3/">
+                    <div class="num">02</div>
+                    <div class="title">FSR1 vs FSR3</div>
+                    <div class="desc">
+                        Switch between paths and toggle features one at a time to see what each
+                        stage of the upscaler buys you.
+                    </div>
+                    <span class="tag">showcase</span>
+                </a>
+                <a class="card" href="/03-split-compare/">
+                    <div class="num">03</div>
+                    <div class="title">Split compare</div>
+                    <div class="desc">
+                        Native vs FSR side-by-side with a wipe slider — the same scene, the same
+                        moment, at two pixel budgets.
+                    </div>
+                    <span class="tag">A/B</span>
+                </a>
+                <a class="card" href="/04-aliasing-torture/">
+                    <div class="num">04</div>
+                    <div class="title">Aliasing torture</div>
+                    <div class="desc">
+                        Dense thin geometry and a moiré floor under a moving camera — where naive
+                        upscaling falls apart and temporal holds.
+                    </div>
+                    <span class="tag">quality</span>
+                </a>
+                <a class="card" href="/05-transparency/">
+                    <div class="num">05</div>
+                    <div class="title">Transparency &amp; particles</div>
+                    <div class="desc">
+                        Particles and transparent geometry have no reliable motion — an honest look
+                        at ghosting and why reactive masks matter.
+                    </div>
+                    <span class="tag">limitations</span>
+                </a>
+                <a class="card" href="/06-screenspace-gi/">
+                    <div class="num">06</div>
+                    <div class="title">Screen-space effects</div>
+                    <div class="desc">
+                        Expensive GTAO / SSR / SSGI rendered at low resolution, then upscaled back
+                        to full size through FSR3.
+                    </div>
+                    <span class="tag">advanced</span>
+                </a>
+            </div>
+        </div>
+    </body>
+</html>

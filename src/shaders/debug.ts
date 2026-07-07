@@ -23,7 +23,9 @@ export const DEBUG_SHADER = assembleShader(
 
 // Simple HSV-ish direction coloring for motion vectors.
 fn motionToColor(m : vec2f) -> vec3f {
-    let mag = clamp(length(m) * 20.0, 0.0, 1.0);
+    // sqrt response so slow sub-pixel motion is still visible without the
+    // fast-motion end saturating instantly (linear scaling reads as "black").
+    let mag = clamp(sqrt(length(m) * 8.0), 0.0, 1.0);
     let dir = normalize(select(m, vec2f(1.0, 0.0), length(m) < 1.0e-6));
     return vec3f(0.5 + 0.5 * dir.x * mag, 0.5 + 0.5 * dir.y * mag, mag);
 }

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>05 · Transparency &amp; particles</title>
+        <style>
+            html,
+            body {
+                margin: 0;
+                height: 100%;
+                overflow: hidden;
+                background: #0b0d10;
+            }
+            canvas {
+                display: block;
+            }
+            #note {
+                position: fixed;
+                left: 12px;
+                bottom: 12px;
+                max-width: 460px;
+                padding: 10px 12px;
+                background: rgba(8, 10, 14, 0.82);
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                border-radius: 8px;
+                color: #cfd8e3;
+                font: 11px/1.6 ui-monospace, Menlo, monospace;
+                pointer-events: none;
+            }
+            #note b {
+                color: #7dd3fc;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="note">
+            <b>Known limitation.</b> Particles and transparent surfaces write no reliable depth or
+            motion vectors, so FSR3's temporal history smears them into ghost trails while the
+            opaque scene stays crisp. Toggle to <b>bilinear</b> to see them without trails. A
+            <b>reactive mask</b> (roadmap Phase&nbsp;3/4) is what fixes this — this demo is its
+            acceptance test.
+        </div>
+        <script type="module" src="./main.ts"></script>
+    </body>
+</html>

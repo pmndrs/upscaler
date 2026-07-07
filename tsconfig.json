@@ -21,6 +21,6 @@
             "three-fsr3": ["src/index.ts"]
         }
     },
-    "include": ["src", "bench/src"],
-    "exclude": ["node_modules", "dist"]
+    "include": ["src", "bench/src", "examples"],
+    "exclude": ["node_modules", "dist", "examples/vite.config.ts"]
 }

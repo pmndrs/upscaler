@@ -31,6 +31,9 @@ export class BenchPipeline {
     //* Scene Target
     private _renderTarget: THREE.RenderTarget | null = null;
     private readonly _mrtNode = mrt({ output, velocity });
+    // Single-output MRT for non-temporal modes — its output count matches the
+    // count:1 render target so color attachment 0 is actually written.
+    private readonly _mrtOutputOnly = mrt({ output });
 
     private _mode: BenchMode = 'fsr3-temporal';
     private _quality: FSRQualityMode = FSRQualityMode.Quality;
@@ -94,21 +97,25 @@ export class BenchPipeline {
                       : 'bilinear',
         });
 
-        //* Scene Render Target (color + velocity MRT, float depth)
+        //* Scene Render Target (color [+ velocity MRT], float depth)
+        // Only the temporal path consumes velocity; the attachment count must
+        // match the MRT output count used in render() (a count:2 target
+        // rendered without a velocity output leaves color attachment 0 black).
         this._renderTarget?.dispose();
         const rw = this.upscaler.renderWidth;
         const rh = this.upscaler.renderHeight;
+        const temporal = mode === 'fsr3-temporal';
         const depthTexture = new THREE.DepthTexture(rw, rh);
         depthTexture.type = THREE.FloatType;
         this._renderTarget = new THREE.RenderTarget(rw, rh, {
-            count: 2,
+            count: temporal ? 2 : 1,
             type: THREE.HalfFloatType,
             depthTexture,
         });
         // MRT routes node outputs to attachments BY TEXTURE NAME (see
         // three's getTextureIndex) — these must match the mrt({...}) keys.
         this._renderTarget.textures[0].name = 'output';
-        this._renderTarget.textures[1].name = 'velocity';
+        if (temporal) this._renderTarget.textures[1].name = 'velocity';
 
         // Present the (re)created output texture on the quad.
         this._quadMaterial.colorNode = texture(this.upscaler.outputTexture);
@@ -128,8 +135,11 @@ export class BenchPipeline {
 
         //* Scene Pass (jittered when temporal)
         this.upscaler.beginFrame(camera);
-        // Velocity MRT costs bandwidth — only pay for it when it's consumed.
-        this._renderer.setMRT(temporal ? this._mrtNode : null);
+        // The MRT output count MUST match the render target's attachment count:
+        // rendering into a count:2 target without the velocity output leaves
+        // color attachment 0 unwritten (black). Non-temporal modes therefore
+        // use a single-output MRT into a count:1 target (see configure()).
+        this._renderer.setMRT(temporal ? this._mrtNode : this._mrtOutputOnly);
         this._renderer.setRenderTarget(rt);
         this._renderer.render(scene, camera);
         this._renderer.setRenderTarget(null);

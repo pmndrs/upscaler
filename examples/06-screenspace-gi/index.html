@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>06 · Screen-space effects → FSR3</title>
+        <style>
+            html,
+            body {
+                margin: 0;
+                height: 100%;
+                overflow: hidden;
+                background: #0b0d10;
+            }
+            canvas {
+                display: block;
+            }
+            #hud {
+                position: fixed;
+                left: 12px;
+                top: 12px;
+                padding: 10px 12px;
+                background: rgba(8, 10, 14, 0.82);
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                border-radius: 8px;
+                color: #cfd8e3;
+                font: 11px/1.55 ui-monospace, Menlo, monospace;
+                white-space: pre;
+                pointer-events: none;
+            }
+            #hud b {
+                color: #7dd3fc;
+            }
+            #note {
+                position: fixed;
+                left: 12px;
+                bottom: 12px;
+                max-width: 480px;
+                padding: 10px 12px;
+                background: rgba(8, 10, 14, 0.82);
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                border-radius: 8px;
+                color: #8592a3;
+                font: 11px/1.6 ui-monospace, Menlo, monospace;
+                pointer-events: none;
+            }
+            #note b {
+                color: #7dd3fc;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="hud"></div>
+        <div id="note">
+            <b>The expensive part runs small.</b> The scene + screen-space effect are rendered at a
+            fraction of the display resolution, then FSR3 reconstructs full size — FSR3 is the only
+            temporal resolver (no TRAA), so it also cleans up the effect's noise. GI at reduced res
+            is inherently noisy; GTAO is the cheapest, SSR the most obvious.
+        </div>
+        <script type="module" src="./main.ts"></script>
+    </body>
+</html>

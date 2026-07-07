@@ -46,7 +46,9 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
             if (x == 0 && y == 0) { continue; }
             let p = clamp(center + vec2i(x, y), vec2i(0), maxCoord);
             let d = textureLoad(sceneDepth, p, 0);
-            let nearer = select(d < bestDepth, d > bestDepth, reversed);
+            // Parenthesize the comparisons: WGSL otherwise parses the
+            // '<' ... '>' as a template argument list and fails to compile.
+            let nearer = select((d < bestDepth), (d > bestDepth), reversed);
             if (nearer) {
                 bestDepth = d;
                 bestCoord = p;
