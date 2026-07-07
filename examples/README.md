@@ -23,6 +23,39 @@ shader/pipeline edits hot-reload here just like in the bench.
 | 05 | **Transparency & particles** (`05-transparency`) | The honest limitation: particles/transparents ghost (no depth/motion) — the acceptance test for a future reactive mask. |
 | 06 | **Screen-space effects** (`06-screenspace-gi`) | GTAO / SSR / SSGI rendered at reduced resolution, then upscaled by FSR3. |
 
+Every interactive demo has a **render scale ×** slider (1.0×–3.0×) that sweeps the
+base render resolution, with the resulting size + base % shown in the HUD.
+
+## Planned
+
+- **07 · DPR budget** (`07-dpr`) — the mobile win, made explicit. Simulate a device
+  pixel ratio (e.g. a phone at DPR 1.5–3) and compare **native render at that DPR**
+  vs **FSR: render at a lower effective resolution, present at the DPR output**.
+  Show total pixels rendered *and* GPU ms for both sides so the saving is a number,
+  not a vibe (e.g. present at DPR 1.5 but render as if DPR 1.0 or lower). Builds on
+  `03-split-compare` + the render-scale control, and adds **scene-render GPU timing**
+  (see below) so the net cost — scene + upscale — is visible next to native.
+
+## Measuring performance
+
+The library already ships real per-pass GPU timing via WebGPU **`timestamp-query`**
+([`src/internal/GpuTimer.ts`](../src/internal/GpuTimer.ts)) — `upscaler.gpuTimings`
+is a per-pass map of GPU milliseconds (dilate / depth-clip / accumulate / rcas / …),
+surfaced in the bench and `02` HUDs. This is the hard-to-get measurement; a scene
+inspector can't give you per-GPU-pass times. Notes for the DPR demo:
+
+- It times only the **FSR passes**. To show the upscale win you also need the
+  **scene-render** GPU time — three's `WebGPURenderer` exposes its own GPU
+  timestamps (`renderer.trackTimestamp` / `renderer.info.render.timestamp`, resolved
+  via `renderer.resolveTimestampsAsync()`); combine that with `gpuTimings` for a
+  scene + upscale total to compare against a native render.
+- GPU times are noisy frame-to-frame — average over ~30 frames (the bench already
+  accumulates) and let it warm up before reading.
+- `timestamp-query` may be absent on some mobile browsers; `GpuTimer` no-ops
+  gracefully, so the demo must tolerate an empty timing map.
+- The three-devtools inspector is useful for draw-call counts / scene-graph / memory
+  sanity, but it is *not* a substitute for `timestamp-query` GPU-pass timing.
+
 ## How they're built
 
 Every demo drives the library through [`shared/FSRPresenter.ts`](shared/FSRPresenter.ts),
