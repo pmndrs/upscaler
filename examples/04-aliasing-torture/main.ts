@@ -1,11 +1,12 @@
 import * as THREE from 'three/webgpu';
 import GUI from 'lil-gui';
 
-import { FSRQualityMode, type FSRUpscalePath } from 'three-fsr3';
+import { type FSRUpscalePath } from 'three-fsr3';
 
 import { bootRenderer, displaySize } from '../shared/boot';
 import { FSRPresenter } from '../shared/FSRPresenter';
 import { addStudioLighting, createGridTexture } from '../shared/props';
+import { addRenderScale, basePercent } from '../shared/ui';
 
 //* The classic upscaler stress test: sub-pixel-thin geometry (a chain-link
 //* fence + railings) over a high-frequency moiré floor, with a slow camera
@@ -59,7 +60,7 @@ for (let i = 0; i < 6; i++) {
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 300);
 
 //* Presenter + state.
-const state = { tier: 'temporal' as FSRUpscalePath, quality: FSRQualityMode.Performance };
+const state = { tier: 'temporal' as FSRUpscalePath, ratio: 2.0 };
 const presenter = new FSRPresenter(renderer);
 function configure(): void {
     const { width, height } = displaySize(dpr);
@@ -67,7 +68,7 @@ function configure(): void {
         displayWidth: width,
         displayHeight: height,
         path: state.tier,
-        quality: state.quality,
+        ratio: state.ratio,
     });
 }
 configure();
@@ -80,13 +81,7 @@ gui.add(state, 'tier', {
 })
     .name('mode')
     .onChange(configure);
-gui.add(state, 'quality', {
-    'Quality (1.5x)': FSRQualityMode.Quality,
-    'Performance (2.0x)': FSRQualityMode.Performance,
-    'Ultra Performance (3.0x)': FSRQualityMode.UltraPerformance,
-})
-    .name('quality')
-    .onChange(configure);
+addRenderScale(gui, state, configure);
 
 window.addEventListener('resize', () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -100,8 +95,8 @@ function updateHud(): void {
     const u = presenter.upscaler;
     hud.innerHTML =
         `<b>mode</b>     ${state.tier}\n` +
-        `<b>render</b>   ${u.renderWidth}×${u.renderHeight}\n` +
-        `<b>display</b>  ${u.displayWidth}×${u.displayHeight}  (${u.upscaleRatio.toFixed(1)}x)`;
+        `<b>render</b>   ${u.renderWidth}×${u.renderHeight}  (${basePercent(u.upscaleRatio)})\n` +
+        `<b>display</b>  ${u.displayWidth}×${u.displayHeight}  (${u.upscaleRatio.toFixed(2)}x)`;
 }
 
 //* Loop — a slow dolly through the fences keeps sub-pixel motion continuous.

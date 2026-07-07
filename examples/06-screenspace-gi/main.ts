@@ -18,10 +18,11 @@ import { ssgi } from 'three/addons/tsl/display/SSGINode.js';
 import { denoise } from 'three/addons/tsl/display/DenoiseNode.js';
 import GUI from 'lil-gui';
 
-import { FSR3Upscaler, FSRQualityMode, getQualityModeRatio } from 'three-fsr3';
+import { FSR3Upscaler } from 'three-fsr3';
 
 import { bootRenderer, displaySize } from '../shared/boot';
 import { addStudioLighting } from '../shared/props';
+import { addRenderScale, basePercent } from '../shared/ui';
 
 //* The "complex" example: an expensive screen-space effect (GTAO / SSR / SSGI)
 //* is rendered at REDUCED resolution via a TSL pass graph, and FSR3 upscales
@@ -105,7 +106,7 @@ compositeMat.depthWrite = false;
 compositeMat.fog = false;
 const compositeQuad = new THREE.QuadMesh(compositeMat);
 
-const state = { effect: 'gtao' as Effect, quality: FSRQualityMode.Performance };
+const state = { effect: 'gtao' as Effect, ratio: 2.0 };
 
 let colorRT: THREE.RenderTarget | null = null;
 let scenePass: ReturnType<typeof pass> | null = null;
@@ -113,7 +114,7 @@ let scenePass: ReturnType<typeof pass> | null = null;
 /** (Re)builds the pass graph, effect composite, and low-res color target. */
 function configure(): void {
     const { width, height } = displaySize(dpr);
-    const ratio = getQualityModeRatio(state.quality);
+    const ratio = state.ratio;
     upscaler.configure({
         displayWidth: width,
         displayHeight: height,
@@ -184,13 +185,7 @@ configure();
 
 const gui = new GUI({ title: 'Screen-space → FSR3' });
 gui.add(state, 'effect', { GTAO: 'gtao', SSR: 'ssr', SSGI: 'ssgi' }).name('effect').onChange(configure);
-gui.add(state, 'quality', {
-    'Quality (1.5x)': FSRQualityMode.Quality,
-    'Performance (2.0x)': FSRQualityMode.Performance,
-    'Ultra Performance (3.0x)': FSRQualityMode.UltraPerformance,
-})
-    .name('render scale')
-    .onChange(configure);
+addRenderScale(gui, state, configure);
 
 window.addEventListener('resize', () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -203,8 +198,8 @@ const hud = document.getElementById('hud')!;
 function updateHud(): void {
     hud.innerHTML =
         `<b>effect</b>   ${state.effect.toUpperCase()}\n` +
-        `<b>render</b>   ${upscaler.renderWidth}×${upscaler.renderHeight}  (low res)\n` +
-        `<b>display</b>  ${upscaler.displayWidth}×${upscaler.displayHeight}  (${upscaler.upscaleRatio.toFixed(1)}x FSR3)`;
+        `<b>render</b>   ${upscaler.renderWidth}×${upscaler.renderHeight}  (${basePercent(upscaler.upscaleRatio)})\n` +
+        `<b>display</b>  ${upscaler.displayWidth}×${upscaler.displayHeight}  (${upscaler.upscaleRatio.toFixed(2)}x FSR3)`;
 }
 
 /** True once three has created the GPU texture behind a three Texture. */

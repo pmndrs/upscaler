@@ -2,11 +2,12 @@ import * as THREE from 'three/webgpu';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import GUI from 'lil-gui';
 
-import { FSRDebugView, FSRQualityMode, type FSRUpscalePath } from 'three-fsr3';
+import { FSRDebugView, type FSRUpscalePath } from 'three-fsr3';
 
 import { bootRenderer, displaySize } from '../shared/boot';
 import { FSRPresenter } from '../shared/FSRPresenter';
 import { addStudioLighting, createGridFloor } from '../shared/props';
+import { addRenderScale, basePercent } from '../shared/ui';
 
 //* A compact playground for understanding what each tier of the upscaler buys
 //* you. Start on "bilinear" (naive), step up to "spatial" (FSR1, edge-adaptive
@@ -53,7 +54,7 @@ controls.autoRotateSpeed = 0.5;
 type Tier = 'bilinear' | 'spatial' | 'temporal';
 const state = {
     tier: 'temporal' as Tier,
-    quality: FSRQualityMode.Performance,
+    ratio: 2.0,
     sharpen: true,
     debug: FSRDebugView.None,
     autoRotate: true,
@@ -66,7 +67,7 @@ function configure(): void {
         displayWidth: width,
         displayHeight: height,
         path: state.tier as FSRUpscalePath,
-        quality: state.quality,
+        ratio: state.ratio,
     });
 }
 configure();
@@ -80,15 +81,7 @@ gui.add(state, 'tier', {
 })
     .name('tier')
     .onChange(configure);
-gui.add(state, 'quality', {
-    'Native AA (1.0x)': FSRQualityMode.NativeAA,
-    'Quality (1.5x)': FSRQualityMode.Quality,
-    'Balanced (1.7x)': FSRQualityMode.Balanced,
-    'Performance (2.0x)': FSRQualityMode.Performance,
-    'Ultra Performance (3.0x)': FSRQualityMode.UltraPerformance,
-})
-    .name('quality')
-    .onChange(configure);
+addRenderScale(gui, state, configure);
 gui.add(state, 'sharpen').name('RCAS sharpen');
 gui.add(state, 'debug', {
     Off: FSRDebugView.None,
@@ -114,8 +107,8 @@ function updateHud(fps: number): void {
     const gpu = [...u.gpuTimings].reduce((a, [, ms]) => a + ms, 0);
     hud.innerHTML =
         `<b>tier</b>     ${state.tier}\n` +
-        `<b>render</b>   ${u.renderWidth}×${u.renderHeight}\n` +
-        `<b>display</b>  ${u.displayWidth}×${u.displayHeight}  (${u.upscaleRatio.toFixed(1)}x)\n` +
+        `<b>render</b>   ${u.renderWidth}×${u.renderHeight}  (${basePercent(u.upscaleRatio)})\n` +
+        `<b>display</b>  ${u.displayWidth}×${u.displayHeight}  (${u.upscaleRatio.toFixed(2)}x)\n` +
         `<b>fps</b>      ${fps.toFixed(0)}\n` +
         `<b>gpu</b>      ${gpu.toFixed(2)} ms`;
 }

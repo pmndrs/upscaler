@@ -1,12 +1,12 @@
 import * as THREE from 'three/webgpu';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { abs, mix, smoothstep, step, texture, uniform, uv, vec4 } from 'three/tsl';
-
-import { FSRQualityMode } from 'three-fsr3';
+import GUI from 'lil-gui';
 
 import { bootRenderer, displaySize } from '../shared/boot';
 import { FSRPresenter } from '../shared/FSRPresenter';
 import { addStudioLighting, createGridFloor } from '../shared/props';
+import { addRenderScale } from '../shared/ui';
 
 //* Native vs FSR3, same scene and same instant, wiped by the mouse. The left
 //* side renders at a fraction of the pixel count and is reconstructed by FSR3;
@@ -55,12 +55,16 @@ controls.autoRotateSpeed = 0.5;
 const fsr = new FSRPresenter(renderer, { shareVelocityMatrix: true });
 const native = new FSRPresenter(renderer, { shareVelocityMatrix: false });
 
+const state = { ratio: 2.0 };
+const fsrLabel = document.getElementById('labFsr')!;
+
+/** Configures both presenters for the current render scale. */
 function configure(): void {
     const { width, height } = displaySize(dpr);
-    fsr.configure({ displayWidth: width, displayHeight: height, path: 'temporal', quality: FSRQualityMode.Performance });
+    fsr.configure({ displayWidth: width, displayHeight: height, path: 'temporal', ratio: state.ratio });
     native.configure({ displayWidth: width, displayHeight: height, path: 'bilinear', ratio: 1 });
 }
-configure();
+configure(); // must run before outputTexture is sampled below
 
 //* Composite present quad — wipe between the two output textures.
 const split = uniform(0.5);
@@ -78,12 +82,24 @@ compositeMat.fog = false;
 compositeMat.colorNode = composited;
 const compositeQuad = new THREE.QuadMesh(compositeMat);
 
-//* Rebind the sampled textures after a resize (configure recreates them).
+/** Re-point the composite at the (recreated) output textures + update label. */
 function rebindComposite(): void {
     fsrTex.value = fsr.outputTexture;
     nativeTex.value = native.outputTexture;
     compositeMat.needsUpdate = true;
+    fsrLabel.textContent = `◄ FSR3 · ${fsr.upscaler.renderWidth}×${fsr.upscaler.renderHeight}`;
 }
+rebindComposite(); // set the initial label
+
+/** configure() rebuilds the output textures, so always rebind after. */
+function reconfigure(): void {
+    configure();
+    rebindComposite();
+}
+
+//* Controls — sweep the FSR side's render scale (native stays at 1.0×).
+const gui = new GUI({ title: 'Split compare' });
+addRenderScale(gui, state, reconfigure);
 
 window.addEventListener('pointermove', (e) => {
     split.value = e.clientX / window.innerWidth;
@@ -92,8 +108,7 @@ window.addEventListener('resize', () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
-    configure();
-    rebindComposite();
+    reconfigure();
 });
 
 //* Loop — draw both offscreen, then composite to the canvas.

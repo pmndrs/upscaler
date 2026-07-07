@@ -2,11 +2,12 @@ import * as THREE from 'three/webgpu';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import GUI from 'lil-gui';
 
-import { FSRQualityMode, type FSRUpscalePath } from 'three-fsr3';
+import { type FSRUpscalePath } from 'three-fsr3';
 
 import { bootRenderer, displaySize } from '../shared/boot';
 import { FSRPresenter } from '../shared/FSRPresenter';
 import { addStudioLighting, createGridFloor } from '../shared/props';
+import { addRenderScale } from '../shared/ui';
 
 //* Transparency and particles are the honest weak spot of a depth+motion
 //* temporal upscaler: they have no watertight depth and no motion vectors, so
@@ -65,7 +66,7 @@ const pGeo = new THREE.BufferGeometry();
 pGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
 const pMat = new THREE.PointsNodeMaterial({
     color: 0xffd28a,
-    size: 6,
+    size: 10,
     sizeAttenuation: true,
     transparent: true,
     depthWrite: false,
@@ -83,7 +84,7 @@ controls.autoRotate = true;
 controls.autoRotateSpeed = 0.4;
 
 //* Presenter + state.
-const state = { tier: 'temporal' as FSRUpscalePath };
+const state = { tier: 'temporal' as FSRUpscalePath, ratio: 2.0 };
 const presenter = new FSRPresenter(renderer);
 function configure(): void {
     const { width, height } = displaySize(dpr);
@@ -91,7 +92,7 @@ function configure(): void {
         displayWidth: width,
         displayHeight: height,
         path: state.tier,
-        quality: FSRQualityMode.Performance,
+        ratio: state.ratio,
     });
 }
 configure();
@@ -103,6 +104,7 @@ gui.add(state, 'tier', {
 })
     .name('mode')
     .onChange(configure);
+addRenderScale(gui, state, configure);
 
 window.addEventListener('resize', () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -123,7 +125,10 @@ renderer.setAnimationLoop(() => {
         q.position.set(Math.cos(a) * 5, 2.2 + Math.sin(t + i) * 0.6, Math.sin(a) * 5 - 1);
         q.lookAt(camera.position);
     });
-    particles.rotation.y = t * 0.25;
+    // Fast lateral sweep — the point cloud has no motion vectors, so the quicker
+    // it moves in screen space the more obvious the temporal ghost trails are.
+    particles.rotation.y = t * 1.1;
+    particles.position.x = Math.sin(t * 0.9) * 4;
 
     presenter.renderScene(scene, camera, dt);
 });
