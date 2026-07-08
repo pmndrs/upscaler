@@ -168,6 +168,7 @@ export class BenchPipeline {
         exposure: number;
         autoExposure: boolean;
         lockThinFeatures: boolean;
+        detectShadingChanges: boolean;
         debugView: FSRDebugView;
     }): void {
         Object.assign(this.upscaler.settings, settings);

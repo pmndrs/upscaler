@@ -66,6 +66,17 @@ const LOCK_PEAK_HI : f32 = 2.0;
 const LOCK_CLAMP_RELAX : f32 = 12.0;   // how much a full lock widens the variance AABB
 const LOCK_HISTORY_BOOST : f32 = 0.7;  // how much a full lock favors history in the blend
 
+//* Shading-change detection (FSR2/3's "luminance instability").
+// Distinguishes a genuine shading change (a light turning on, an animated
+// material) from mere motion by comparing the reprojected history's luma to the
+// current neighborhood's averaged luma — a coherent disagreement the local
+// variance can't explain. Measured on averaged luma so sub-pixel aliasing on
+// thin edges doesn't read as a change. Where it fires, history is aged so the
+// surface re-converges to its new shading instead of ghosting the old.
+const SHADING_LO : f32 = 1.5;          // luma disagreement (in neighborhood std-devs) to start reacting
+const SHADING_HI : f32 = 4.0;          // ...and to treat as a full shading change
+const SHADING_AGE : f32 = 0.75;        // max fraction of accumulation dropped on a full change
+
 // Lanczos2 kernel (the same window FSR2 uses for its upsample taps).
 fn lanczos2(x : f32) -> f32 {
     let ax = abs(x);
@@ -187,6 +198,16 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
     let histY = rgbToYCoCg(history.rgb).x;
     let contrast = boxMax.x - boxMin.x;
 
+    //* Shading-Change Detection
+    // Coherent luma disagreement between reprojected history and the current
+    // neighborhood, normalized by how much the neighborhood itself varies —
+    // large only when the surface's shading changed rather than just moved.
+    var shadingChange = 0.0;
+    if (hasFlag(FLAG_SHADING_CHANGE)) {
+        let lumaSpread = sqrt(variance.x) + 0.5 * contrast + 1.0e-3;
+        shadingChange = smoothstep(SHADING_LO, SHADING_HI, abs(mean.x - histY) / lumaSpread);
+    }
+
     //* Luminance-Stability Lock
     // Detect a thin feature (a luminance outlier vs the neighborhood) that is
     // temporally stable, and grow a lock on it; the lock then shields the
@@ -207,9 +228,13 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
         lockedLuma = select(lockPrev.g, curY, lockPrev.r < 0.05);
         // Grow the lock while a feature is present, decay it otherwise.
         lockLife = lockPrev.r + select(-LOCK_DECAY, LOCK_GROW * featureStrength, featureStrength > 0.1);
-        // Break on disocclusion or a real shading change vs the locked luma.
-        let shading = smoothstep(max(contrast, 1.0e-3), max(contrast, 1.0e-3) * 2.0, abs(curY - lockedLuma));
-        lockLife = clamp(lockLife * (1.0 - disocclusion) * (1.0 - shading), 0.0, 1.0);
+        // Break on disocclusion or a shading change measured against the lock's
+        // OWN tracked luma — not the neighborhood-mean detector, which on a thin
+        // bright feature always disagrees with the (background-dominated) mean
+        // and would break every lock. The mean-based detector only ages
+        // non-locked history below.
+        let lockShading = smoothstep(max(contrast, 1.0e-3), max(contrast, 1.0e-3) * 2.0, abs(curY - lockedLuma));
+        lockLife = clamp(lockLife * (1.0 - disocclusion) * (1.0 - lockShading), 0.0, 1.0);
     }
 
     //* History Rectification
@@ -231,6 +256,9 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
     // — but a lock protects its feature from that clip-driven aging.
     sampleCount *= (1.0 - disocclusion);
     sampleCount *= (1.0 - 0.5 * clipAmount * (1.0 - lockLife));
+    // A detected shading change ages history so the new shading converges fast;
+    // a lock protects its thin feature from this (aliasing there is not a change).
+    sampleCount *= (1.0 - SHADING_AGE * shadingChange * (1.0 - lockLife));
 
     //* Blend — locked features lean on the accumulated history so sub-pixel
     //* detail persists under motion instead of dimming.
@@ -240,7 +268,8 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
     let result = mix(rectifiedHistory, current, alpha);
 
     textureStore(historyOut, gid.xy, vec4f(result, newCount / C.maxAccumulation));
-    textureStore(locksOut, gid.xy, vec4f(lockLife, lockedLuma, 0.0, 0.0));
+    // b = shading-change factor (for the debug view); a unused.
+    textureStore(locksOut, gid.xy, vec4f(lockLife, lockedLuma, shadingChange, 0.0));
 }
 `,
 );

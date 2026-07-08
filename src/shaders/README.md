@@ -17,7 +17,7 @@ Every pass is a WGSL compute module assembled from shared chunks (`common.ts` + 
 | `rcas.ts`              | Faithful port of `FsrRcasF` (analytic lobe bound, `exp2` sharpness mapping)                                                                       | Denoise variant not wired up yet                                                                                                                                                    |
 | `dilate.ts`            | Same intent as _reconstruct & dilate_                                                                                                             | No scatter-based "reconstructed previous depth"; outputs linearized depth directly                                                                                                  |
 | `depthClip.ts`         | Same intent as _depth clip_                                                                                                                       | Compares against last frame's dilated depth (classic TAA style) rather than the reconstructed buffer; relative-depth threshold instead of plane-fit `Ksep`                          |
-| `accumulate.ts`        | Same structure as _reproject & accumulate_ (Lanczos2 upsample, kernel-confidence weighting, history rectification, accumulation counter in alpha) + luminance-stability **locks** protecting thin features + **auto-exposed** pre-tonemap | Variance clipping (Playdead) as the base rectifier; no shading-change detector; Catmull-Rom (Jimenez 5-fetch) history filter |
+| `accumulate.ts`        | Same structure as _reproject & accumulate_ (Lanczos2 upsample, kernel-confidence weighting, history rectification, accumulation counter in alpha) + luminance-stability **locks** protecting thin features + **auto-exposed** pre-tonemap + **shading-change** history aging | Variance clipping (Playdead) as the base rectifier; shading-change measured on the 3×3 neighborhood mean vs history luma rather than a dedicated coarse pyramid mip; Catmull-Rom (Jimenez 5-fetch) history filter |
 | `luminancePyramid.ts`  | Same intent as _compute luminance pyramid_ (log-average luminance → auto-exposure with eye-adaptation)                                            | Single-workgroup reduction of a 32×32 tap grid instead of an atomic SPD mip chain; intermediate mips not yet produced (the shading-change detector will need them)                  |
 | `blit.ts` / `debug.ts` | — (bench/output utilities)                                                                                                                        |                                                                                                                                                                                     |
 
@@ -43,15 +43,32 @@ display transform — so a very bright or very dark HDR scene accumulates in the
 range (steadier variance clip + firefly guard) **without changing final brightness**. Toggle
 via `settings.autoExposure` (the `FLAG_AUTO_EXPOSURE` bit); with it off, the fixed
 `settings.exposure` is published through the same path. Inspect via `FSRDebugView.Exposure`
-(the exposed scene luminance should read near mid-grey everywhere). Remaining accumulate gap:
-a shading-change detector (needs the intermediate luminance mips this pass does not yet emit).
+(the exposed scene luminance should read near mid-grey everywhere).
+
+**Shading-change detection** (Phase 3, done) tells a genuine shading change (a light
+turning on, an animated material) apart from mere motion, so the changed surface
+re-converges to its new look instead of ghosting the old one. It compares the reprojected
+history's luma against the current 3×3 neighborhood mean, normalized by how much the
+neighborhood itself varies — a coherent disagreement the local variance can't explain.
+Where it fires, non-locked history is aged (`SHADING_AGE`); a lock fully suppresses the
+aging (aliasing on a thin feature is not a shading change — and by construction the
+background-dominated neighborhood mean always disagrees with a thin feature's history, so
+the detector must not touch locked pixels or drive lock-breaking; locks break on their own
+self-referential luma term). Toggle via `settings.detectShadingChanges` (`FLAG_SHADING_CHANGE`); inspect via
+`FSRDebugView.ShadingChange`. **Simplification vs FSR2:** the comparison uses the 3×3
+neighborhood mean rather than a dedicated coarse luminance-pyramid mip — cheaper, and
+jitter-robust enough in practice, but a true SPD mip would be steadier on high-frequency
+content (a Phase-5 refinement). Constants (`SHADING_LO/HI/AGE` at the top of
+`accumulate.ts`) are conservative defaults — raise `SHADING_LO` if stable surfaces shimmer,
+lower it if changed shading ghosts.
 
 ## Debugging
 
-Set `settings.debugView` (`FSRDebugView`) to render pipeline internals instead of the final image: motion vectors, disocclusion mask, linearized depth, accumulation age, locks, or auto-exposed luminance. When integrating a new scene, check in this order:
+Set `settings.debugView` (`FSRDebugView`) to render pipeline internals instead of the final image: motion vectors, disocclusion mask, linearized depth, accumulation age, locks, auto-exposed luminance, or the shading-change factor. When integrating a new scene, check in this order:
 
 1. **Motion vectors** — static scene + moving camera should produce smooth gradients, no per-object noise (if objects flash, their previous model matrices aren't tracked — did you bypass the `velocity` node?).
 2. **Disocclusion** — should outline moving silhouettes, thin and stable. Full-screen flashing means depth linearization flags are wrong (reversed-depth mismatch).
 3. **Accumulation age** — should saturate to white within ~a second when still, and reset along disocclusion trails.
 4. **Locks** — should light up on thin high-contrast features (grid lines, wire/fence edges, specular silhouettes) and stay black on flat surfaces. Locks everywhere ⇒ thresholds too low (expect ghosting); nothing lit ⇒ thresholds too high (thin features will dim).
 5. **Exposure** — the exposed scene luminance should read near an even mid-grey regardless of how bright/dark the scene is (that is auto-exposure normalizing it). All-black ⇒ exposure driven to its floor (scene far too bright), all-white ⇒ driven to its ceiling (scene far too dark).
+6. **Shading change** — black on a static, steadily-lit scene; lights up (and fades over a few frames) on surfaces whose shading actually changes — a moving specular highlight, a light animating, a material shifting. Lit everywhere on a still scene ⇒ `SHADING_LO` too low (stable surfaces will re-converge needlessly and shimmer); never lighting up on an obvious lighting change ⇒ too high.

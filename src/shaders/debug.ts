@@ -67,6 +67,9 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
             let l = luma(textureLoad(inputColor, renderCoord, 0).rgb) * exposure;
             c = vec3f(clamp(l, 0.0, 1.0));
         }
+        case 7u: { // Shading-change factor (packed into locks.b by accumulate)
+            c = vec3f(textureLoad(locksIn, vec2i(gid.xy), 0).b);
+        }
         default: {}
     }
 

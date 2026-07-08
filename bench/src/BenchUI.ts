@@ -13,6 +13,7 @@ export interface BenchState {
     exposure: number;
     autoExposure: boolean;
     lockThinFeatures: boolean;
+    detectShadingChanges: boolean;
     debugView: FSRDebugView;
     animate: boolean;
     autoOrbit: boolean;
@@ -53,6 +54,7 @@ export function createBenchUI(
     tuning.add(state, 'exposure', 0.25, 4, 0.05);
     tuning.add(state, 'autoExposure').name('auto exposure');
     tuning.add(state, 'lockThinFeatures').name('lock thin features');
+    tuning.add(state, 'detectShadingChanges').name('detect shading changes');
 
     const debug = gui.addFolder('Debug');
     debug.add(state, 'debugView', {
@@ -63,6 +65,7 @@ export function createBenchUI(
         'Accumulation age': FSRDebugView.AccumulationAge,
         Locks: FSRDebugView.Locks,
         Exposure: FSRDebugView.Exposure,
+        'Shading change': FSRDebugView.ShadingChange,
     });
     debug.add({ resetHistory: onResetHistory }, 'resetHistory').name('Reset history');
 

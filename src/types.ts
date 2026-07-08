@@ -55,6 +55,8 @@ export enum FSRDebugView {
     Locks = 5,
     /** Auto-exposed scene luminance (should sit near mid-grey everywhere). */
     Exposure = 6,
+    /** Shading-change factor (white = history aged because shading changed). */
+    ShadingChange = 7,
 }
 
 /**
@@ -132,6 +134,13 @@ export interface FSRRuntimeSettings {
      * dimming/shimmer such features otherwise show under motion. On by default.
      */
     lockThinFeatures: boolean;
+    /**
+     * Detect genuine shading changes (a light turning on, an animated material)
+     * versus mere motion, and age the history there so the changed surface
+     * re-converges quickly instead of ghosting its old shading. Measured on
+     * averaged luminance so sub-pixel aliasing doesn't trip it. On by default.
+     */
+    detectShadingChanges: boolean;
     /** Debug visualization mode. */
     debugView: FSRDebugView;
 }

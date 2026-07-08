@@ -17,6 +17,7 @@ import {
     FLAG_PERSPECTIVE,
     FLAG_RESET,
     FLAG_REVERSED_DEPTH,
+    FLAG_SHADING_CHANGE,
 } from './shaders/common';
 import { DEBUG_SHADER } from './shaders/debug';
 import { DEPTH_CLIP_SHADER } from './shaders/depthClip';
@@ -66,6 +67,7 @@ export class FSR3Upscaler {
         exposure: 1.0,
         autoExposure: true,
         lockThinFeatures: true,
+        detectShadingChanges: true,
         debugView: FSRDebugView.None,
     };
 
@@ -573,6 +575,7 @@ export class FSR3Upscaler {
         if (this._path === 'spatial') flags |= FLAG_INPUT_DISPLAY;
         if (this.settings.lockThinFeatures) flags |= FLAG_LOCKS;
         if (this.settings.autoExposure) flags |= FLAG_AUTO_EXPOSURE;
+        if (this.settings.detectShadingChanges) flags |= FLAG_SHADING_CHANGE;
         c.setFlags(flags);
     }
 

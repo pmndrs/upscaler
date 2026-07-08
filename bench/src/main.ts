@@ -25,6 +25,7 @@ const state: BenchState = {
     exposure: 1.0,
     autoExposure: true,
     lockThinFeatures: true,
+    detectShadingChanges: true,
     debugView: FSRDebugView.None,
     animate: true,
     autoOrbit: true,
@@ -140,6 +141,7 @@ renderer.setAnimationLoop(() => {
         exposure: state.exposure,
         autoExposure: state.autoExposure,
         lockThinFeatures: state.lockThinFeatures,
+        detectShadingChanges: state.detectShadingChanges,
         debugView: state.debugView,
     });
     pipeline.render(bench.scene, camera, dt);
