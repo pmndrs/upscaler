@@ -57,6 +57,8 @@ export enum FSRDebugView {
     Exposure = 6,
     /** Shading-change factor (white = history aged because shading changed). */
     ShadingChange = 7,
+    /** Reactive mask (white = pixel flagged reactive, favouring the current frame). */
+    Reactivity = 8,
 }
 
 /**
@@ -94,6 +96,14 @@ export interface FSRDispatchInputs {
      * Required for the temporal path.
      */
     velocity?: Texture;
+    /**
+     * Optional reactive mask at render resolution — the red channel in `[0, 1]`
+     * flags pixels whose current-frame color should dominate over history
+     * (additive particles, transparent/animated surfaces that have no reliable
+     * depth or motion and would otherwise ghost). Higher = more reactive. Author
+     * it yourself (render your transparents' coverage) or via a future helper.
+     */
+    reactive?: Texture;
     /** Drop all history this frame (camera cut, teleport, resize). */
     reset?: boolean;
     /** Seconds since the previous frame. */

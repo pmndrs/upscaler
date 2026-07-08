@@ -35,11 +35,12 @@
     </head>
     <body>
         <div id="note">
-            <b>Known limitation.</b> Particles and transparent surfaces write no reliable depth or
-            motion vectors, so FSR3's temporal history smears them into ghost trails while the
-            opaque scene stays crisp. Toggle to <b>bilinear</b> to see them without trails. A
-            <b>reactive mask</b> (roadmap Phase&nbsp;3/4) is what fixes this — this demo is its
-            acceptance test.
+            Particles and transparent surfaces write no reliable depth or motion vectors, so
+            FSR3's temporal history smears them into ghost trails while the opaque scene stays
+            crisp. The fix is a <b>reactive mask</b>: this demo renders the transparents' coverage
+            into a render-res mask and hands it to FSR3, so those pixels favour the current frame
+            instead of trailing. Toggle <b>reactive mask</b> off to bring the trails back, and the
+            <b>Reactivity</b> / <b>Accumulation age</b> debug views to see the mechanism.
         </div>
         <script type="module" src="./main.ts"></script>
     </body>

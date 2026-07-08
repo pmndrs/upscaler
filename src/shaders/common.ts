@@ -15,6 +15,7 @@ export const FLAG_INPUT_DISPLAY = 16;
 export const FLAG_LOCKS = 32;
 export const FLAG_AUTO_EXPOSURE = 64;
 export const FLAG_SHADING_CHANGE = 128;
+export const FLAG_REACTIVE = 256;
 
 /** Per-frame constants uniform block. Binding 0 in every FSR pass. */
 export const WGSL_CONSTANTS = /* wgsl */ `
@@ -46,6 +47,7 @@ const FLAG_INPUT_DISPLAY : u32 = 16u;
 const FLAG_LOCKS : u32 = 32u;
 const FLAG_AUTO_EXPOSURE : u32 = 64u;
 const FLAG_SHADING_CHANGE : u32 = 128u;
+const FLAG_REACTIVE : u32 = 256u;
 
 fn hasFlag(bit : u32) -> bool { return (C.flags & bit) != 0u; }
 `;

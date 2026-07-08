@@ -13,7 +13,8 @@ import { assembleShader } from './wgsl';
  * - 5: locks (display size; r = lock lifetime)
  * - 6: exposure (1×1; r = pre-exposure, g = avg luma)
  * - 7: scene color (render size)
- * - 8: output storage (rgba8unorm, display size)
+ * - 8: reactive mask (render size; r = reactivity)
+ * - 9: output storage (rgba8unorm, display size)
  */
 export const DEBUG_SHADER = assembleShader(
     WGSL_CONSTANTS,
@@ -26,7 +27,8 @@ export const DEBUG_SHADER = assembleShader(
 @group(0) @binding(5) var locksIn : texture_2d<f32>;
 @group(0) @binding(6) var exposureTex : texture_2d<f32>;
 @group(0) @binding(7) var inputColor : texture_2d<f32>;
-@group(0) @binding(8) var outputColor : texture_storage_2d<rgba8unorm, write>;
+@group(0) @binding(8) var reactiveMask : texture_2d<f32>;
+@group(0) @binding(9) var outputColor : texture_storage_2d<rgba8unorm, write>;
 
 // Simple HSV-ish direction coloring for motion vectors.
 fn motionToColor(m : vec2f) -> vec3f {
@@ -69,6 +71,10 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
         }
         case 7u: { // Shading-change factor (packed into locks.b by accumulate)
             c = vec3f(textureLoad(locksIn, vec2i(gid.xy), 0).b);
+        }
+        case 8u: { // Reactive mask
+            let rdim = vec2i(textureDimensions(reactiveMask));
+            c = vec3f(textureLoad(reactiveMask, clamp(renderCoord, vec2i(0), rdim - 1), 0).r);
         }
         default: {}
     }

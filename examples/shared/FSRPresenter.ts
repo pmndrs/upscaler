@@ -47,6 +47,7 @@ export class FSRPresenter {
 
     private _rt: THREE.RenderTarget | null = null;
     private _path: FSRUpscalePath = 'temporal';
+    private _reactive: THREE.Texture | null = null;
 
     /**
      * @param renderer - An initialized `WebGPURenderer`
@@ -149,6 +150,7 @@ export class FSRPresenter {
                 color: rt.textures[0],
                 depth: rt.depthTexture ?? undefined,
                 velocity: temporal ? rt.textures[1] : undefined,
+                reactive: this._reactive ?? undefined,
                 deltaTime,
             },
             camera,
@@ -173,6 +175,15 @@ export class FSRPresenter {
     /** Applies runtime settings (sharpness / accumulation / exposure / locks / debug). */
     applySettings(settings: Partial<FSRRuntimeSettings>): void {
         Object.assign(this.upscaler.settings, settings);
+    }
+
+    /**
+     * Sets the render-resolution reactive mask fed to the next {@link draw}
+     * (red channel = reactivity). Pass `null` to clear it.
+     * @param texture - A render-res mask texture, or null
+     */
+    setReactiveMask(texture: THREE.Texture | null): void {
+        this._reactive = texture;
     }
 
     dispose(): void {

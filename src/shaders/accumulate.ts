@@ -46,8 +46,11 @@ export const ACCUMULATE_SHADER = assembleShader(
 @group(0) @binding(7) var locksIn : texture_2d<f32>;
 @group(0) @binding(8) var locksOut : texture_storage_2d<rgba16float, write>;
 @group(0) @binding(9) var exposureTex : texture_2d<f32>;
+@group(0) @binding(10) var reactiveMask : texture_2d<f32>;
 
 const PI : f32 = 3.14159265358979;
+// How hard a fully-reactive pixel snaps to the current frame in the blend.
+const REACTIVE_STRENGTH : f32 = 0.9;
 // Variance-clip gamma: how many standard deviations of the current
 // neighborhood the history may stray before being clipped.
 const CLIP_GAMMA : f32 = 1.0;
@@ -135,6 +138,13 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
     let disocclusion = textureLoad(masks, renderCoord, 0).r;
     // Pre-exposure for this frame (auto or manual) — divided back out at output.
     let exposure = textureLoad(exposureTex, vec2i(0), 0).r;
+    // Reactive mask: pixels the caller flags (particles, transparents) should
+    // lean on the current frame instead of ghosting through history.
+    var reactivity = 0.0;
+    if (hasFlag(FLAG_REACTIVE)) {
+        let rdim = vec2i(textureDimensions(reactiveMask));
+        reactivity = clamp(textureLoad(reactiveMask, clamp(renderCoord, vec2i(0), rdim - 1), 0).r, 0.0, 1.0);
+    }
 
     //* Current Frame Upsample (jitter-aware Lanczos2)
     // srcPos is the display pixel in render texel-index space, shifted by
@@ -235,6 +245,9 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
         // non-locked history below.
         let lockShading = smoothstep(max(contrast, 1.0e-3), max(contrast, 1.0e-3) * 2.0, abs(curY - lockedLuma));
         lockLife = clamp(lockLife * (1.0 - disocclusion) * (1.0 - lockShading), 0.0, 1.0);
+        // Reactive pixels (particles/transparents) are not stable thin features
+        // to protect — don't let them form locks.
+        lockLife = lockLife * (1.0 - reactivity);
     }
 
     //* History Rectification
@@ -259,12 +272,17 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
     // A detected shading change ages history so the new shading converges fast;
     // a lock protects its thin feature from this (aliasing there is not a change).
     sampleCount *= (1.0 - SHADING_AGE * shadingChange * (1.0 - lockLife));
+    // Reactive pixels keep almost no history so fast transparent motion doesn't
+    // smear a trail behind it.
+    sampleCount *= (1.0 - REACTIVE_STRENGTH * reactivity);
 
     //* Blend — locked features lean on the accumulated history so sub-pixel
     //* detail persists under motion instead of dimming.
     let newCount = min(sampleCount + 1.0, C.maxAccumulation);
     let baseAlpha = clamp(confidence / newCount, 1.0 / C.maxAccumulation, 1.0);
-    let alpha = max(baseAlpha * (1.0 - LOCK_HISTORY_BOOST * lockLife), 1.0 / (C.maxAccumulation * 2.0));
+    var alpha = max(baseAlpha * (1.0 - LOCK_HISTORY_BOOST * lockLife), 1.0 / (C.maxAccumulation * 2.0));
+    // Snap reactive pixels toward the current frame regardless of accumulation.
+    alpha = mix(alpha, 1.0, REACTIVE_STRENGTH * reactivity);
     let result = mix(rectifiedHistory, current, alpha);
 
     textureStore(historyOut, gid.xy, vec4f(result, newCount / C.maxAccumulation));

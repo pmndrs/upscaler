@@ -62,6 +62,15 @@ content (a Phase-5 refinement). Constants (`SHADING_LO/HI/AGE` at the top of
 `accumulate.ts`) are conservative defaults — raise `SHADING_LO` if stable surfaces shimmer,
 lower it if changed shading ghosts.
 
+**Reactive mask** (Phase 3, done) is the caller-authored escape hatch for geometry that has
+no reliable depth or motion — additive particles, transparent/animated surfaces — which
+would otherwise ghost through the history. Pass a render-res mask as `dispatch({ reactive })`
+(red channel `[0,1]`); flagged pixels suppress lock formation, keep almost no accumulation,
+and snap toward the current frame in the blend (`REACTIVE_STRENGTH`). No mask → a 1×1 zero
+texture is bound and the whole path is flag-gated off, so there's zero cost when unused.
+Author the mask however you like (render your transparents' coverage — see
+`examples/05-transparency`); inspect via `FSRDebugView.Reactivity`.
+
 ## Debugging
 
 Set `settings.debugView` (`FSRDebugView`) to render pipeline internals instead of the final image: motion vectors, disocclusion mask, linearized depth, accumulation age, locks, auto-exposed luminance, or the shading-change factor. When integrating a new scene, check in this order:
@@ -72,3 +81,4 @@ Set `settings.debugView` (`FSRDebugView`) to render pipeline internals instead o
 4. **Locks** — should light up on thin high-contrast features (grid lines, wire/fence edges, specular silhouettes) and stay black on flat surfaces. Locks everywhere ⇒ thresholds too low (expect ghosting); nothing lit ⇒ thresholds too high (thin features will dim).
 5. **Exposure** — the exposed scene luminance should read near an even mid-grey regardless of how bright/dark the scene is (that is auto-exposure normalizing it). All-black ⇒ exposure driven to its floor (scene far too bright), all-white ⇒ driven to its ceiling (scene far too dark).
 6. **Shading change** — black on a static, steadily-lit scene; lights up (and fades over a few frames) on surfaces whose shading actually changes — a moving specular highlight, a light animating, a material shifting. Lit everywhere on a still scene ⇒ `SHADING_LO` too low (stable surfaces will re-converge needlessly and shimmer); never lighting up on an obvious lighting change ⇒ too high.
+7. **Reactivity** — the caller's reactive mask, as accumulate sees it: white where you flagged transparents/particles, black on opaque geometry. If it's misaligned or empty, the mask isn't being authored/passed correctly (wrong resolution, not set before `dispatch`).

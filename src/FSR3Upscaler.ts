@@ -15,6 +15,7 @@ import {
     FLAG_INPUT_REINHARD,
     FLAG_LOCKS,
     FLAG_PERSPECTIVE,
+    FLAG_REACTIVE,
     FLAG_RESET,
     FLAG_REVERSED_DEPTH,
     FLAG_SHADING_CHANGE,
@@ -123,6 +124,9 @@ export class FSR3Upscaler {
     // Auto-exposure state: 1×1 exposure value (r = exposure, g = avg luma),
     // ping-ponged so eye-adaptation can ease from last frame's value.
     private _exposure: [GPUTexture, GPUTexture] | null = null;
+    // 1×1 zero texture bound in place of a reactive mask when the caller
+    // doesn't supply one (WebGPU zero-inits it, so reactivity reads 0).
+    private _reactiveDummy: GPUTexture | null = null;
 
     constructor(options: { renderer: WebGPURenderer }) {
         this._renderer = options.renderer;
@@ -390,6 +394,11 @@ export class FSR3Upscaler {
         const locksOut = this._locks![1 - this._historyIndex];
         const exposurePrev = this._exposure![this._historyIndex];
         const exposureCur = this._exposure![1 - this._historyIndex];
+        const reactiveView = (
+            inputs.reactive
+                ? getGPUTexture(this._renderer, inputs.reactive)
+                : this._reactiveDummy!
+        ).createView();
 
         //* Exposure — reduce scene luminance to a pre-exposure (auto-exposure).
         // Runs first; every later pass reads this frame's value from exposureCur.
@@ -460,6 +469,7 @@ export class FSR3Upscaler {
             locksIn.createView(),
             locksOut.createView(),
             exposureCur.createView(),
+            reactiveView,
         ]);
         const accumulatePass = encoder.beginComputePass({
             label: 'fsr3-accumulate',
@@ -484,6 +494,7 @@ export class FSR3Upscaler {
                 locksOut.createView(),
                 exposureCur.createView(),
                 colorGPU.createView(),
+                reactiveView,
                 this._outputView(),
             ]);
             const debugPass = encoder.beginComputePass({
@@ -576,6 +587,7 @@ export class FSR3Upscaler {
         if (this.settings.lockThinFeatures) flags |= FLAG_LOCKS;
         if (this.settings.autoExposure) flags |= FLAG_AUTO_EXPOSURE;
         if (this.settings.detectShadingChanges) flags |= FLAG_SHADING_CHANGE;
+        if (inputs.reactive) flags |= FLAG_REACTIVE;
         c.setFlags(flags);
     }
 
@@ -621,6 +633,14 @@ export class FSR3Upscaler {
             this._createTexture('exposure-0', 1, 1, 'rgba16float'),
             this._createTexture('exposure-1', 1, 1, 'rgba16float'),
         ];
+        // Sampled-only (no storage) so a non-storage format is fine; zero-init
+        // gives a "nothing reactive" default when the caller passes no mask.
+        this._reactiveDummy = this._device.createTexture({
+            label: 'fsr3-reactive-dummy',
+            size: { width: 1, height: 1 },
+            format: 'r8unorm',
+            usage: GPUTextureUsage.TEXTURE_BINDING,
+        });
 
         if (this._path === 'spatial') {
             this._easuOutput = this._createTexture('easu-output', dw, dh, 'rgba16float');
@@ -670,5 +690,7 @@ export class FSR3Upscaler {
             this._exposure.forEach((t) => t.destroy());
             this._exposure = null;
         }
+        this._reactiveDummy?.destroy();
+        this._reactiveDummy = null;
     }
 }
