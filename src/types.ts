@@ -87,6 +87,28 @@ export interface FSRConfig {
     renderHeight?: number;
     /** Which upscaling pipeline to run. Defaults to `'temporal'`. */
     path?: FSRUpscalePath;
+    /**
+     * Apply the sub-pixel camera jitter each frame (temporal path only).
+     * Defaults to `true`.
+     *
+     * Jitter is what lets the temporal path *reconstruct* detail beyond the
+     * render resolution: each frame samples a slightly different sub-pixel grid,
+     * and accumulation resolves them into a higher-res image. **But it only works
+     * if the input is re-rendered under the jittered projection every frame.** If
+     * you feed the upscaler a buffer whose rendering you don't control under the
+     * jitter (an effect texture from an external pipeline, a pre-rendered target,
+     * anything composited outside the jitter window), the color won't reflect the
+     * offset while reprojection assumes it does — so history lands on the wrong
+     * texels and the image smears.
+     *
+     * Set `false` for those inputs: the temporal path still reprojects, clips,
+     * and accumulates (so it denoises noisy GI and holds temporal stability, and
+     * upscales), it just skips the sub-pixel offset — no reconstruction gain, no
+     * smear risk. Owning-the-render integrations (the `fsrScene` node, `FSR3Pass`)
+     * default it on; the composable `fsr3` node defaults it off for exactly this
+     * reason.
+     */
+    jitter?: boolean;
 }
 
 /**

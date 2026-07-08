@@ -92,7 +92,7 @@ const texNode = (n: unknown) => (n as { getTextureNode(): unknown }).getTextureN
 
 const post = new THREE.PostProcessing(renderer);
 
-const state = { ssgi: true, ssr: true, ratio: 2.0, rcasDenoise: true };
+const state = { ssgi: true, ssr: true, ratio: 2.0, rcasDenoise: true, jitter: true };
 let fsrNode: ReturnType<typeof fsr3> | null = null;
 
 /** (Re)builds the whole reduced-res post graph and points FSR3 at its output. */
@@ -151,7 +151,11 @@ function configure(): void {
 
     // Dispose the previous node's upscaler before replacing the graph.
     (fsrNode as unknown as { dispose?(): void } | null)?.dispose?.();
-    fsrNode = fsr3(colorTex, depth, vel, camera, { path: 'temporal', ratio });
+    // The whole scene renders in-graph under this node, so jitter is safe here
+    // (the reduced pass IS re-rendered under the jittered projection each frame)
+    // and buys sub-pixel reconstruction — the toggle lets you A/B it against the
+    // non-jittered temporal upscale, which is the composable node's safe default.
+    fsrNode = fsr3(colorTex, depth, vel, camera, { path: 'temporal', ratio, jitter: state.jitter });
     post.outputNode = fsrNode as unknown as THREE.Node;
     post.needsUpdate = true;
 }
@@ -161,6 +165,10 @@ const gui = new GUI({ title: 'SSGI + SSR → FSR3' });
 gui.add(state, 'ssgi').name('SSGI (indirect)').onChange(configure);
 gui.add(state, 'ssr').name('SSR (reflections)').onChange(configure);
 addRenderScale(gui, state, configure);
+// Jitter buys sub-pixel reconstruction but needs the input re-rendered under
+// the jittered projection each frame — safe here (the scene renders in-graph),
+// off is the composable node's default for inputs you can't re-render jittered.
+gui.add(state, 'jitter').name('jitter (reconstruct)').onChange(configure);
 // The reduced-res effects are noisy — RCAS's denoise variant keeps the final
 // sharpen from amplifying that grain.
 gui.add(state, 'rcasDenoise').name('RCAS denoise');
@@ -179,6 +187,7 @@ function updateHud(): void {
     hud.innerHTML =
         `<b>three-fsr3</b>  kitchen sink (node graph)\n` +
         `effects  ${fx}\n` +
+        `jitter   ${state.jitter ? 'on (reconstruct)' : 'off (stable)'}\n` +
         (u
             ? `render   ${u.renderWidth}×${u.renderHeight}  (${basePercent(u.upscaleRatio)})\n` +
               `display  ${u.displayWidth}×${u.displayHeight}  (${u.upscaleRatio.toFixed(2)}x FSR3)`

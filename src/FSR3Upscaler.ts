@@ -106,6 +106,7 @@ export class FSR3Upscaler {
     private _ratio = 1;
 
     private _jitter!: JitterSequence;
+    private _jitterEnabled = true;
     private _frameIndex = 0;
     private _pendingReset = true;
     private _warnedMsaa = false;
@@ -177,6 +178,7 @@ export class FSR3Upscaler {
         if (!this._initialized) this.init();
 
         this._path = config.path ?? 'temporal';
+        this._jitterEnabled = config.jitter ?? true;
         this._displayWidth = Math.max(1, Math.floor(config.displayWidth));
         this._displayHeight = Math.max(1, Math.floor(config.displayHeight));
 
@@ -259,7 +261,9 @@ export class FSR3Upscaler {
     /**
      * Starts a frame: advances the jitter sequence and applies it to the
      * camera as a sub-pixel view offset (same mechanism as three's TRAA).
-     * No-op on non-temporal paths.
+     * No-op on non-temporal paths, or when jitter is disabled (see the
+     * `jitter` config flag — the temporal path still reprojects and
+     * accumulates, it just doesn't add the sub-pixel offset).
      * @param camera - The scene camera (perspective or orthographic)
      */
     beginFrame(camera: JitterableCamera): void {
@@ -267,7 +271,7 @@ export class FSR3Upscaler {
         camera.updateProjectionMatrix();
         this.unjitteredProjectionMatrix.copy(camera.projectionMatrix);
 
-        if (this._path !== 'temporal') return;
+        if (this._path !== 'temporal' || !this._jitterEnabled) return;
 
         this._jitter.advance();
         const [jx, jy] = this._jitter.current;
@@ -597,7 +601,7 @@ export class FSR3Upscaler {
         c.setRenderSize(this._renderWidth, this._renderHeight);
         c.setDisplaySize(this._displayWidth, this._displayHeight);
 
-        if (this._path === 'temporal') {
+        if (this._path === 'temporal' && this._jitterEnabled) {
             const [jx, jy] = this._jitter.current;
             const [px, py] = this._jitter.previous;
             c.setJitter(jx, jy, px, py);

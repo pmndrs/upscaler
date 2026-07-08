@@ -24,6 +24,24 @@ export interface FSR3NodeOptions {
     quality?: FSRQualityMode;
     /** Explicit upscale ratio — only used by {@link fsrScene} (overrides quality). */
     ratio?: number;
+    /**
+     * Apply the sub-pixel camera jitter (temporal path). Jitter is what buys
+     * *reconstruction* (detail beyond render res), but it requires the input to
+     * be re-rendered under the jittered projection every frame — see
+     * {@link FSRConfig.jitter} for the full why.
+     *
+     * Defaults differ by entry point, because they differ in whether they
+     * control the render:
+     * - {@link fsrScene} → **on**. It builds and renders the scene pass itself,
+     *   in-graph, so the jitter always lands — free reconstruction.
+     * - {@link fsr3} → **off**. It consumes whatever texture you give it; it
+     *   can't guarantee that texture is re-rendered under the jitter, so the safe
+     *   default is a non-jittered temporal upscale (still reprojects, denoises,
+     *   and accumulates — just no smear risk). Turn it **on** only when your
+     *   inputs render in-graph under this node (e.g. a `pass()` you hand it that
+     *   the post render drives).
+     */
+    jitter?: boolean;
 }
 
 /**
@@ -71,6 +89,9 @@ export class FSR3Node extends TempNode {
     private readonly _velocity: TextureNodeLike;
     private readonly _camera: CameraLike;
     private readonly _options: FSR3NodeOptions;
+    // Composable node defaults to non-jittered (safe for any input); fsrScene
+    // opts in via options.jitter. See FSR3NodeOptions.jitter for the why.
+    private readonly _jitter: boolean;
 
     private readonly _output = new Vector2();
     private readonly _input = new Vector2();
@@ -95,6 +116,7 @@ export class FSR3Node extends TempNode {
         this._velocity = velocityNode;
         this._camera = camera;
         this._options = options;
+        this._jitter = options.jitter ?? false;
     }
 
     /** The underlying upscaler — inspect `.settings`, `.gpuTimings`, etc. */
@@ -109,9 +131,13 @@ export class FSR3Node extends TempNode {
         if (!this._upscaler) {
             this._upscaler = new FSR3Upscaler({ renderer });
             this._upscaler.init();
-            // Motion vectors must be jitter-free — feed the velocity node the
-            // upscaler's (stable) unjittered projection.
-            velocity.setProjectionMatrix(this._upscaler.unjitteredProjectionMatrix);
+            // When we jitter, motion vectors must stay jitter-free — feed the
+            // velocity node the upscaler's (stable) unjittered projection. When
+            // we don't jitter, the camera projection is already jitter-free, so
+            // the velocity node needs no compensation.
+            if (this._jitter) {
+                velocity.setProjectionMatrix(this._upscaler.unjitteredProjectionMatrix);
+            }
         }
 
         // Register the inputs as graph dependencies so three renders them in
@@ -119,17 +145,18 @@ export class FSR3Node extends TempNode {
         // fields are `_`-prefixed, which three's automatic child discovery
         // (Node._getChildren) skips — so we register them explicitly, exactly as
         // FSR1Node does with `properties.textureNode`. Without this the input
-        // passes are never built → never rendered → black output.
+        // passes are never built → never rendered → black output. depth/velocity
+        // are optional (a non-jittered spatial upscale needs neither).
         const props = builder.getNodeProperties(this);
         props.colorNode = this._color;
-        props.depthNode = this._depth;
-        props.velocityNode = this._velocity;
+        if (this._depth) props.depthNode = this._depth;
+        if (this._velocity) props.velocityNode = this._velocity;
 
         // Apply the sub-pixel jitter before the input passes render — same hook
-        // three's TAAUNode uses. The upscaler's beginFrame/endFrame do the
-        // setViewOffset + unjittered-projection snapshot.
+        // three's TAAUNode uses. Only installed when jittering: the hook is
+        // pointless (and the camera offset undesirable) otherwise.
         const renderPipeline = builder.context?.renderPipeline;
-        if (renderPipeline) {
+        if (this._jitter && renderPipeline) {
             renderPipeline.context.onBeforeRenderPipeline = () => {
                 if (this._configured) this._upscaler!.beginFrame(this._camera as never);
             };
@@ -160,6 +187,7 @@ export class FSR3Node extends TempNode {
             renderWidth: Math.max(1, Math.round(this._input.x)),
             renderHeight: Math.max(1, Math.round(this._input.y)),
             path: this._options.path,
+            jitter: this._jitter,
         });
         this._configured = true;
         if (this._textureNode) {
@@ -183,9 +211,13 @@ export class FSR3Node extends TempNode {
         if (!this._upscaler) return;
 
         const color = this._texture(this._color);
-        const depth = this._texture(this._depth);
-        const velocityTex = this._texture(this._velocity);
-        if (!color || !depth || !velocityTex) return;
+        if (!color) return;
+        // The temporal path reprojects history, so it needs depth + velocity
+        // (jittered or not). The spatial path needs only color.
+        const isTemporal = (this._options.path ?? 'temporal') === 'temporal';
+        const depth = this._depth ? this._texture(this._depth) : null;
+        const velocityTex = this._velocity ? this._texture(this._velocity) : null;
+        if (isTemporal && (!depth || !velocityTex)) return;
 
         // Exact input size from the GPU texture (throws until it's backed).
         let gpu: GPUTexture;
@@ -211,7 +243,12 @@ export class FSR3Node extends TempNode {
         this._lastTime = now;
 
         this._upscaler.dispatch(
-            { color, depth, velocity: velocityTex, deltaTime: dt },
+            {
+                color,
+                depth: depth ?? undefined,
+                velocity: velocityTex ?? undefined,
+                deltaTime: dt,
+            },
             this._camera as never,
         );
     }
@@ -278,11 +315,11 @@ export const fsrScene = (
     scenePass.setMRT(mrt({ output, velocity }));
     scenePass.setResolutionScale(1 / ratio);
 
-    return fsr3(
-        scenePass.getTextureNode('output'),
-        scenePass.getTextureNode('depth'),
-        scenePass.getTextureNode('velocity'),
-        camera,
-        options,
-    );
+    return fsr3(scenePass.getTextureNode('output'), scenePass.getTextureNode('depth'), scenePass.getTextureNode('velocity'), camera, {
+        // fsrScene owns the render (the pass renders in-graph under this node),
+        // so the jitter always lands — opt into it for free reconstruction
+        // unless the caller explicitly overrode it.
+        jitter: true,
+        ...options,
+    });
 };
