@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu';
 import { screenUV, smoothstep } from 'three/tsl';
 
-import { fsr3, FSRQualityMode } from 'three-fsr3';
+import { fsrScene, FSRQualityMode } from 'three-fsr3';
 
 import { bootRenderer } from '../shared/boot';
 import { addStudioLighting, createGridFloor } from '../shared/props';
@@ -32,8 +32,8 @@ camera.lookAt(0, 1.6, 0);
 
 //* FSR3 node → vignette → screen, all in the post graph.
 const post = new THREE.PostProcessing(renderer);
-// fsr3() returns a loosely-typed TSL node; cast to reach the node math ops.
-const fsrNode = fsr3(scene, camera, { quality: FSRQualityMode.Performance }) as {
+// fsrScene() returns a loosely-typed TSL node; cast to reach the node math ops.
+const fsrNode = fsrScene(scene, camera, { quality: FSRQualityMode.Performance }) as {
     mul(n: unknown): unknown;
 };
 // Darken toward the frame edges (1 at centre, ~0.35 at the corners).
@@ -43,7 +43,7 @@ post.outputNode = fsrNode.mul(vignette) as unknown as THREE.Node;
 const badge = document.getElementById('badge')!;
 badge.innerHTML =
     `<b>three-fsr3</b>  node composition\n` +
-    `post.outputNode = fsr3(scene, camera)\n              .mul(vignette)`;
+    `post.outputNode = fsrScene(scene, camera)\n                   .mul(vignette)`;
 
 window.addEventListener('resize', () => {
     renderer.setSize(window.innerWidth, window.innerHeight);

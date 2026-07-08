@@ -177,14 +177,24 @@ export class FSR3Upscaler {
         if (!this._initialized) this.init();
 
         this._path = config.path ?? 'temporal';
-        this._ratio =
-            config.customUpscaleRatio ??
-            getQualityModeRatio(config.qualityMode ?? FSRQualityMode.Quality);
         this._displayWidth = Math.max(1, Math.floor(config.displayWidth));
         this._displayHeight = Math.max(1, Math.floor(config.displayHeight));
-        const render = getRenderResolution(this._displayWidth, this._displayHeight, this._ratio);
-        this._renderWidth = render.width;
-        this._renderHeight = render.height;
+
+        if (config.renderWidth && config.renderHeight) {
+            // Explicit render size — the input is produced by an external pass
+            // whose resolution we don't control (e.g. the TSL node feeding a
+            // reduced-res effect graph). Match it exactly and derive the ratio.
+            this._renderWidth = Math.max(1, Math.floor(config.renderWidth));
+            this._renderHeight = Math.max(1, Math.floor(config.renderHeight));
+            this._ratio = this._displayWidth / this._renderWidth;
+        } else {
+            this._ratio =
+                config.customUpscaleRatio ??
+                getQualityModeRatio(config.qualityMode ?? FSRQualityMode.Quality);
+            const render = getRenderResolution(this._displayWidth, this._displayHeight, this._ratio);
+            this._renderWidth = render.width;
+            this._renderHeight = render.height;
+        }
 
         this._jitter.setRatio(this._ratio);
         this._allocateTextures();

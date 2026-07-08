@@ -76,6 +76,15 @@ export interface FSRConfig {
     qualityMode?: FSRQualityMode;
     /** Explicit upscale ratio (e.g. `1.5` renders at 1/1.5 of display size). */
     customUpscaleRatio?: number;
+    /**
+     * Explicit render (input) resolution. Overrides {@link customUpscaleRatio} /
+     * {@link qualityMode} — use when the input is produced by an external pass
+     * whose size you don't control (the TSL node feeding a reduced-res effect
+     * graph). Must be set together with {@link renderHeight}.
+     */
+    renderWidth?: number;
+    /** Explicit render (input) height — see {@link renderWidth}. */
+    renderHeight?: number;
     /** Which upscaling pipeline to run. Defaults to `'temporal'`. */
     path?: FSRUpscalePath;
 }
