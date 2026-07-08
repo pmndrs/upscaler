@@ -64,7 +64,7 @@ src/
   shaders/
     common.ts          — shared WGSL chunks: FsrConstants UBO, color/depth/tonemap helpers, FLAG_* bits
     wgsl.ts            — assembleShader() dedup concatenator (WGSL has no #include)
-    blit / easu / rcas / dilate / depthClip / accumulate / debug .ts  — the passes
+    blit / easu / rcas / dilate / depthClip / accumulate / luminancePyramid / debug .ts  — the passes
     README.md          — per-pass fidelity vs FidelityFX reference + debugging guide
   internal/
     threeWebGPU.ts     — getDevice() / getGPUTexture(): the three-internals bridge
@@ -112,13 +112,15 @@ These were discovered by reading three's source; they're non-obvious and easy to
 6. **Bench Vite needs `build.target: 'esnext'`** — `main.ts` uses top-level `await renderer.init()`.
 7. **MRT output count must match the RT attachment count.** Rendering the scene into a `count: 2` `RenderTarget` while `setMRT(null)` (or an MRT without the velocity output) leaves **color attachment 0 unwritten → black output**. This is why non-temporal bench modes were black on first GPU boot. Fix: size the RT to the mode (temporal → `count: 2` + `mrt({ output, velocity })`; everything else → `count: 1` + `mrt({ output })`). See `BenchPipeline.configure`/`render`. **Any integration (incl. examples / `FSRPresenter`) must keep these two counts in lockstep.**
 8. **WGSL parses `a < b, c > d` as a template argument list.** `select(d < bestDepth, d > bestDepth, reversed)` failed to compile (`parsed as template list`). Wrap comparisons that put `<` … `>` in one expression in parentheses: `select((d < bestDepth), (d > bestDepth), reversed)`. Watch for this whenever a shader compares with both `<` and `>` nearby.
+9. **WGSL reserves more keywords than you expect.** `target` is reserved (also `filter`, `sampler_state`, `enum`, `typedef`, `mat`, …) — a `let target = …` fails with `'target' is a reserved keyword`, and the whole pipeline then cascades into `Invalid ComputePipeline` / `Invalid BindGroup` warnings that hide the one real error. When a new pass invalidates the whole `fsr3` command buffer, grep the console for `reserved keyword` / `parsing WGSL` first. (`luminancePyramid.ts` hit this on first GPU boot — `target` → `targetExposure`.) The structural unit tests can't catch this; only a real device parse does.
 
 ---
 
 ## Landmines still live (unverified — prime suspects when it misbehaves)
 
-- **Motion vector sign/scale.** `motionScale = (0.5, -0.5)` converts the `velocity` node's NDC delta to a UV delta, and reprojection is `prevUV = uv - motion`. This convention is **reasoned, not tested.** If history smears or the image tears under camera motion, flip signs / check this first. **Motion Vectors debug view is your friend.**
+- **Motion vector sign/scale.** `motionScale = (0.5, -0.5)` converts the `velocity` node's NDC delta to a UV delta, and reprojection is `prevUV = uv - motion`. **Corroborated against three's own `TAAUNode`** (2026-07-08), which uses the identical `velocity.xy * vec2(0.5, -0.5)` scale and `historyUV = uv - offset` reprojection, plus the same `setViewOffset` jitter in render-pixel units — so this is no longer a guess. Still the first thing to re-check if history smears or tears under camera motion; **Motion Vectors debug view is your friend.**
 - **Accumulation tuning.** Catmull-Rom history filter, YCoCg variance-clip gamma (`CLIP_GAMMA = 1.0`), disocclusion/clip weight falloffs, **and the luminance-lock constants (`LOCK_*`)** in `accumulate.ts` are sensible defaults, not tuned. Ghosting → tighten (lower `LOCK_CLAMP_RELAX`/`LOCK_HISTORY_BOOST`, raise the peak/contrast thresholds); instability/shimmer or thin features dimming → loosen. Use `FSRDebugView.Locks` to see where locks form.
+- **Auto-exposure constants** (`luminancePyramid.ts`: `EXPOSURE_KEY`, `EXPOSURE_MIN/MAX`, `ADAPT_SPEED`) are defaults. Because exposure is divided back out before display, the *visible* effect is subtle (better accumulation stability, not a brightness change). If a scene pulses in brightness, `ADAPT_SPEED` is the suspect; if the image goes flat/washed on a very bright or dark scene, check the min/max clamp. `FSRDebugView.Exposure` should read near mid-grey — verify there before suspecting the accumulate math.
 - **Depth separation threshold** in `depthClip.ts` (`DEPTH_SEPARATION_SCALE`, `DEPTH_SIMILARITY_FLOOR`) is a guess. Too aggressive = history thrown away everywhere (no convergence); too slack = ghost trails behind moving objects.
 - **`timestamp-query`** may be absent; `GpuTimer` no-ops gracefully, but confirm the GPU-ms readout actually appears where supported.
 
@@ -147,8 +149,8 @@ variant on `06-screenspace-gi`, and expose new toggles in `02-fsr1-vs-fsr3`. Rem
 
 - **Phase 3 — fidelity to real FSR3:**
   - ~~**Luminance-stability locks**~~ — **done & GPU-verified.** Persistent display-res lock buffer in `accumulate.ts` (r = lifetime, g = locked luma), reprojected through motion; detects thin luminance outliers, grows a lock while present, breaks on disocclusion/shading change, then widens the rectification AABB + boosts history for locked pixels. Toggle `settings.lockThinFeatures` (`FLAG_LOCKS`); inspect via `FSRDebugView.Locks`. Tuning constants (top of `accumulate.ts`) are defaults, not final — tighten if thin features ghost, loosen if they still dim.
-  - Luminance pyramid (SPD-style downsample) + auto-exposure.
-  - Shading-change detector.
+  - ~~**Luminance pyramid + auto-exposure**~~ — **done.** `luminancePyramid.ts` reduces the scene to a single log-average luminance (one-workgroup 32×32-tap reduction, not yet an SPD mip chain) → a pre-exposure eased over time (eye-adaptation). `accumulate.ts` pre-exposes the input before the invertible tonemap; `rcas.ts`/`blit.ts` divide it back out before display — so HDR scenes of very different brightness accumulate in the same well-conditioned range **without changing final brightness**. This also fixed a latent bug: the temporal path previously baked in `settings.exposure` and never divided it out. Toggle `settings.autoExposure` (`FLAG_AUTO_EXPOSURE`); inspect via `FSRDebugView.Exposure`. Constants (top of `luminancePyramid.ts`: key/min/max/adapt-speed) are defaults. The SPD mip chain is deferred until the shading-change detector needs the intermediate mips.
+  - Shading-change detector (will consume the luminance pyramid's intermediate mips — emit them here first).
   - Reactive-mask input for transparents/particles.
 - **Phase 4 — API & ecosystem:** reactive-mask authoring helpers; a `postprocessing`/TSL node wrapper for drop-in use; **RCAS denoise variant** toggle (pairs with three's SSR denoiser for noisy GI/SSR inputs — this was one of Dennis's original asks); MSAA-input support.
 - **Phase 5 — performance:** `textureGather` tap packing (EASU/RCAS currently use per-tap `textureLoad`); f16 arithmetic (`shader-f16`); merge dilate+depth-clip into one pass; bind-group caching (currently rebuilt per dispatch — fine but wasteful); half-res luma analysis.

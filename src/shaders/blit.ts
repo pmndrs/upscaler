@@ -14,7 +14,8 @@ import { assembleShader } from './wgsl';
  * Bindings:
  * - 1: input color (filterable float)
  * - 2: linear clamp sampler
- * - 3: output storage (rgba8unorm, display size)
+ * - 3: exposure, 1×1 (rgba16float; r = pre-exposure to undo on the temporal path)
+ * - 4: output storage (rgba8unorm, display size)
  */
 export const BLIT_SHADER = assembleShader(
     WGSL_CONSTANTS,
@@ -23,7 +24,8 @@ export const BLIT_SHADER = assembleShader(
     /* wgsl */ `
 @group(0) @binding(1) var inputColor : texture_2d<f32>;
 @group(0) @binding(2) var linearSampler : sampler;
-@group(0) @binding(3) var outputColor : texture_storage_2d<rgba8unorm, write>;
+@group(0) @binding(3) var exposureTex : texture_2d<f32>;
+@group(0) @binding(4) var outputColor : texture_storage_2d<rgba8unorm, write>;
 
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) gid : vec3u) {
@@ -33,7 +35,9 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
     var c = textureSampleLevel(inputColor, linearSampler, uv, 0.0).rgb;
 
     if (hasFlag(FLAG_INPUT_REINHARD)) {
-        c = displayTransform(tonemapInvert(c));
+        // Undo the pre-exposure the accumulate pass baked in before tonemapping.
+        let exposure = max(textureLoad(exposureTex, vec2i(0), 0).r, 1.0e-4);
+        c = displayTransform(tonemapInvert(c) / exposure);
     } else if (!hasFlag(FLAG_INPUT_DISPLAY)) {
         c = displayTransform(c * C.exposure);
     }

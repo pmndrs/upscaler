@@ -57,6 +57,7 @@ const state = {
     ratio: 2.0,
     sharpen: true,
     locks: true,
+    autoExposure: true,
     debug: FSRDebugView.None,
     autoRotate: true,
 };
@@ -85,6 +86,7 @@ gui.add(state, 'tier', {
 addRenderScale(gui, state, configure);
 gui.add(state, 'sharpen').name('RCAS sharpen');
 gui.add(state, 'locks').name('lock thin features');
+gui.add(state, 'autoExposure').name('auto exposure');
 gui.add(state, 'debug', {
     Off: FSRDebugView.None,
     'Motion vectors': FSRDebugView.MotionVectors,
@@ -92,6 +94,7 @@ gui.add(state, 'debug', {
     Depth: FSRDebugView.Depth,
     'Accumulation age': FSRDebugView.AccumulationAge,
     Locks: FSRDebugView.Locks,
+    Exposure: FSRDebugView.Exposure,
 }).name('debug view');
 gui.add(state, 'autoRotate').name('auto orbit');
 gui.add({ reset: () => presenter.upscaler.resetHistory() }, 'reset').name('reset history');
@@ -140,6 +143,7 @@ renderer.setAnimationLoop(() => {
     presenter.applySettings({
         sharpness: state.sharpen ? 0.8 : 0,
         lockThinFeatures: state.locks,
+        autoExposure: state.autoExposure,
         debugView: state.debug,
     });
     presenter.renderScene(scene, camera, dt);

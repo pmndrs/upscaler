@@ -166,6 +166,7 @@ export class BenchPipeline {
         sharpness: number;
         maxAccumulation: number;
         exposure: number;
+        autoExposure: boolean;
         lockThinFeatures: boolean;
         debugView: FSRDebugView;
     }): void {

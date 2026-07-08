@@ -10,6 +10,7 @@ import { getQualityModeRatio, getRenderResolution } from './math/resolution';
 import { ACCUMULATE_SHADER } from './shaders/accumulate';
 import { BLIT_SHADER } from './shaders/blit';
 import {
+    FLAG_AUTO_EXPOSURE,
     FLAG_INPUT_DISPLAY,
     FLAG_INPUT_REINHARD,
     FLAG_LOCKS,
@@ -21,6 +22,7 @@ import { DEBUG_SHADER } from './shaders/debug';
 import { DEPTH_CLIP_SHADER } from './shaders/depthClip';
 import { DILATE_SHADER } from './shaders/dilate';
 import { EASU_SHADER } from './shaders/easu';
+import { LUMINANCE_PYRAMID_SHADER } from './shaders/luminancePyramid';
 import { RCAS_SHADER } from './shaders/rcas';
 import {
     FSRDebugView,
@@ -62,6 +64,7 @@ export class FSR3Upscaler {
         sharpness: 0.8,
         maxAccumulation: 24,
         exposure: 1.0,
+        autoExposure: true,
         lockThinFeatures: true,
         debugView: FSRDebugView.None,
     };
@@ -87,6 +90,7 @@ export class FSR3Upscaler {
     private _dilatePass!: ComputePass;
     private _depthClipPass!: ComputePass;
     private _accumulatePass!: ComputePass;
+    private _exposurePass!: ComputePass;
     private _debugPass!: ComputePass;
 
     private _path: FSRUpscalePath = 'temporal';
@@ -114,6 +118,9 @@ export class FSR3Upscaler {
     private _dilatedMotion: GPUTexture | null = null;
     private _masks: GPUTexture | null = null;
     private _easuOutput: GPUTexture | null = null;
+    // Auto-exposure state: 1×1 exposure value (r = exposure, g = avg luma),
+    // ping-ponged so eye-adaptation can ease from last frame's value.
+    private _exposure: [GPUTexture, GPUTexture] | null = null;
 
     constructor(options: { renderer: WebGPURenderer }) {
         this._renderer = options.renderer;
@@ -142,6 +149,7 @@ export class FSR3Upscaler {
         this._dilatePass = new ComputePass(device, 'dilate', DILATE_SHADER);
         this._depthClipPass = new ComputePass(device, 'depth-clip', DEPTH_CLIP_SHADER);
         this._accumulatePass = new ComputePass(device, 'accumulate', ACCUMULATE_SHADER);
+        this._exposurePass = new ComputePass(device, 'exposure', LUMINANCE_PYRAMID_SHADER);
         this._debugPass = new ComputePass(device, 'debug', DEBUG_SHADER);
 
         this._jitter = new JitterSequence(this._ratio);
@@ -280,7 +288,7 @@ export class FSR3Upscaler {
 
         switch (this._path) {
             case 'bilinear':
-                this._encodeBlit(encoder, colorGPU.createView());
+                this._encodeBlit(encoder, colorGPU.createView(), this._exposure![0].createView());
                 break;
             case 'spatial':
                 this._encodeSpatial(encoder, colorGPU);
@@ -312,11 +320,16 @@ export class FSR3Upscaler {
 
     //* Pass Encoding
 
-    private _encodeBlit(encoder: GPUCommandEncoder, input: GPUTextureView): void {
+    private _encodeBlit(
+        encoder: GPUCommandEncoder,
+        input: GPUTextureView,
+        exposure: GPUTextureView,
+    ): void {
         const bindGroup = this._blitPass.createBindGroup([
             { buffer: this._constants.buffer },
             input,
             this._linearSampler,
+            exposure,
             this._outputView(),
         ]);
         const pass = encoder.beginComputePass({
@@ -342,10 +355,11 @@ export class FSR3Upscaler {
         easuPass.end();
 
         //* RCAS — sharpen (input already display-referred)
+        const exposureView = this._exposure![0].createView();
         if (this.settings.sharpness > 0) {
-            this._encodeRcas(encoder, this._easuOutput!.createView());
+            this._encodeRcas(encoder, this._easuOutput!.createView(), exposureView);
         } else {
-            this._encodeBlit(encoder, this._easuOutput!.createView());
+            this._encodeBlit(encoder, this._easuOutput!.createView(), exposureView);
         }
     }
 
@@ -372,6 +386,25 @@ export class FSR3Upscaler {
         const historyOut = this._history![1 - this._historyIndex];
         const locksIn = this._locks![this._historyIndex];
         const locksOut = this._locks![1 - this._historyIndex];
+        const exposurePrev = this._exposure![this._historyIndex];
+        const exposureCur = this._exposure![1 - this._historyIndex];
+
+        //* Exposure — reduce scene luminance to a pre-exposure (auto-exposure).
+        // Runs first; every later pass reads this frame's value from exposureCur.
+        const exposureBindGroup = this._exposurePass.createBindGroup([
+            { buffer: this._constants.buffer },
+            colorGPU.createView(),
+            this._linearSampler,
+            exposurePrev.createView(),
+            exposureCur.createView(),
+        ]);
+        const exposurePass = encoder.beginComputePass({
+            label: 'fsr3-exposure',
+            timestampWrites: this._timer.passDescriptor('exposure'),
+        });
+        // One workgroup performs the whole reduction (see luminancePyramid.ts).
+        this._exposurePass.dispatch(exposurePass, exposureBindGroup, 8, 8);
+        exposurePass.end();
 
         //* Dilate — nearest-depth motion/depth over 3×3
         const dilateBindGroup = this._dilatePass.createBindGroup([
@@ -424,6 +457,7 @@ export class FSR3Upscaler {
             historyOut.createView(),
             locksIn.createView(),
             locksOut.createView(),
+            exposureCur.createView(),
         ]);
         const accumulatePass = encoder.beginComputePass({
             label: 'fsr3-accumulate',
@@ -446,6 +480,8 @@ export class FSR3Upscaler {
                 depthCur.createView(),
                 historyOut.createView(),
                 locksOut.createView(),
+                exposureCur.createView(),
+                colorGPU.createView(),
                 this._outputView(),
             ]);
             const debugPass = encoder.beginComputePass({
@@ -460,16 +496,21 @@ export class FSR3Upscaler {
             );
             debugPass.end();
         } else if (this.settings.sharpness > 0) {
-            this._encodeRcas(encoder, historyOut.createView());
+            this._encodeRcas(encoder, historyOut.createView(), exposureCur.createView());
         } else {
-            this._encodeBlit(encoder, historyOut.createView());
+            this._encodeBlit(encoder, historyOut.createView(), exposureCur.createView());
         }
     }
 
-    private _encodeRcas(encoder: GPUCommandEncoder, input: GPUTextureView): void {
+    private _encodeRcas(
+        encoder: GPUCommandEncoder,
+        input: GPUTextureView,
+        exposure: GPUTextureView,
+    ): void {
         const bindGroup = this._rcasPass.createBindGroup([
             { buffer: this._constants.buffer },
             input,
+            exposure,
             this._outputView(),
         ]);
         const pass = encoder.beginComputePass({
@@ -531,6 +572,7 @@ export class FSR3Upscaler {
         if (this._path === 'temporal') flags |= FLAG_INPUT_REINHARD;
         if (this._path === 'spatial') flags |= FLAG_INPUT_DISPLAY;
         if (this.settings.lockThinFeatures) flags |= FLAG_LOCKS;
+        if (this.settings.autoExposure) flags |= FLAG_AUTO_EXPOSURE;
         c.setFlags(flags);
     }
 
@@ -568,6 +610,14 @@ export class FSR3Upscaler {
         this._output.generateMipmaps = false;
         this._renderer.initTexture(this._output);
         this._outputGPU = getGPUTexture(this._renderer, this._output);
+
+        // Exposure is a 1×1 value read by every output path (blit/rcas), so it
+        // is allocated for all pipelines even though only the temporal path
+        // computes it — the other paths bind [0] and leave its content unused.
+        this._exposure = [
+            this._createTexture('exposure-0', 1, 1, 'rgba16float'),
+            this._createTexture('exposure-1', 1, 1, 'rgba16float'),
+        ];
 
         if (this._path === 'spatial') {
             this._easuOutput = this._createTexture('easu-output', dw, dh, 'rgba16float');
@@ -613,5 +663,9 @@ export class FSR3Upscaler {
         this._dilatedMotion = null;
         this._masks?.destroy();
         this._masks = null;
+        if (this._exposure) {
+            this._exposure.forEach((t) => t.destroy());
+            this._exposure = null;
+        }
     }
 }

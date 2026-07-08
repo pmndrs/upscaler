@@ -53,6 +53,8 @@ export enum FSRDebugView {
     AccumulationAge = 4,
     /** Luminance-stability locks (white = a locked thin feature). */
     Locks = 5,
+    /** Auto-exposed scene luminance (should sit near mid-grey everywhere). */
+    Exposure = 6,
 }
 
 /**
@@ -110,8 +112,20 @@ export interface FSRRuntimeSettings {
      * values are more stable but ghost longer. FSR3 uses ~32 internally.
      */
     maxAccumulation: number;
-    /** Pre-exposure applied before the invertible tonemap. */
+    /**
+     * Pre-exposure applied before the invertible tonemap. Used directly when
+     * {@link autoExposure} is off; ignored when it is on (the value is computed
+     * from scene luminance each frame). Divided back out before display either
+     * way, so it conditions accumulation without changing final brightness.
+     */
     exposure: number;
+    /**
+     * Compute the pre-exposure from the scene's average luminance each frame
+     * (with eye-adaptation), instead of using the fixed {@link exposure}. Keeps
+     * the invertible-tonemap accumulation well-conditioned across HDR scenes of
+     * very different brightness. On by default.
+     */
+    autoExposure: boolean;
     /**
      * Protect stable thin sub-pixel features (wires, fence pickets, foliage)
      * from history rectification via luminance-stability locks. Reduces the

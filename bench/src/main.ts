@@ -23,6 +23,7 @@ const state: BenchState = {
     sharpness: 0.8,
     maxAccumulation: 24,
     exposure: 1.0,
+    autoExposure: true,
     lockThinFeatures: true,
     debugView: FSRDebugView.None,
     animate: true,
@@ -137,6 +138,7 @@ renderer.setAnimationLoop(() => {
         sharpness: state.sharpness,
         maxAccumulation: state.maxAccumulation,
         exposure: state.exposure,
+        autoExposure: state.autoExposure,
         lockThinFeatures: state.lockThinFeatures,
         debugView: state.debugView,
     });

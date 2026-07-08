@@ -1,4 +1,4 @@
-import { WGSL_CONSTANTS } from './common';
+import { WGSL_COLOR, WGSL_CONSTANTS } from './common';
 import { assembleShader } from './wgsl';
 
 /**
@@ -11,17 +11,22 @@ import { assembleShader } from './wgsl';
  * - 3: dilated view depth (render size)
  * - 4: history (display size)
  * - 5: locks (display size; r = lock lifetime)
- * - 6: output storage (rgba8unorm, display size)
+ * - 6: exposure (1×1; r = pre-exposure, g = avg luma)
+ * - 7: scene color (render size)
+ * - 8: output storage (rgba8unorm, display size)
  */
 export const DEBUG_SHADER = assembleShader(
     WGSL_CONSTANTS,
+    WGSL_COLOR,
     /* wgsl */ `
 @group(0) @binding(1) var dilatedMotion : texture_2d<f32>;
 @group(0) @binding(2) var masks : texture_2d<f32>;
 @group(0) @binding(3) var dilatedDepth : texture_2d<f32>;
 @group(0) @binding(4) var historyIn : texture_2d<f32>;
 @group(0) @binding(5) var locksIn : texture_2d<f32>;
-@group(0) @binding(6) var outputColor : texture_storage_2d<rgba8unorm, write>;
+@group(0) @binding(6) var exposureTex : texture_2d<f32>;
+@group(0) @binding(7) var inputColor : texture_2d<f32>;
+@group(0) @binding(8) var outputColor : texture_storage_2d<rgba8unorm, write>;
 
 // Simple HSV-ish direction coloring for motion vectors.
 fn motionToColor(m : vec2f) -> vec3f {
@@ -56,6 +61,11 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
         }
         case 5u: { // Luminance-stability locks (r = lifetime)
             c = vec3f(textureLoad(locksIn, vec2i(gid.xy), 0).r);
+        }
+        case 6u: { // Auto-exposed scene luminance — should read near mid-grey
+            let exposure = textureLoad(exposureTex, vec2i(0), 0).r;
+            let l = luma(textureLoad(inputColor, renderCoord, 0).rgb) * exposure;
+            c = vec3f(clamp(l, 0.0, 1.0));
         }
         default: {}
     }

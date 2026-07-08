@@ -28,6 +28,9 @@ import { assembleShader } from './wgsl';
  * - 4: history in, display size (rgba16float; rgb tonemapped, a = age)
  * - 5: linear clamp sampler
  * - 6: history out (rgba16float storage, display size)
+ * - 7: locks in, display size (rgba16float; r = lifetime, g = locked luma)
+ * - 8: locks out (rgba16float storage, display size)
+ * - 9: exposure, 1×1 (rgba16float; r = pre-exposure for this frame)
  */
 export const ACCUMULATE_SHADER = assembleShader(
     WGSL_CONSTANTS,
@@ -42,6 +45,7 @@ export const ACCUMULATE_SHADER = assembleShader(
 @group(0) @binding(6) var historyOut : texture_storage_2d<rgba16float, write>;
 @group(0) @binding(7) var locksIn : texture_2d<f32>;
 @group(0) @binding(8) var locksOut : texture_storage_2d<rgba16float, write>;
+@group(0) @binding(9) var exposureTex : texture_2d<f32>;
 
 const PI : f32 = 3.14159265358979;
 // Variance-clip gamma: how many standard deviations of the current
@@ -118,6 +122,8 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
     let renderCoord = clamp(vec2i(uv * C.renderSize), vec2i(0), vec2i(C.renderSize) - 1);
     let motion = textureLoad(dilatedMotion, renderCoord, 0).xy;
     let disocclusion = textureLoad(masks, renderCoord, 0).r;
+    // Pre-exposure for this frame (auto or manual) — divided back out at output.
+    let exposure = textureLoad(exposureTex, vec2i(0), 0).r;
 
     //* Current Frame Upsample (jitter-aware Lanczos2)
     // srcPos is the display pixel in render texel-index space, shifted by
@@ -138,7 +144,7 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
             let coord = clamp(baseTexel + vec2i(x, y), vec2i(0), maxCoord);
             let d = srcPos - vec2f(coord);
             let w = lanczos2(d.x) * lanczos2(d.y);
-            let c = tonemapInvertible(textureLoad(inputColor, coord, 0).rgb * C.exposure);
+            let c = tonemapInvertible(textureLoad(inputColor, coord, 0).rgb * exposure);
             colorSum += c * w;
             weightSum += w;
 

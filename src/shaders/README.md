@@ -17,7 +17,8 @@ Every pass is a WGSL compute module assembled from shared chunks (`common.ts` + 
 | `rcas.ts`              | Faithful port of `FsrRcasF` (analytic lobe bound, `exp2` sharpness mapping)                                                                       | Denoise variant not wired up yet                                                                                                                                                    |
 | `dilate.ts`            | Same intent as _reconstruct & dilate_                                                                                                             | No scatter-based "reconstructed previous depth"; outputs linearized depth directly                                                                                                  |
 | `depthClip.ts`         | Same intent as _depth clip_                                                                                                                       | Compares against last frame's dilated depth (classic TAA style) rather than the reconstructed buffer; relative-depth threshold instead of plane-fit `Ksep`                          |
-| `accumulate.ts`        | Same structure as _reproject & accumulate_ (Lanczos2 upsample, kernel-confidence weighting, history rectification, accumulation counter in alpha) + luminance-stability **locks** protecting thin features | Variance clipping (Playdead) as the base rectifier; no luminance pyramid/auto-exposure; no shading-change detector; Catmull-Rom (Jimenez 5-fetch) history filter |
+| `accumulate.ts`        | Same structure as _reproject & accumulate_ (Lanczos2 upsample, kernel-confidence weighting, history rectification, accumulation counter in alpha) + luminance-stability **locks** protecting thin features + **auto-exposed** pre-tonemap | Variance clipping (Playdead) as the base rectifier; no shading-change detector; Catmull-Rom (Jimenez 5-fetch) history filter |
+| `luminancePyramid.ts`  | Same intent as _compute luminance pyramid_ (log-average luminance → auto-exposure with eye-adaptation)                                            | Single-workgroup reduction of a 32×32 tap grid instead of an atomic SPD mip chain; intermediate mips not yet produced (the shading-change detector will need them)                  |
 | `blit.ts` / `debug.ts` | — (bench/output utilities)                                                                                                                        |                                                                                                                                                                                     |
 
 **Luminance-stability locks** (Phase 3, done) protect thin sub-pixel features (wires,
@@ -31,14 +32,26 @@ A locked pixel widens its rectification AABB (`LOCK_CLAMP_RELAX`) and leans on h
 the blend (`LOCK_HISTORY_BOOST`). Toggle via `settings.lockThinFeatures` (the `FLAG_LOCKS`
 bit); inspect via `FSRDebugView.Locks`. The tuning constants at the top of `accumulate.ts`
 are sensible defaults, not final — tighten if you see thin features ghost, loosen if they
-still dim. Remaining accumulate gaps: luminance pyramid + auto-exposure and a shading-change
-detector.
+still dim.
+
+**Auto-exposure** (Phase 3, done) conditions the invertible-tonemap accumulation.
+`luminancePyramid.ts` reduces the scene to a single log-average luminance in one workgroup,
+maps it to a pre-exposure that lands the average on middle grey, and eases toward it over
+time (eye-adaptation). `accumulate.ts` multiplies the input by that exposure before the
+invertible tonemap; the output pass (`rcas.ts` / `blit.ts`) divides it back out before the
+display transform — so a very bright or very dark HDR scene accumulates in the same working
+range (steadier variance clip + firefly guard) **without changing final brightness**. Toggle
+via `settings.autoExposure` (the `FLAG_AUTO_EXPOSURE` bit); with it off, the fixed
+`settings.exposure` is published through the same path. Inspect via `FSRDebugView.Exposure`
+(the exposed scene luminance should read near mid-grey everywhere). Remaining accumulate gap:
+a shading-change detector (needs the intermediate luminance mips this pass does not yet emit).
 
 ## Debugging
 
-Set `settings.debugView` (`FSRDebugView`) to render pipeline internals instead of the final image: motion vectors, disocclusion mask, linearized depth, accumulation age, or locks. When integrating a new scene, check in this order:
+Set `settings.debugView` (`FSRDebugView`) to render pipeline internals instead of the final image: motion vectors, disocclusion mask, linearized depth, accumulation age, locks, or auto-exposed luminance. When integrating a new scene, check in this order:
 
 1. **Motion vectors** — static scene + moving camera should produce smooth gradients, no per-object noise (if objects flash, their previous model matrices aren't tracked — did you bypass the `velocity` node?).
 2. **Disocclusion** — should outline moving silhouettes, thin and stable. Full-screen flashing means depth linearization flags are wrong (reversed-depth mismatch).
 3. **Accumulation age** — should saturate to white within ~a second when still, and reset along disocclusion trails.
 4. **Locks** — should light up on thin high-contrast features (grid lines, wire/fence edges, specular silhouettes) and stay black on flat surfaces. Locks everywhere ⇒ thresholds too low (expect ghosting); nothing lit ⇒ thresholds too high (thin features will dim).
+5. **Exposure** — the exposed scene luminance should read near an even mid-grey regardless of how bright/dark the scene is (that is auto-exposure normalizing it). All-black ⇒ exposure driven to its floor (scene far too bright), all-white ⇒ driven to its ceiling (scene far too dark).

@@ -17,7 +17,8 @@ import { assembleShader } from './wgsl';
  *
  * Bindings:
  * - 1: input color (display size)
- * - 2: output storage (rgba8unorm, display size)
+ * - 2: exposure, 1×1 (rgba16float; r = pre-exposure to undo on the temporal path)
+ * - 3: output storage (rgba8unorm, display size)
  */
 export const RCAS_SHADER = assembleShader(
     WGSL_CONSTANTS,
@@ -25,7 +26,8 @@ export const RCAS_SHADER = assembleShader(
     WGSL_DISPLAY_TRANSFORM,
     /* wgsl */ `
 @group(0) @binding(1) var inputColor : texture_2d<f32>;
-@group(0) @binding(2) var outputColor : texture_storage_2d<rgba8unorm, write>;
+@group(0) @binding(2) var exposureTex : texture_2d<f32>;
+@group(0) @binding(3) var outputColor : texture_storage_2d<rgba8unorm, write>;
 
 // Maximum sharpening lobe magnitude — set so a single tap cannot exceed the
 // local contrast ring (0.25 - 1/16 in the reference).
@@ -36,7 +38,9 @@ fn rcasLoad(p : vec2i) -> vec3f {
     let clamped = clamp(p, vec2i(0), vec2i(C.displaySize) - 1);
     let c = textureLoad(inputColor, clamped, 0).rgb;
     if (hasFlag(FLAG_INPUT_REINHARD)) {
-        return displayTransform(tonemapInvert(c));
+        // Undo the pre-exposure the accumulate pass baked in before tonemapping.
+        let exposure = max(textureLoad(exposureTex, vec2i(0), 0).r, 1.0e-4);
+        return displayTransform(tonemapInvert(c) / exposure);
     }
     return c;
 }
