@@ -19,6 +19,7 @@ Every pass is a WGSL compute module assembled from shared chunks (`common.ts` + 
 | `depthClip.ts`         | Same intent as _depth clip_                                                                                                                       | Compares against last frame's dilated depth (classic TAA style) rather than the reconstructed buffer; relative-depth threshold instead of plane-fit `Ksep`                          |
 | `accumulate.ts`        | Same structure as _reproject & accumulate_ (Lanczos2 upsample, kernel-confidence weighting, history rectification, accumulation counter in alpha) + luminance-stability **locks** protecting thin features + **auto-exposed** pre-tonemap + **shading-change** history aging | Variance clipping (Playdead) as the base rectifier; shading-change measured on the 3×3 neighborhood mean vs history luma rather than a dedicated coarse pyramid mip; Catmull-Rom (Jimenez 5-fetch) history filter |
 | `luminancePyramid.ts`  | Same intent as _compute luminance pyramid_ (log-average luminance → auto-exposure with eye-adaptation)                                            | Single-workgroup reduction of a 32×32 tap grid instead of an atomic SPD mip chain; intermediate mips not yet produced (the shading-change detector will need them)                  |
+| `generateReactive.ts`  | Same intent as _GenerateReactiveMask_ (opaque-vs-final color diff → reactive mask)                                                                | Fixed threshold/scale constants rather than per-call params                                                                                                                         |
 | `blit.ts` / `debug.ts` | — (bench/output utilities)                                                                                                                        |                                                                                                                                                                                     |
 
 **Luminance-stability locks** (Phase 3, done) protect thin sub-pixel features (wires,
@@ -68,8 +69,12 @@ would otherwise ghost through the history. Pass a render-res mask as `dispatch({
 (red channel `[0,1]`); flagged pixels suppress lock formation, keep almost no accumulation,
 and snap toward the current frame in the blend (`REACTIVE_STRENGTH`). No mask → a 1×1 zero
 texture is bound and the whole path is flag-gated off, so there's zero cost when unused.
-Author the mask however you like (render your transparents' coverage — see
-`examples/05-transparency`); inspect via `FSRDebugView.Reactivity`.
+Author the mask however you like — render your transparents' coverage, or let the library
+generate it: pass `dispatch({ reactiveOpaqueColor })` (an opaque-only render at render res)
+and `generateReactive.ts` diffs it against the final `color` (FSR2's `GenerateReactiveMask`)
+to produce the mask automatically. `examples/05-transparency` demonstrates both. Inspect via
+`FSRDebugView.Reactivity`. (Auto-gen note: render the opaque pass with the same jitter as the
+final frame, or high-contrast edges leave faint reactivity from sub-pixel misalignment.)
 
 ## Debugging
 

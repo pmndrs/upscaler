@@ -25,6 +25,7 @@ import { DEBUG_SHADER } from './shaders/debug';
 import { DEPTH_CLIP_SHADER } from './shaders/depthClip';
 import { DILATE_SHADER } from './shaders/dilate';
 import { EASU_SHADER } from './shaders/easu';
+import { GENERATE_REACTIVE_SHADER } from './shaders/generateReactive';
 import { LUMINANCE_PYRAMID_SHADER } from './shaders/luminancePyramid';
 import { RCAS_SHADER } from './shaders/rcas';
 import {
@@ -96,6 +97,7 @@ export class FSR3Upscaler {
     private _depthClipPass!: ComputePass;
     private _accumulatePass!: ComputePass;
     private _exposurePass!: ComputePass;
+    private _generateReactivePass!: ComputePass;
     private _debugPass!: ComputePass;
 
     private _path: FSRUpscalePath = 'temporal';
@@ -129,6 +131,9 @@ export class FSR3Upscaler {
     // 1×1 zero texture bound in place of a reactive mask when the caller
     // doesn't supply one (WebGPU zero-inits it, so reactivity reads 0).
     private _reactiveDummy: GPUTexture | null = null;
+    // Render-res target the auto-generated reactive mask is written into when
+    // the caller passes an opaque-only color to diff against the final color.
+    private _reactiveGenerated: GPUTexture | null = null;
 
     constructor(options: { renderer: WebGPURenderer }) {
         this._renderer = options.renderer;
@@ -158,6 +163,7 @@ export class FSR3Upscaler {
         this._depthClipPass = new ComputePass(device, 'depth-clip', DEPTH_CLIP_SHADER);
         this._accumulatePass = new ComputePass(device, 'accumulate', ACCUMULATE_SHADER);
         this._exposurePass = new ComputePass(device, 'exposure', LUMINANCE_PYRAMID_SHADER);
+        this._generateReactivePass = new ComputePass(device, 'gen-reactive', GENERATE_REACTIVE_SHADER);
         this._debugPass = new ComputePass(device, 'debug', DEBUG_SHADER);
 
         this._jitter = new JitterSequence(this._ratio);
@@ -396,11 +402,34 @@ export class FSR3Upscaler {
         const locksOut = this._locks![1 - this._historyIndex];
         const exposurePrev = this._exposure![this._historyIndex];
         const exposureCur = this._exposure![1 - this._historyIndex];
-        const reactiveView = (
-            inputs.reactive
-                ? getGPUTexture(this._renderer, inputs.reactive)
-                : this._reactiveDummy!
-        ).createView();
+        //* Reactive mask — explicit mask, else auto-generate from an opaque-only
+        //* color diff against the final color, else a zero dummy.
+        let reactiveView: GPUTextureView;
+        if (inputs.reactive) {
+            reactiveView = getGPUTexture(this._renderer, inputs.reactive).createView();
+        } else if (inputs.reactiveOpaqueColor) {
+            const opaqueGPU = getGPUTexture(this._renderer, inputs.reactiveOpaqueColor);
+            const genBindGroup = this._generateReactivePass.createBindGroup([
+                { buffer: this._constants.buffer },
+                opaqueGPU.createView(),
+                colorGPU.createView(),
+                this._reactiveGenerated!.createView(),
+            ]);
+            const genPass = encoder.beginComputePass({
+                label: 'fsr3-gen-reactive',
+                timestampWrites: this._timer.passDescriptor('genReactive'),
+            });
+            this._generateReactivePass.dispatch(
+                genPass,
+                genBindGroup,
+                this._renderWidth,
+                this._renderHeight,
+            );
+            genPass.end();
+            reactiveView = this._reactiveGenerated!.createView();
+        } else {
+            reactiveView = this._reactiveDummy!.createView();
+        }
 
         //* Exposure — reduce scene luminance to a pre-exposure (auto-exposure).
         // Runs first; every later pass reads this frame's value from exposureCur.
@@ -589,7 +618,7 @@ export class FSR3Upscaler {
         if (this.settings.lockThinFeatures) flags |= FLAG_LOCKS;
         if (this.settings.autoExposure) flags |= FLAG_AUTO_EXPOSURE;
         if (this.settings.detectShadingChanges) flags |= FLAG_SHADING_CHANGE;
-        if (inputs.reactive) flags |= FLAG_REACTIVE;
+        if (inputs.reactive || inputs.reactiveOpaqueColor) flags |= FLAG_REACTIVE;
         if (this.settings.rcasDenoise) flags |= FLAG_RCAS_DENOISE;
         c.setFlags(flags);
     }
@@ -664,6 +693,7 @@ export class FSR3Upscaler {
             ];
             this._dilatedMotion = this._createTexture('dilated-motion', rw, rh, 'rgba16float');
             this._masks = this._createTexture('masks', rw, rh, 'rgba8unorm');
+            this._reactiveGenerated = this._createTexture('reactive-gen', rw, rh, 'rgba8unorm');
         }
     }
 
@@ -695,5 +725,7 @@ export class FSR3Upscaler {
         }
         this._reactiveDummy?.destroy();
         this._reactiveDummy = null;
+        this._reactiveGenerated?.destroy();
+        this._reactiveGenerated = null;
     }
 }

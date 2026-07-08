@@ -48,6 +48,7 @@ export class FSRPresenter {
     private _rt: THREE.RenderTarget | null = null;
     private _path: FSRUpscalePath = 'temporal';
     private _reactive: THREE.Texture | null = null;
+    private _reactiveOpaque: THREE.Texture | null = null;
 
     /**
      * @param renderer - An initialized `WebGPURenderer`
@@ -151,6 +152,7 @@ export class FSRPresenter {
                 depth: rt.depthTexture ?? undefined,
                 velocity: temporal ? rt.textures[1] : undefined,
                 reactive: this._reactive ?? undefined,
+                reactiveOpaqueColor: this._reactiveOpaque ?? undefined,
                 deltaTime,
             },
             camera,
@@ -184,6 +186,16 @@ export class FSRPresenter {
      */
     setReactiveMask(texture: THREE.Texture | null): void {
         this._reactive = texture;
+    }
+
+    /**
+     * Sets a render-res opaque-only color for the next {@link draw}; the
+     * upscaler auto-generates the reactive mask from its difference with the
+     * final render. Ignored if an explicit mask is set. Pass `null` to clear.
+     * @param texture - A render-res opaque-only color texture, or null
+     */
+    setReactiveOpaqueColor(texture: THREE.Texture | null): void {
+        this._reactiveOpaque = texture;
     }
 
     dispose(): void {

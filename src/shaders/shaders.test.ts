@@ -6,6 +6,7 @@ import { DEBUG_SHADER } from './debug';
 import { DEPTH_CLIP_SHADER } from './depthClip';
 import { DILATE_SHADER } from './dilate';
 import { EASU_SHADER } from './easu';
+import { GENERATE_REACTIVE_SHADER } from './generateReactive';
 import { LUMINANCE_PYRAMID_SHADER } from './luminancePyramid';
 import { RCAS_SHADER } from './rcas';
 import { assembleShader } from './wgsl';
@@ -18,6 +19,7 @@ const ALL_SHADERS: Record<string, string> = {
     depthClip: DEPTH_CLIP_SHADER,
     accumulate: ACCUMULATE_SHADER,
     luminancePyramid: LUMINANCE_PYRAMID_SHADER,
+    generateReactive: GENERATE_REACTIVE_SHADER,
     debug: DEBUG_SHADER,
 };
 

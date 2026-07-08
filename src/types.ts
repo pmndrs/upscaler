@@ -104,6 +104,14 @@ export interface FSRDispatchInputs {
      * it yourself (render your transparents' coverage) or via a future helper.
      */
     reactive?: Texture;
+    /**
+     * Opaque-only scene color at render resolution. When provided (and no
+     * explicit {@link reactive} mask is given), the upscaler auto-generates the
+     * reactive mask from the difference between this and the final `color` —
+     * FSR2's `GenerateReactiveMask`. Render your scene once with transparents
+     * hidden into this buffer; `color` stays the full composited render.
+     */
+    reactiveOpaqueColor?: Texture;
     /** Drop all history this frame (camera cut, teleport, resize). */
     reset?: boolean;
     /** Seconds since the previous frame. */

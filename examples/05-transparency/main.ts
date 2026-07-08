@@ -104,12 +104,14 @@ const maskPointsMat = new THREE.PointsNodeMaterial({
     blending: THREE.AdditiveBlending,
 });
 let maskRT: THREE.RenderTarget | null = null;
+let opaqueRT: THREE.RenderTarget | null = null;
 
 //* Presenter + state.
+type MaskSource = 'off' | 'manual' | 'auto';
 const state = {
     tier: 'temporal' as FSRUpscalePath,
     ratio: 2.0,
-    reactiveMask: true,
+    maskSource: 'manual' as MaskSource,
     debug: FSRDebugView.None,
 };
 const presenter = new FSRPresenter(renderer);
@@ -121,41 +123,63 @@ function configure(): void {
         path: state.tier,
         ratio: state.ratio,
     });
+    const rw = presenter.upscaler.renderWidth;
+    const rh = presenter.upscaler.renderHeight;
     maskRT?.dispose();
-    maskRT = new THREE.RenderTarget(
-        presenter.upscaler.renderWidth,
-        presenter.upscaler.renderHeight,
-        { depthBuffer: true },
-    );
+    maskRT = new THREE.RenderTarget(rw, rh, { depthBuffer: true });
+    opaqueRT?.dispose();
+    opaqueRT = new THREE.RenderTarget(rw, rh, { depthBuffer: true });
 }
 configure();
 
-/** Renders the transparents-only coverage into {@link maskRT} as a reactive mask. */
-function authorReactiveMask(): void {
-    if (!maskRT || state.tier !== 'temporal' || !state.reactiveMask) {
+const transparents: THREE.Object3D[] = [...glass, particles];
+
+/**
+ * Feeds the presenter a reactive signal for the transparents, per the selected
+ * source: `manual` renders their flat-white coverage into a mask; `auto` renders
+ * the opaque-only scene and lets FSR3 diff it against the final frame.
+ */
+function authorReactive(): void {
+    if (state.tier !== 'temporal' || state.maskSource === 'off') {
+        presenter.setReactiveMask(null);
+        presenter.setReactiveOpaqueColor(null);
+        return;
+    }
+
+    if (state.maskSource === 'auto' && opaqueRT) {
+        //* Opaque-only render — FSR3 diffs it against the final color internally.
+        transparents.forEach((o) => (o.visible = false));
+        renderer.setRenderTarget(opaqueRT);
+        renderer.render(scene, camera);
+        renderer.setRenderTarget(null);
+        transparents.forEach((o) => (o.visible = true));
+        presenter.setReactiveOpaqueColor(opaqueRT.texture);
         presenter.setReactiveMask(null);
         return;
     }
-    const glassMats = glass.map((q) => q.material);
-    glass.forEach((q) => (q.material = maskMeshMat));
-    const pointsMat = particles.material;
-    particles.material = maskPointsMat;
-    opaque.forEach((o) => (o.visible = false));
-    // Black background so non-covered pixels read zero reactivity; the opaque
-    // pass restores its own Color background below, which drives its own clear.
-    const prevBg = scene.background;
-    scene.background = new THREE.Color(0x000000);
 
-    renderer.setRenderTarget(maskRT);
-    renderer.render(scene, camera);
-    renderer.setRenderTarget(null);
+    if (state.maskSource === 'manual' && maskRT) {
+        //* Flat-white coverage of the transparents; black elsewhere.
+        const glassMats = glass.map((q) => q.material);
+        glass.forEach((q) => (q.material = maskMeshMat));
+        const pointsMat = particles.material;
+        particles.material = maskPointsMat;
+        opaque.forEach((o) => (o.visible = false));
+        const prevBg = scene.background;
+        scene.background = new THREE.Color(0x000000);
 
-    glass.forEach((q, i) => (q.material = glassMats[i]));
-    particles.material = pointsMat;
-    opaque.forEach((o) => (o.visible = true));
-    scene.background = prevBg;
+        renderer.setRenderTarget(maskRT);
+        renderer.render(scene, camera);
+        renderer.setRenderTarget(null);
 
-    presenter.setReactiveMask(maskRT.texture);
+        glass.forEach((q, i) => (q.material = glassMats[i]));
+        particles.material = pointsMat;
+        opaque.forEach((o) => (o.visible = true));
+        scene.background = prevBg;
+
+        presenter.setReactiveMask(maskRT.texture);
+        presenter.setReactiveOpaqueColor(null);
+    }
 }
 
 const gui = new GUI({ title: 'Transparency' });
@@ -166,7 +190,11 @@ gui.add(state, 'tier', {
     .name('mode')
     .onChange(configure);
 addRenderScale(gui, state, configure);
-gui.add(state, 'reactiveMask').name('reactive mask');
+gui.add(state, 'maskSource', {
+    'Off (ghosts)': 'off',
+    'Manual coverage': 'manual',
+    'Auto (opaque diff)': 'auto',
+}).name('reactive mask');
 gui.add(state, 'debug', {
     Off: FSRDebugView.None,
     Reactivity: FSRDebugView.Reactivity,
@@ -198,6 +226,6 @@ renderer.setAnimationLoop(() => {
     particles.position.x = Math.sin(t * 0.9) * 4;
 
     presenter.applySettings({ debugView: state.debug });
-    authorReactiveMask();
+    authorReactive();
     presenter.renderScene(scene, camera, dt);
 });

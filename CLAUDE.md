@@ -64,7 +64,7 @@ src/
   shaders/
     common.ts          — shared WGSL chunks: FsrConstants UBO, color/depth/tonemap helpers, FLAG_* bits
     wgsl.ts            — assembleShader() dedup concatenator (WGSL has no #include)
-    blit / easu / rcas / dilate / depthClip / accumulate / luminancePyramid / debug .ts  — the passes
+    blit / easu / rcas / dilate / depthClip / accumulate / luminancePyramid / generateReactive / debug .ts  — the passes
     README.md          — per-pass fidelity vs FidelityFX reference + debugging guide
   internal/
     threeWebGPU.ts     — getDevice() / getGPUTexture(): the three-internals bridge
@@ -158,7 +158,8 @@ variant on `06-screenspace-gi`, and expose new toggles in `02-fsr1-vs-fsr3`. Rem
   - ~~**Reactive-mask input**~~ — **done & GPU-verified.** Optional `dispatch({ reactive })` render-res mask (red = reactivity); flagged pixels suppress locks, keep near-zero accumulation, and snap to the current frame (`REACTIVE_STRENGTH` in `accumulate.ts`). No mask → a 1×1 zero texture is bound and `FLAG_REACTIVE` stays off (zero cost). `FSRPresenter.setReactiveMask()` threads it through; `examples/05-transparency` authors one by rendering the transparents' coverage and is the acceptance demo. Inspect via `FSRDebugView.Reactivity`. **Authoring helpers** (auto-generating the mask) remain Phase 4.
 - **Phase 4 — API & ecosystem:**
   - ~~**RCAS denoise variant**~~ — **done & GPU-verified.** `rcas.ts` gains FSR1's `FSR_RCAS_DENOISE` path (attenuate the sharpening lobe on lone luma outliers so grain from noisy inputs isn't amplified), gated by `settings.rcasDenoise` (`FLAG_RCAS_DENOISE`, off by default). Pairs with an upstream spatial denoiser; `examples/06-screenspace-gi` toggles it on for the reduced-res SSR/GI. One of Dennis's original asks.
-  - Reactive-mask authoring helpers (auto-generate the mask); a `postprocessing`/TSL node wrapper for drop-in use; MSAA-input support.
+  - ~~**Reactive-mask authoring helper**~~ — **done & GPU-verified.** `dispatch({ reactiveOpaqueColor })` auto-generates the mask from the opaque-vs-final color diff (`generateReactive.ts`, FSR2's `GenerateReactiveMask`); no explicit `reactive` mask needed. `FSRPresenter.setReactiveOpaqueColor()` threads it; `examples/05-transparency` offers manual-coverage vs auto-diff. Caveat: jitter the opaque pass like the final or high-contrast edges leave faint reactivity (sub-pixel misalignment).
+  - **Node wrapper** (drop-in `postprocessing`/TSL) and **MSAA-input support** — remaining.
 - **Phase 5 — performance:** `textureGather` tap packing (EASU/RCAS currently use per-tap `textureLoad`); f16 arithmetic (`shader-f16`); merge dilate+depth-clip into one pass; bind-group caching (currently rebuilt per dispatch — fine but wasteful); half-res luma analysis.
 
 Frame generation (the other half of "FSR3") is **out of scope** — it needs swapchain frame pacing browsers don't expose.
