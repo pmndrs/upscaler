@@ -22,12 +22,11 @@ import {
     FLAG_SHADING_CHANGE,
 } from './shaders/common';
 import { DEBUG_SHADER } from './shaders/debug';
-import { DEPTH_CLIP_SHADER } from './shaders/depthClip';
-import { DILATE_SHADER } from './shaders/dilate';
 import { EASU_SHADER } from './shaders/easu';
 import { GENERATE_REACTIVE_SHADER } from './shaders/generateReactive';
 import { LUMINANCE_PYRAMID_SHADER } from './shaders/luminancePyramid';
 import { RCAS_SHADER } from './shaders/rcas';
+import { RECONSTRUCT_SHADER } from './shaders/reconstruct';
 import {
     FSRDebugView,
     FSRQualityMode,
@@ -93,8 +92,7 @@ export class FSR3Upscaler {
     private _blitPass!: ComputePass;
     private _easuPass!: ComputePass;
     private _rcasPass!: ComputePass;
-    private _dilatePass!: ComputePass;
-    private _depthClipPass!: ComputePass;
+    private _reconstructPass!: ComputePass;
     private _accumulatePass!: ComputePass;
     private _exposurePass!: ComputePass;
     private _generateReactivePass!: ComputePass;
@@ -159,8 +157,7 @@ export class FSR3Upscaler {
         this._blitPass = new ComputePass(device, 'blit', BLIT_SHADER);
         this._easuPass = new ComputePass(device, 'easu', EASU_SHADER);
         this._rcasPass = new ComputePass(device, 'rcas', RCAS_SHADER);
-        this._dilatePass = new ComputePass(device, 'dilate', DILATE_SHADER);
-        this._depthClipPass = new ComputePass(device, 'depth-clip', DEPTH_CLIP_SHADER);
+        this._reconstructPass = new ComputePass(device, 'reconstruct', RECONSTRUCT_SHADER);
         this._accumulatePass = new ComputePass(device, 'accumulate', ACCUMULATE_SHADER);
         this._exposurePass = new ComputePass(device, 'exposure', LUMINANCE_PYRAMID_SHADER);
         this._generateReactivePass = new ComputePass(device, 'gen-reactive', GENERATE_REACTIVE_SHADER);
@@ -448,45 +445,28 @@ export class FSR3Upscaler {
         this._exposurePass.dispatch(exposurePass, exposureBindGroup, 8, 8);
         exposurePass.end();
 
-        //* Dilate — nearest-depth motion/depth over 3×3
-        const dilateBindGroup = this._dilatePass.createBindGroup([
+        //* Reconstruct — dilate (nearest-depth motion/depth over 3×3) + depth
+        //* clip (disocclusion vs last frame's dilated depth) fused into one pass.
+        const reconstructBindGroup = this._reconstructPass.createBindGroup([
             { buffer: this._constants.buffer },
             depthView,
             velocityGPU.createView(),
-            depthCur.createView(),
-            this._dilatedMotion!.createView(),
-        ]);
-        const dilatePass = encoder.beginComputePass({
-            label: 'fsr3-dilate',
-            timestampWrites: this._timer.passDescriptor('dilate'),
-        });
-        this._dilatePass.dispatch(
-            dilatePass,
-            dilateBindGroup,
-            this._renderWidth,
-            this._renderHeight,
-        );
-        dilatePass.end();
-
-        //* Depth Clip — disocclusion mask vs last frame's dilated depth
-        const clipBindGroup = this._depthClipPass.createBindGroup([
-            { buffer: this._constants.buffer },
-            depthCur.createView(),
-            this._dilatedMotion!.createView(),
             depthPrev.createView(),
+            depthCur.createView(),
+            this._dilatedMotion!.createView(),
             this._masks!.createView(),
         ]);
-        const clipPass = encoder.beginComputePass({
-            label: 'fsr3-depth-clip',
-            timestampWrites: this._timer.passDescriptor('depthClip'),
+        const reconstructPass = encoder.beginComputePass({
+            label: 'fsr3-reconstruct',
+            timestampWrites: this._timer.passDescriptor('reconstruct'),
         });
-        this._depthClipPass.dispatch(
-            clipPass,
-            clipBindGroup,
+        this._reconstructPass.dispatch(
+            reconstructPass,
+            reconstructBindGroup,
             this._renderWidth,
             this._renderHeight,
         );
-        clipPass.end();
+        reconstructPass.end();
 
         //* Accumulate — jittered upsample + history reprojection/rectification
         const accumulateBindGroup = this._accumulatePass.createBindGroup([

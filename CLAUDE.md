@@ -64,7 +64,7 @@ src/
   shaders/
     common.ts          — shared WGSL chunks: FsrConstants UBO, color/depth/tonemap helpers, FLAG_* bits
     wgsl.ts            — assembleShader() dedup concatenator (WGSL has no #include)
-    blit / easu / rcas / dilate / depthClip / accumulate / luminancePyramid / generateReactive / debug .ts  — the passes
+    blit / easu / rcas / reconstruct / accumulate / luminancePyramid / generateReactive / debug .ts  — the passes
     README.md          — per-pass fidelity vs FidelityFX reference + debugging guide
   internal/
     threeWebGPU.ts     — getDevice() / getGPUTexture(): the three-internals bridge
@@ -122,7 +122,7 @@ These were discovered by reading three's source; they're non-obvious and easy to
 - **Accumulation tuning.** Catmull-Rom history filter, YCoCg variance-clip gamma (`CLIP_GAMMA = 1.0`), disocclusion/clip weight falloffs, **and the luminance-lock constants (`LOCK_*`)** in `accumulate.ts` are sensible defaults, not tuned. Ghosting → tighten (lower `LOCK_CLAMP_RELAX`/`LOCK_HISTORY_BOOST`, raise the peak/contrast thresholds); instability/shimmer or thin features dimming → loosen. Use `FSRDebugView.Locks` to see where locks form.
 - **Shading-change constants** (`accumulate.ts`: `SHADING_LO/HI/AGE`) are conservative defaults. If stable, steadily-lit surfaces shimmer or fail to converge, `SHADING_LO` is too low (it's aging history that didn't change) — raise it; if a genuine lighting change ghosts its old shading, lower it. `FSRDebugView.ShadingChange` should be black on a still scene — check it before suspecting the accumulate blend. The detector reuses the 3×3 neighborhood mean, not a coarse pyramid mip, so it can false-positive on very high-frequency content under heavy motion; that's the Phase-5 SPD-mip refinement.
 - **Auto-exposure constants** (`luminancePyramid.ts`: `EXPOSURE_KEY`, `EXPOSURE_MIN/MAX`, `ADAPT_SPEED`) are defaults. Because exposure is divided back out before display, the *visible* effect is subtle (better accumulation stability, not a brightness change). If a scene pulses in brightness, `ADAPT_SPEED` is the suspect; if the image goes flat/washed on a very bright or dark scene, check the min/max clamp. `FSRDebugView.Exposure` should read near mid-grey — verify there before suspecting the accumulate math.
-- **Depth separation threshold** in `depthClip.ts` (`DEPTH_SEPARATION_SCALE`, `DEPTH_SIMILARITY_FLOOR`) is a guess. Too aggressive = history thrown away everywhere (no convergence); too slack = ghost trails behind moving objects.
+- **Depth separation threshold** in `reconstruct.ts` (`DEPTH_SEPARATION_SCALE`, `DEPTH_SIMILARITY_FLOOR`) is a guess. Too aggressive = history thrown away everywhere (no convergence); too slack = ghost trails behind moving objects.
 - **`timestamp-query`** may be absent; `GpuTimer` no-ops gracefully, but confirm the GPU-ms readout actually appears where supported.
 
 ---
@@ -160,7 +160,7 @@ variant on `06-screenspace-gi`, and expose new toggles in `02-fsr1-vs-fsr3`. Rem
   - ~~**RCAS denoise variant**~~ — **done & GPU-verified.** `rcas.ts` gains FSR1's `FSR_RCAS_DENOISE` path (attenuate the sharpening lobe on lone luma outliers so grain from noisy inputs isn't amplified), gated by `settings.rcasDenoise` (`FLAG_RCAS_DENOISE`, off by default). Pairs with an upstream spatial denoiser; `examples/06-screenspace-gi` toggles it on for the reduced-res SSR/GI. One of Dennis's original asks.
   - ~~**Reactive-mask authoring helper**~~ — **done & GPU-verified.** `dispatch({ reactiveOpaqueColor })` auto-generates the mask from the opaque-vs-final color diff (`generateReactive.ts`, FSR2's `GenerateReactiveMask`); no explicit `reactive` mask needed. `FSRPresenter.setReactiveOpaqueColor()` threads it; `examples/05-transparency` offers manual-coverage vs auto-diff. Caveat: jitter the opaque pass like the final or high-contrast edges leave faint reactivity (sub-pixel misalignment).
   - **Node wrapper** (drop-in `postprocessing`/TSL) and **MSAA-input support** — remaining.
-- **Phase 5 — performance:** `textureGather` tap packing (EASU/RCAS currently use per-tap `textureLoad`); f16 arithmetic (`shader-f16`); merge dilate+depth-clip into one pass; bind-group caching (currently rebuilt per dispatch — fine but wasteful); half-res luma analysis.
+- **Phase 5 — performance:** ~~merge dilate+depth-clip into one pass~~ **done** (`reconstruct.ts` — one render-res dispatch, one fewer intermediate round-trip; GPU-verified disocclusion unchanged). Remaining: `textureGather` tap packing (EASU/RCAS currently use per-tap `textureLoad`); f16 arithmetic (`shader-f16`); bind-group caching (currently rebuilt per dispatch — fine but wasteful); half-res luma analysis.
 
 Frame generation (the other half of "FSR3") is **out of scope** — it needs swapchain frame pacing browsers don't expose.
 
