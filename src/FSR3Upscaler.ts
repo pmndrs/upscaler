@@ -108,6 +108,7 @@ export class FSR3Upscaler {
     private _jitter!: JitterSequence;
     private _frameIndex = 0;
     private _pendingReset = true;
+    private _warnedMsaa = false;
     private _historyIndex = 0;
     private _depthIndex = 0;
     private _initialized = false;
@@ -294,6 +295,7 @@ export class FSR3Upscaler {
         this._constants.upload();
 
         const colorGPU = getGPUTexture(this._renderer, inputs.color);
+        this._checkMsaa(colorGPU, 'color');
         const encoder = this._device.createCommandEncoder({ label: 'fsr3' });
         this._timer.beginFrame();
 
@@ -385,6 +387,8 @@ export class FSR3Upscaler {
 
         const depthGPU = getGPUTexture(this._renderer, inputs.depth);
         const velocityGPU = getGPUTexture(this._renderer, inputs.velocity);
+        this._checkMsaa(depthGPU, 'depth');
+        this._checkMsaa(velocityGPU, 'velocity');
         // Stencil-less depth formats bind directly; combined formats need a
         // depth-only view for texture_depth_2d.
         const depthView = depthGPU.createView(
@@ -543,6 +547,22 @@ export class FSR3Upscaler {
         });
         this._rcasPass.dispatch(pass, bindGroup, this._displayWidth, this._displayHeight);
         pass.end();
+    }
+
+    // FSR is itself the anti-aliaser (the temporal path is a TAA-class
+    // resolver — that's what Native AA mode is), so it wants an aliased,
+    // single-sample, jittered render. A multisampled input can't even bind to
+    // the compute passes as a texture_2d, and would waste the MSAA cost. Warn
+    // once (cheap: one property read) rather than let bind-group creation fail
+    // with an opaque validation error.
+    private _checkMsaa(tex: GPUTexture, label: string): void {
+        if (this._warnedMsaa || tex.sampleCount <= 1) return;
+        this._warnedMsaa = true;
+        console.warn(
+            `three-fsr3: the ${label} input is multisampled (sampleCount=${tex.sampleCount}). ` +
+                `FSR does its own anti-aliasing — feed it an aliased, single-sample, jittered ` +
+                `render with MSAA disabled. Multisampled inputs are not supported.`,
+        );
     }
 
     // Storage bindings must view exactly one mip level — pin it explicitly
