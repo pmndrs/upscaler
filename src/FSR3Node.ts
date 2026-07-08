@@ -1,8 +1,7 @@
 import { Vector2, type Texture } from 'three';
 import { NodeUpdateType, TempNode, type WebGPURenderer } from 'three/webgpu';
-import { nodeObject, passTexture, velocity } from 'three/tsl';
+import { convertToTexture, mrt, nodeObject, output, pass, passTexture, velocity } from 'three/tsl';
 
-import { FSR3Pass } from './FSR3Pass';
 import { FSR3Upscaler } from './FSR3Upscaler';
 import { getGPUTexture } from './internal/threeWebGPU';
 import { getQualityModeRatio } from './math/resolution';
@@ -43,21 +42,22 @@ export interface FSR3NodeOptions {
  *                        scenePass.getTextureNode('velocity'), camera);
  * ```
  *
- * For the plain "just upscale my scene" case, use {@link fsrScene} — it owns
- * the render, so its jitter is always correct.
+ * For the plain "just upscale my scene" case, use {@link fsrScene} — it wraps
+ * this node around a scene pass for you.
  *
- * **Advanced — read this.** This composable form does *not* render its inputs;
- * it consumes the textures you give it. Two consequences:
- * 1. Something else must actually render those input passes each frame (they are
- *    not shader-graph dependencies of this node). The node no-ops on a frame
- *    where the input textures aren't GPU-backed yet.
+ * **How the inputs render.** Like three's own `FSR1Node` / `TAAUNode`, the input
+ * nodes are registered as graph dependencies (in `setup`), so three renders them
+ * in dependency order *inside* the post-processing render, right before this
+ * node's `updateBefore` runs the FSR compute. Two things follow from that:
+ * 1. You don't render the inputs yourself — hand this node a node chain (a scene
+ *    pass, or `denoise(ssgi(…))`) and three drives it. The chain must ultimately
+ *    reach this node (i.e. be part of `post.outputNode`), which it is by
+ *    construction.
  * 2. Sub-pixel jitter is applied via the render-pipeline hook (like `TAAUNode`)
- *    *before the pipeline renders*. For that jitter to land on your input, the
- *    input passes must render **inside** the post-processing render (not earlier
- *    in your own loop). For an imperative pipeline where you control the render
- *    order (composite SSGI into a low-res target yourself), drive
- *    {@link FSR3Upscaler} directly instead — you get full jitter control and it
- *    is the proven path (see `examples/06-screenspace-gi`).
+ *    *before the pipeline renders*, and because the inputs render in-pipeline the
+ *    jitter lands on them — no manual jitter plumbing. (An imperative pipeline
+ *    that composites into a low-res target *outside* the post render still wants
+ *    the raw {@link FSR3Upscaler}; see `examples/06-screenspace-gi`.)
  *
  * Present the result untouched — set `renderer.toneMapping = NoToneMapping` and
  * `renderer.outputColorSpace = LinearSRGBColorSpace` (the examples' bootRenderer
@@ -113,6 +113,17 @@ export class FSR3Node extends TempNode {
             // upscaler's (stable) unjittered projection.
             velocity.setProjectionMatrix(this._upscaler.unjitteredProjectionMatrix);
         }
+
+        // Register the inputs as graph dependencies so three renders them in
+        // dependency order, in-pipeline, before this node's updateBefore. Our
+        // fields are `_`-prefixed, which three's automatic child discovery
+        // (Node._getChildren) skips — so we register them explicitly, exactly as
+        // FSR1Node does with `properties.textureNode`. Without this the input
+        // passes are never built → never rendered → black output.
+        const props = builder.getNodeProperties(this);
+        props.colorNode = this._color;
+        props.depthNode = this._depth;
+        props.velocityNode = this._velocity;
 
         // Apply the sub-pixel jitter before the input passes render — same hook
         // three's TAAUNode uses. The upscaler's beginFrame/endFrame do the
@@ -227,96 +238,24 @@ export const fsr3 = (
     camera: CameraLike,
     options: FSR3NodeOptions = {},
 ): ReturnType<typeof nodeObject> =>
-    nodeObject(new FSR3Node(color, depth, velocityNode, camera, options));
+    // Materialize the (possibly composited) color into a texture — same as
+    // FSR1/TAAU do with their beauty input. depth/velocity are already pass
+    // texture nodes, so they pass through untouched (matching TAAUNode).
+    nodeObject(new FSR3Node(convertToTexture(color), depth, velocityNode, camera, options));
 
 /**
- * The plain "upscale my scene" node — used by {@link fsrScene}. Unlike the
- * composable {@link FSR3Node}, it *owns* the render (via {@link FSR3Pass}): the
- * scene isn't a graph dependency of anything, so the node must render it itself
- * in `updateBefore` rather than expecting the pipeline to.
- */
-export class FSR3SceneNode extends TempNode {
-    readonly isFSR3SceneNode = true;
-
-    private readonly _scene: { isScene?: boolean };
-    private readonly _camera: CameraLike;
-    private readonly _options: FSR3NodeOptions;
-    private readonly _size = new Vector2();
-
-    private _pass: FSR3Pass | null = null;
-    private _textureNode: ReturnType<typeof passTexture> | null = null;
-    private _lastTime = 0;
-
-    constructor(scene: { isScene?: boolean }, camera: CameraLike, options: FSR3NodeOptions = {}) {
-        super('vec4');
-        (this as unknown as { updateBeforeType: unknown }).updateBeforeType = NodeUpdateType.FRAME;
-        this._scene = scene;
-        this._camera = camera;
-        this._options = options;
-    }
-
-    /** The underlying upscaler — inspect `.settings`, `.gpuTimings`, etc. */
-    get upscaler(): FSR3Upscaler | null {
-        return this._pass?.upscaler ?? null;
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    setup(builder: any): any {
-        if (!this._pass) {
-            this._pass = new FSR3Pass(builder.renderer as WebGPURenderer);
-            (builder.renderer as WebGPURenderer).getDrawingBufferSize(this._size);
-            this._configure();
-        }
-        if (!this._textureNode) {
-            this._textureNode = passTexture(this as never, this._pass.outputTexture);
-        }
-        return this._textureNode;
-    }
-
-    private _configure(): void {
-        this._pass!.configure({
-            displayWidth: Math.max(1, this._size.x),
-            displayHeight: Math.max(1, this._size.y),
-            path: this._options.path,
-            quality: this._options.quality ?? FSRQualityMode.Quality,
-            ratio: this._options.ratio,
-        });
-        if (this._textureNode) {
-            (this._textureNode as unknown as { value: unknown }).value = this._pass!.outputTexture;
-        }
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    updateBefore(frame: any): any {
-        const renderer = frame.renderer as WebGPURenderer;
-        if (!this._pass) return;
-        const size = renderer.getDrawingBufferSize(new Vector2());
-        if (size.x !== this._size.x || size.y !== this._size.y) {
-            this._size.copy(size);
-            this._configure();
-        }
-        const now = typeof performance !== 'undefined' ? performance.now() : 0;
-        const dt = this._lastTime ? Math.min((now - this._lastTime) / 1000, 0.1) : 1 / 60;
-        this._lastTime = now;
-        this._pass.draw(this._scene as never, this._camera as never, dt);
-    }
-
-    dispose(): void {
-        this._pass?.dispose();
-        super.dispose();
-    }
-}
-
-/**
- * Convenience for the plain "upscale my scene" case — the node renders a
- * reduced-resolution scene pass itself and outputs the upscaled result:
+ * Convenience for the plain "upscale my scene" case: builds a reduced-resolution
+ * scene pass (color + jitter-free velocity MRT) and hands it to the composable
+ * {@link fsr3} node — the same shape as three's `taau(pass.getTextureNode(…), …)`
+ * factory. So it's a thin wrapper, not a separate code path: the scene renders
+ * in-graph as an FSR3 input, jitter and all.
  *
  * ```ts
  * post.outputNode = fsrScene(scene, camera, { quality: FSRQualityMode.Quality });
  * ```
  *
- * For an effect pipeline as the input (SSGI etc.), use the composable
- * {@link fsr3} instead.
+ * For an effect pipeline as the input (SSGI etc.), compose {@link fsr3} directly
+ * against your own reduced-res passes — see `examples/09-kitchen-sink`.
  *
  * @param scene - Scene to render at reduced resolution and upscale
  * @param camera - Scene camera
@@ -324,7 +263,26 @@ export class FSR3SceneNode extends TempNode {
  * @returns A TSL node whose value is the upscaled, display-ready texture
  */
 export const fsrScene = (
-    scene: { isScene?: boolean },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    scene: any,
     camera: CameraLike,
     options: FSR3NodeOptions = {},
-): ReturnType<typeof nodeObject> => nodeObject(new FSR3SceneNode(scene, camera, options));
+): ReturnType<typeof nodeObject> => {
+    const ratio = options.ratio ?? getQualityModeRatio(options.quality ?? FSRQualityMode.Quality);
+
+    //* Render the scene at 1/ratio with a color + velocity MRT — the two inputs
+    //* FSR3's temporal path needs (depth is the pass's own depth buffer). The
+    //* `velocity` node is the shared TSL singleton whose projection the upscaler
+    //* pins to its unjittered matrix each frame, so motion vectors stay jitter-free.
+    const scenePass = pass(scene, camera as never);
+    scenePass.setMRT(mrt({ output, velocity }));
+    scenePass.setResolutionScale(1 / ratio);
+
+    return fsr3(
+        scenePass.getTextureNode('output'),
+        scenePass.getTextureNode('depth'),
+        scenePass.getTextureNode('velocity'),
+        camera,
+        options,
+    );
+};
