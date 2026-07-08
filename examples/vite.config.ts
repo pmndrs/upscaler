@@ -27,6 +27,7 @@ export default defineConfig({
                 screenspace: resolve(root, '06-screenspace-gi/index.html'),
                 tslnode: resolve(root, '07-tsl-node/index.html'),
                 compose: resolve(root, '08-tsl-compose/index.html'),
+                kitchensink: resolve(root, '09-kitchen-sink/index.html'),
             },
         },
     },
