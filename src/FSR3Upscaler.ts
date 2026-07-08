@@ -15,6 +15,7 @@ import {
     FLAG_INPUT_REINHARD,
     FLAG_LOCKS,
     FLAG_PERSPECTIVE,
+    FLAG_RCAS_DENOISE,
     FLAG_REACTIVE,
     FLAG_RESET,
     FLAG_REVERSED_DEPTH,
@@ -64,6 +65,7 @@ export class FSR3Upscaler {
     /** Runtime tuning knobs — mutate freely between frames. */
     readonly settings: FSRRuntimeSettings = {
         sharpness: 0.8,
+        rcasDenoise: false,
         maxAccumulation: 24,
         exposure: 1.0,
         autoExposure: true,
@@ -588,6 +590,7 @@ export class FSR3Upscaler {
         if (this.settings.autoExposure) flags |= FLAG_AUTO_EXPOSURE;
         if (this.settings.detectShadingChanges) flags |= FLAG_SHADING_CHANGE;
         if (inputs.reactive) flags |= FLAG_REACTIVE;
+        if (this.settings.rcasDenoise) flags |= FLAG_RCAS_DENOISE;
         c.setFlags(flags);
     }
 

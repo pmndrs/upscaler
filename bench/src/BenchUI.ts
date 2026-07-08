@@ -9,6 +9,7 @@ export interface BenchState {
     mode: BenchMode;
     quality: FSRQualityMode;
     sharpness: number;
+    rcasDenoise: boolean;
     maxAccumulation: number;
     exposure: number;
     autoExposure: boolean;
@@ -50,6 +51,7 @@ export function createBenchUI(
 
     const tuning = gui.addFolder('Tuning');
     tuning.add(state, 'sharpness', 0, 1, 0.05);
+    tuning.add(state, 'rcasDenoise').name('RCAS denoise');
     tuning.add(state, 'maxAccumulation', 4, 32, 1);
     tuning.add(state, 'exposure', 0.25, 4, 0.05);
     tuning.add(state, 'autoExposure').name('auto exposure');

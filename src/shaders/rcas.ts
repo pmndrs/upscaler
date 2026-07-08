@@ -70,7 +70,19 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
     let lobeRGB = max(-hitMin, hitMax);
     // C.sharpness 1 -> 0 attenuation stops (sharpest), 0 -> 2 stops.
     let peak = exp2(-2.0 * (1.0 - C.sharpness));
-    let lobe = max(-RCAS_LIMIT, min(max(lobeRGB.r, max(lobeRGB.g, lobeRGB.b)), 0.0)) * peak;
+    var lobe = max(-RCAS_LIMIT, min(max(lobeRGB.r, max(lobeRGB.g, lobeRGB.b)), 0.0)) * peak;
+
+    //* Denoise (FSR1's FSR_RCAS_DENOISE)
+    // A lone luma outlier vs its cross-neighborhood, normalized by the local
+    // range, reads as noise; attenuate the lobe there (up to 50%) so RCAS
+    // doesn't amplify grain from noisy inputs (e.g. reduced-res SSR/GI).
+    if (hasFlag(FLAG_RCAS_DENOISE)) {
+        let mn = min(min(b.g, d.g), min(f.g, h.g));
+        let mx = max(max(b.g, d.g), max(f.g, h.g));
+        var nz = 0.25 * (b.g + d.g + f.g + h.g) - e.g;
+        nz = clamp(abs(nz) / max(mx - mn, 1.0e-4), 0.0, 1.0);
+        lobe *= 1.0 - 0.5 * nz;
+    }
 
     //* Resolve
     let rcpL = 1.0 / (4.0 * lobe + 1.0);

@@ -120,6 +120,14 @@ export interface FSRRuntimeSettings {
      */
     sharpness: number;
     /**
+     * Enable RCAS's denoise variant (FSR1 `FSR_RCAS_DENOISE`): attenuate
+     * sharpening on lone luma outliers so grain from noisy inputs (reduced-res
+     * SSR/GI, raw path tracing) isn't amplified. Off by default — turn it on
+     * only for noisy sources; it slightly softens fine detail. Pairs with a
+     * spatial denoiser upstream.
+     */
+    rcasDenoise: boolean;
+    /**
      * Maximum number of accumulated frames in the temporal history. Higher
      * values are more stable but ghost longer. FSR3 uses ~32 internally.
      */

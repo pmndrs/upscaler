@@ -106,7 +106,7 @@ compositeMat.depthWrite = false;
 compositeMat.fog = false;
 const compositeQuad = new THREE.QuadMesh(compositeMat);
 
-const state = { effect: 'gtao' as Effect, ratio: 2.0 };
+const state = { effect: 'gtao' as Effect, ratio: 2.0, rcasDenoise: true };
 
 let colorRT: THREE.RenderTarget | null = null;
 let scenePass: ReturnType<typeof pass> | null = null;
@@ -186,6 +186,9 @@ configure();
 const gui = new GUI({ title: 'Screen-space → FSR3' });
 gui.add(state, 'effect', { GTAO: 'gtao', SSR: 'ssr', SSGI: 'ssgi' }).name('effect').onChange(configure);
 addRenderScale(gui, state, configure);
+// The screen-space effects are noisy at reduced resolution — RCAS's denoise
+// variant keeps the final sharpen from amplifying that grain.
+gui.add(state, 'rcasDenoise').name('RCAS denoise');
 
 window.addEventListener('resize', () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -215,6 +218,7 @@ renderer.setAnimationLoop(() => {
     const dt = Math.min(clock.getDelta(), 0.1);
     controls.update();
     if (!colorRT || !scenePass) return;
+    upscaler.settings.rcasDenoise = state.rcasDenoise;
 
     //* Render the low-res effect graph into colorRT (this also renders the
     //* scenePass, producing depth + velocity), jittered by FSR3. The pass

@@ -164,6 +164,7 @@ export class BenchPipeline {
     /** Applies runtime settings from the UI (no reconfigure needed). */
     applySettings(settings: {
         sharpness: number;
+        rcasDenoise: boolean;
         maxAccumulation: number;
         exposure: number;
         autoExposure: boolean;

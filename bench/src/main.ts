@@ -21,6 +21,7 @@ const state: BenchState = {
     mode: 'fsr3-temporal',
     quality: FSRQualityMode.Performance,
     sharpness: 0.8,
+    rcasDenoise: false,
     maxAccumulation: 24,
     exposure: 1.0,
     autoExposure: true,
@@ -137,6 +138,7 @@ renderer.setAnimationLoop(() => {
     bench.update(time, state.animate);
     pipeline.applySettings({
         sharpness: state.sharpness,
+        rcasDenoise: state.rcasDenoise,
         maxAccumulation: state.maxAccumulation,
         exposure: state.exposure,
         autoExposure: state.autoExposure,
