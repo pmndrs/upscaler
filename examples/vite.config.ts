@@ -25,6 +25,8 @@ export default defineConfig({
                 aliasing: resolve(root, '04-aliasing-torture/index.html'),
                 transparency: resolve(root, '05-transparency/index.html'),
                 screenspace: resolve(root, '06-screenspace-gi/index.html'),
+                tslnode: resolve(root, '07-tsl-node/index.html'),
+                compose: resolve(root, '08-tsl-compose/index.html'),
             },
         },
     },

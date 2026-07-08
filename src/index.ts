@@ -1,5 +1,6 @@
 export { FSR3Upscaler } from './FSR3Upscaler';
 export { FSR3Pass, type FSR3PassConfig } from './FSR3Pass';
+export { FSR3Node, fsr3, type FSR3NodeOptions } from './FSR3Node';
 export {
     FSRDebugView,
     FSRQualityMode,
