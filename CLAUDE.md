@@ -58,7 +58,8 @@ CI (`.github/workflows/ci.yml`) runs lint → typecheck → test → build on pu
 ```
 src/
   index.ts             — public exports
-  FSR3Upscaler.ts      — THE public API + pass orchestration (start here)
+  FSR3Upscaler.ts      — THE low-level API + pass orchestration (start here)
+  FSR3Pass.ts          — high-level public drop-in (MRT/jitter/present recipe; ex-FSRPresenter)
   types.ts             — FSRQualityMode, FSRDebugView, config/settings/dispatch types
   math/                — halton, jitter sequencing, resolution presets (all unit-tested)
   shaders/
@@ -159,7 +160,8 @@ variant on `06-screenspace-gi`, and expose new toggles in `02-fsr1-vs-fsr3`. Rem
 - **Phase 4 — API & ecosystem:**
   - ~~**RCAS denoise variant**~~ — **done & GPU-verified.** `rcas.ts` gains FSR1's `FSR_RCAS_DENOISE` path (attenuate the sharpening lobe on lone luma outliers so grain from noisy inputs isn't amplified), gated by `settings.rcasDenoise` (`FLAG_RCAS_DENOISE`, off by default). Pairs with an upstream spatial denoiser; `examples/06-screenspace-gi` toggles it on for the reduced-res SSR/GI. One of Dennis's original asks.
   - ~~**Reactive-mask authoring helper**~~ — **done & GPU-verified.** `dispatch({ reactiveOpaqueColor })` auto-generates the mask from the opaque-vs-final color diff (`generateReactive.ts`, FSR2's `GenerateReactiveMask`); no explicit `reactive` mask needed. `FSRPresenter.setReactiveOpaqueColor()` threads it; `examples/05-transparency` offers manual-coverage vs auto-diff. Caveat: jitter the opaque pass like the final or high-contrast edges leave faint reactivity (sub-pixel misalignment).
-  - **Node wrapper** (drop-in `postprocessing`/TSL) and **MSAA-input support** — remaining.
+  - ~~**Drop-in driver**~~ — **partly done.** `FSRPresenter` graduated into the library as the public **`FSR3Pass`** class (`src/FSR3Pass.ts`, exported) — the imperative drop-in that bakes in the MRT/jitter/velocity/present recipe. `examples/shared/FSRPresenter.ts` is now a thin re-export shim, so the examples still drive it. Chosen over adding a `postprocessing` peer dep. **Remaining:** a native TSL node (no new deps — modelled on three's `TAAUNode`, managing jitter in `updateBefore`) for `THREE.PostProcessing` graphs; this is "the future" surface per Dennis, with `FSR3Pass` covering imperative + renderer-agnostic use in the meantime.
+  - **MSAA-input support** — remaining.
 - **Phase 5 — performance:** ~~merge dilate+depth-clip into one pass~~ **done** (`reconstruct.ts` — one render-res dispatch, one fewer intermediate round-trip; GPU-verified disocclusion unchanged). Remaining: `textureGather` tap packing (EASU/RCAS currently use per-tap `textureLoad`); f16 arithmetic (`shader-f16`); bind-group caching (currently rebuilt per dispatch — fine but wasteful); half-res luma analysis.
 
 Frame generation (the other half of "FSR3") is **out of scope** — it needs swapchain frame pacing browsers don't expose.
