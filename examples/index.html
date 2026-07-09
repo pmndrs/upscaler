@@ -188,11 +188,11 @@
                 </a>
                 <a class="card" href="/10-ssgi-denoise/">
                     <div class="num">10</div>
-                    <div class="title">SSGI built-in denoise</div>
+                    <div class="title">SSGI recurrent denoise</div>
                     <div class="desc">
-                        The kitchen sink with SSGI's own temporal denoiser
-                        (<code>getGINode()</code>/<code>getAONode()</code>) instead of the external
-                        <code>DenoiseNode</code> — cleaner indirect light before FSR3 upscales.
+                        The kitchen sink running r185's <code>recurrentDenoise</code> +
+                        <code>temporalReproject</code> over SSGI (diffuse mode), with a toggle to A/B
+                        against the raw built-in output — cleaner indirect light before FSR3 upscales.
                     </div>
                     <span class="tag">advanced</span>
                 </a>

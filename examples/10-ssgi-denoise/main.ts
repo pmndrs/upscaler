@@ -14,6 +14,8 @@ import {
 import { ssr } from 'three/addons/tsl/display/SSRNode.js';
 import { ssgi } from 'three/addons/tsl/display/SSGINode.js';
 import { denoise } from 'three/addons/tsl/display/DenoiseNode.js';
+import { temporalReproject } from 'three/addons/tsl/display/TemporalReprojectNode.js';
+import { recurrentDenoise } from 'three/addons/tsl/display/RecurrentDenoiseNode.js';
 import GUI from 'lil-gui';
 
 import { fsr3, type FSR3Upscaler } from 'three-fsr3';
@@ -24,18 +26,23 @@ import { addRenderScale, basePercent } from '../shared/ui';
 
 //* Kitchen sink, denoised-SSGI variant (a copy of 09 that leaves 09 untouched).
 //*
-//* The difference from 09 is only the SSGI branch: instead of taking SSGI's raw
-//* texture and running the OLD external `DenoiseNode` over it, we use SSGINode's
-//* own built-in temporal denoiser — `getAONode()` / `getGINode()` return already-
-//* denoised outputs (SSGINode.useTemporalFiltering is on by default), and its
-//* sliceCount / stepCount trade noise for cost. This is the path three's own
-//* `webgpu_postprocessing_ssgi` example uses. (`recurrentDenoise`, the r185 node
-//* that shines on the SSR demo, is the *SSR* denoiser — SSGI has this instead.)
+//* SSGI is genuinely noisy: SSGINode's `useTemporalFiltering` only *rotates* the
+//* sampling noise each frame for a downstream temporal resolver to average — it
+//* is not a denoiser, so on its own the GI stays grainy. This demo runs the r185
+//* recurrent spatiotemporal denoiser (`recurrentDenoise`, the same node that
+//* cleans the SSR demo) over the GI in `diffuse` mode:
 //*
-//* Temporal budget note: SSGI's internal temporal filter + FSR3's accumulation
-//* are two temporal stages. That's the same shape three's example uses (SSGI +
-//* TRAA), and we still drop TRAA — FSR3 is the sole AA. If the overlap ever
-//* costs too much, the fix is to share history, not to stack a third stage.
+//*   ssgi.getGINode() -> temporalReproject(velocity) -> recurrentDenoise -> composite
+//*
+//* `temporalReproject` aligns the previous denoised frame along motion vectors
+//* (recurrentDenoise itself takes no velocity), then recurrentDenoise à-trous-
+//* filters spatially and temporally accumulates, feeding its output back as next
+//* frame's history. A `denoiser` toggle A/Bs it against the raw built-in path.
+//*
+//* Temporal budget note: recurrentDenoise accumulates, and so does FSR3 — two
+//* temporal stages (same shape as three's SSGI+TRAA example, and we still drop
+//* TRAA so FSR3 is the sole AA). If the overlap costs too much, the fix is to
+//* share history, not stack a third stage.
 
 const { renderer, dpr } = await bootRenderer();
 
@@ -93,7 +100,16 @@ const texNode = (n: unknown) => (n as { getTextureNode(): unknown }).getTextureN
 
 const post = new THREE.PostProcessing(renderer);
 
-const state = { ssgi: true, ssr: true, ratio: 2.0, rcasDenoise: true, jitter: true, ssgiSlices: 2, ssgiSteps: 8 };
+const state = {
+    ssgi: true,
+    ssr: true,
+    ratio: 2.0,
+    rcasDenoise: true,
+    jitter: true,
+    ssgiSlices: 2,
+    ssgiSteps: 8,
+    ssgiDenoiser: 'recurrent' as 'recurrent' | 'builtin',
+};
 let fsrNode: ReturnType<typeof fsr3> | null = null;
 
 /** (Re)builds the whole reduced-res post graph and points FSR3 at its output. */
@@ -127,15 +143,36 @@ function configure(): void {
     //* Composite the enabled effects onto the beauty, all at reduced res.
     let rgb = beauty.rgb;
     if (state.ssgi) {
-        // SSGINode denoises internally (useTemporalFiltering, on by default) and
-        // exposes already-denoised AO + GI via getAONode()/getGINode() — so we do
-        // NOT wrap it in the external DenoiseNode (what 09 does, and why 09's GI
-        // is grainier). sliceCount/stepCount trade noise for cost.
         const giPass = ssgi(beauty, depth, normal, camera);
         giPass.sliceCount.value = state.ssgiSlices;
         giPass.stepCount.value = state.ssgiSteps;
         const ao = sw(giPass.getAONode());
-        const gi = sw(giPass.getGINode());
+        const giRaw = giPass.getGINode();
+
+        let gi;
+        if (state.ssgiDenoiser === 'recurrent') {
+            //* Reproject the noisy GI along velocity, then spatially + temporally
+            //* denoise it (diffuse kernel), feeding the denoised result back as
+            //* history. recurrentDenoise carries no velocity of its own, so the
+            //* temporalReproject stage is what makes it hold up under motion.
+            const giReproj = temporalReproject(giRaw as never, depth as never, normal as never, vel as never, camera, {
+                mode: 'diffuse',
+            });
+            const giDenoise = recurrentDenoise(giReproj as never, camera, {
+                depth: depth as never,
+                normal: normal as never,
+                raw: giRaw as never,
+                mode: 'diffuse',
+                accumulate: true,
+            });
+            giReproj.setHistoryTexture(giDenoise as never);
+            gi = sw(giDenoise);
+        } else {
+            //* Raw built-in path (SSGINode's own output) — grainy, resolved only
+            //* by FSR3's accumulation. The A/B baseline for the denoiser above.
+            gi = sw(giRaw);
+        }
+
         // beauty * AO  +  albedo * indirect-bounce
         rgb = beauty.rgb.mul(ao.r).add(diffuseTex.rgb.mul(gi.rgb));
     }
@@ -162,8 +199,11 @@ function configure(): void {
 }
 configure();
 
-const gui = new GUI({ title: 'SSGI (built-in denoise) + SSR → FSR3' });
+const gui = new GUI({ title: 'SSGI (recurrent denoise) + SSR → FSR3' });
 gui.add(state, 'ssgi').name('SSGI (indirect)').onChange(configure);
+gui.add(state, 'ssgiDenoiser', { 'recurrent (r185)': 'recurrent', 'built-in (raw)': 'builtin' })
+    .name('SSGI denoiser')
+    .onChange(configure);
 gui.add(state, 'ssgiSlices', 1, 4, 1).name('SSGI slices').onChange(configure);
 gui.add(state, 'ssgiSteps', 4, 16, 1).name('SSGI steps').onChange(configure);
 gui.add(state, 'ssr').name('SSR (reflections)').onChange(configure);
@@ -183,9 +223,9 @@ function updateHud(): void {
     const u = (fsrNode as unknown as { upscaler?: FSR3Upscaler }).upscaler;
     const fx = [state.ssgi && 'SSGI', state.ssr && 'SSR'].filter(Boolean).join(' + ') || 'none';
     hud.innerHTML =
-        `<b>three-fsr3</b>  SSGI built-in denoise\n` +
+        `<b>three-fsr3</b>  SSGI recurrent denoise\n` +
         `effects  ${fx}\n` +
-        `SSGI     ${state.ssgiSlices} slices / ${state.ssgiSteps} steps (temporal denoise)\n` +
+        `SSGI     ${state.ssgiDenoiser} · ${state.ssgiSlices} slices / ${state.ssgiSteps} steps\n` +
         `jitter   ${state.jitter ? 'on (reconstruct)' : 'off (stable)'}\n` +
         (u
             ? `render   ${u.renderWidth}×${u.renderHeight}  (${basePercent(u.upscaleRatio)})\n` +
