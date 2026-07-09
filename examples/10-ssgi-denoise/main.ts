@@ -112,9 +112,10 @@ const state = {
     jitter: true,
     ssgiSlices: 2,
     ssgiSteps: 8,
-    // Defaults to the stable path; `recurrent` is a documented experiment that
-    // fights FSR3 jitter (see the header's KNOWN ISSUE).
-    ssgiDenoiser: 'builtin' as 'recurrent' | 'builtin',
+    // `builtin` = raw SSGI (stable, weak). `spatial` = recurrentDenoise as a
+    // spatial-only à-trous with FSR3 owning all temporal (no jitter conflict).
+    // `recurrent` = full spatiotemporal denoise (fights FSR3 jitter — see header).
+    ssgiDenoiser: 'spatial' as 'recurrent' | 'builtin' | 'spatial',
 };
 let fsrNode: ReturnType<typeof fsr3> | null = null;
 
@@ -156,11 +157,25 @@ function configure(): void {
         const giRaw = giPass.getGINode();
 
         let gi;
-        if (state.ssgiDenoiser === 'recurrent') {
-            //* Reproject the noisy GI along velocity, then spatially + temporally
-            //* denoise it (diffuse kernel), feeding the denoised result back as
-            //* history. recurrentDenoise carries no velocity of its own, so the
-            //* temporalReproject stage is what makes it hold up under motion.
+        if (state.ssgiDenoiser === 'spatial') {
+            //* "Share our temporal": run recurrentDenoise as a SPATIAL-ONLY à-trous
+            //* (accumulate: false, no temporalReproject) so there is no second
+            //* temporal stage and nothing is reprojected by velocity — FSR3 owns
+            //* ALL temporal work. No jitter conflict; the denoiser just lowers the
+            //* per-frame variance FSR3 then accumulates. This is the composition a
+            //* jittered temporal upscaler actually wants: spatial clean → temporal.
+            const giDenoise = recurrentDenoise(giRaw as never, camera, {
+                depth: depth as never,
+                normal: normal as never,
+                raw: giRaw as never,
+                mode: 'diffuse',
+                accumulate: false,
+            });
+            gi = sw(giDenoise);
+        } else if (state.ssgiDenoiser === 'recurrent') {
+            //* Full spatiotemporal denoise: reproject along velocity, à-trous +
+            //* temporally accumulate, feed the result back as history. Its own
+            //* accumulation is what fights FSR3 jitter (see the header KNOWN ISSUE).
             const giReproj = temporalReproject(giRaw as never, depth as never, normal as never, vel as never, camera, {
                 mode: 'diffuse',
             });
@@ -175,7 +190,7 @@ function configure(): void {
             gi = sw(giDenoise);
         } else {
             //* Raw built-in path (SSGINode's own output) — grainy, resolved only
-            //* by FSR3's accumulation. The A/B baseline for the denoiser above.
+            //* by FSR3's accumulation. The A/B baseline.
             gi = sw(giRaw);
         }
 
@@ -207,7 +222,11 @@ configure();
 
 const gui = new GUI({ title: 'SSGI denoise A/B → FSR3' });
 gui.add(state, 'ssgi').name('SSGI (indirect)').onChange(configure);
-gui.add(state, 'ssgiDenoiser', { 'built-in (stable)': 'builtin', 'recurrent (⚠ fights jitter)': 'recurrent' })
+gui.add(state, 'ssgiDenoiser', {
+    'spatial (FSR owns temporal)': 'spatial',
+    'built-in (raw)': 'builtin',
+    'recurrent (⚠ fights jitter)': 'recurrent',
+})
     .name('SSGI denoiser')
     .onChange(configure);
 gui.add(state, 'ssgiSlices', 1, 4, 1).name('SSGI slices').onChange(configure);
