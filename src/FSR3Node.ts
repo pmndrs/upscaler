@@ -26,20 +26,24 @@ export interface FSR3NodeOptions {
     ratio?: number;
     /**
      * Apply the sub-pixel camera jitter (temporal path). Jitter is what buys
-     * *reconstruction* (detail beyond render res), but it requires the input to
-     * be re-rendered under the jittered projection every frame — see
+     * *reconstruction* (detail beyond render res), but it only works if the
+     * input is re-rendered under the jittered projection every frame — see
      * {@link FSRConfig.jitter} for the full why.
      *
-     * Defaults differ by entry point, because they differ in whether they
-     * control the render:
-     * - {@link fsrScene} → **on**. It builds and renders the scene pass itself,
-     *   in-graph, so the jitter always lands — free reconstruction.
-     * - {@link fsr3} → **off**. It consumes whatever texture you give it; it
-     *   can't guarantee that texture is re-rendered under the jitter, so the safe
-     *   default is a non-jittered temporal upscale (still reprojects, denoises,
-     *   and accumulates — just no smear risk). Turn it **on** only when your
-     *   inputs render in-graph under this node (e.g. a `pass()` you hand it that
-     *   the post render drives).
+     * Both temporal entry points ({@link fsr3} and {@link fsrScene}) default
+     * this **on**, because a composable node's inputs are graph dependencies
+     * that three renders *in-pipeline*, after this node's jitter hook has
+     * offset the camera — so the offset lands on them and reconstruction is
+     * free. This is how real FSR/DLSS are meant to run.
+     *
+     * Turn it **off** (`{ jitter: false }`) when the input is **not** re-rendered
+     * in-graph under this node — e.g. a texture you filled in your own render
+     * loop and wrapped in `texture()`, or a genuinely noisy GI/RT buffer you
+     * want reprojected/denoised but not reconstructed. Jitter-off is still a
+     * full temporal upscale (reproject + accumulate + denoise), just without
+     * the sub-pixel offset, so there is no smear risk. For that imperative,
+     * composite-outside-the-graph case the raw {@link FSR3Upscaler} is usually
+     * the better fit (see `examples/06-screenspace-gi`).
      */
     jitter?: boolean;
 }
@@ -89,9 +93,14 @@ export class FSR3Node extends TempNode {
     private readonly _velocity: TextureNodeLike;
     private readonly _camera: CameraLike;
     private readonly _options: FSR3NodeOptions;
-    // Composable node defaults to non-jittered (safe for any input); fsrScene
-    // opts in via options.jitter. See FSR3NodeOptions.jitter for the why.
+    // Temporal nodes default to jittered: a composable node's inputs render
+    // in-graph under our jitter hook, so the offset lands and reconstruction
+    // is free. Opt out for externally-rendered / noisy inputs (see
+    // FSR3NodeOptions.jitter).
     private readonly _jitter: boolean;
+    // One-shot guard so a jittering temporal node that never receives depth +
+    // velocity fails loudly instead of silently emitting nothing.
+    private _warnedMissingInputs = false;
 
     private readonly _output = new Vector2();
     private readonly _input = new Vector2();
@@ -116,7 +125,7 @@ export class FSR3Node extends TempNode {
         this._velocity = velocityNode;
         this._camera = camera;
         this._options = options;
-        this._jitter = options.jitter ?? false;
+        this._jitter = options.jitter ?? true;
     }
 
     /** The underlying upscaler — inspect `.settings`, `.gpuTimings`, etc. */
@@ -217,7 +226,20 @@ export class FSR3Node extends TempNode {
         const isTemporal = (this._options.path ?? 'temporal') === 'temporal';
         const depth = this._depth ? this._texture(this._depth) : null;
         const velocityTex = this._velocity ? this._texture(this._velocity) : null;
-        if (isTemporal && (!depth || !velocityTex)) return;
+        if (isTemporal && (!depth || !velocityTex)) {
+            // The temporal path can't run without both — bail, but say so once:
+            // a bare `fsr3(color, …)` with jitter on (the default) would emit
+            // nothing frame after frame with no clue why.
+            if (!this._warnedMissingInputs) {
+                this._warnedMissingInputs = true;
+                console.warn(
+                    'three-fsr3: fsr3() temporal path needs depth + velocity texture nodes; ' +
+                        'none resolved, so the node emits nothing. Pass them, or use ' +
+                        'fsr3Spatial(color) for a color-only spatial upscale.',
+                );
+            }
+            return;
+        }
 
         // Exact input size from the GPU texture (throws until it's backed).
         let gpu: GPUTexture;
@@ -279,6 +301,42 @@ export const fsr3 = (
     // FSR1/TAAU do with their beauty input. depth/velocity are already pass
     // texture nodes, so they pass through untouched (matching TAAUNode).
     nodeObject(new FSR3Node(convertToTexture(color), depth, velocityNode, camera, options));
+
+// Stand-in camera for the spatial path. EASU is purely spatial — it reprojects
+// nothing — but `FSR3Upscaler._writeConstants` still stages `camera.near/far`
+// (ignored by the EASU shader). Any finite values keep NaN out of the UBO, so
+// the spatial node needs no real camera from the caller.
+const SPATIAL_CAMERA = { isCamera: true, near: 0.1, far: 2000, isPerspectiveCamera: false } as CameraLike;
+
+/**
+ * Single-frame **spatial** upscale (FSR1/EASU) as a composable node — for inputs
+ * with no motion data. Takes only a color texture node: no depth, no velocity,
+ * no camera, no history. Unlike the temporal {@link fsr3}, it neither reprojects
+ * nor accumulates, so it can't reconstruct detail beyond the render resolution —
+ * it's a high-quality edge-aware upscale of the frame you give it.
+ *
+ * Reach for this when you genuinely have only a color buffer. If you *do* have
+ * depth + velocity, prefer {@link fsr3} (temporal) — it's strictly better.
+ *
+ * ```ts
+ * post.outputNode = fsr3Spatial(pass(scene, camera).getTextureNode('output'));
+ * ```
+ *
+ * @param color - Reduced-res color texture node to upscale
+ * @param options - Only `quality` / `ratio` apply (`path`/`jitter` are forced)
+ * @returns A TSL node whose value is the upscaled, display-ready texture
+ */
+export const fsr3Spatial = (
+    color: TextureNodeLike,
+    options: Omit<FSR3NodeOptions, 'path' | 'jitter'> = {},
+): ReturnType<typeof nodeObject> =>
+    nodeObject(
+        new FSR3Node(convertToTexture(color), null, null, SPATIAL_CAMERA, {
+            ...options,
+            path: 'spatial',
+            jitter: false,
+        }),
+    );
 
 /**
  * Convenience for the plain "upscale my scene" case: builds a reduced-resolution

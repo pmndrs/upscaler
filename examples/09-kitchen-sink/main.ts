@@ -153,8 +153,8 @@ function configure(): void {
     (fsrNode as unknown as { dispose?(): void } | null)?.dispose?.();
     // The whole scene renders in-graph under this node, so jitter is safe here
     // (the reduced pass IS re-rendered under the jittered projection each frame)
-    // and buys sub-pixel reconstruction — the toggle lets you A/B it against the
-    // non-jittered temporal upscale, which is the composable node's safe default.
+    // and buys sub-pixel reconstruction — on by default for exactly this reason.
+    // The toggle lets you A/B it against a non-jittered (reproject-only) upscale.
     fsrNode = fsr3(colorTex, depth, vel, camera, { path: 'temporal', ratio, jitter: state.jitter });
     post.outputNode = fsrNode as unknown as THREE.Node;
     post.needsUpdate = true;
@@ -167,7 +167,8 @@ gui.add(state, 'ssr').name('SSR (reflections)').onChange(configure);
 addRenderScale(gui, state, configure);
 // Jitter buys sub-pixel reconstruction but needs the input re-rendered under
 // the jittered projection each frame — safe here (the scene renders in-graph),
-// off is the composable node's default for inputs you can't re-render jittered.
+// which is why the composable node defaults it on. Turn it off only for inputs
+// you can't re-render jittered.
 gui.add(state, 'jitter').name('jitter (reconstruct)').onChange(configure);
 // The reduced-res effects are noisy — RCAS's denoise variant keeps the final
 // sharpen from amplifying that grain.
