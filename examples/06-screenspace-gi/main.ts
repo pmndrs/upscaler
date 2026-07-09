@@ -166,7 +166,8 @@ function configure(): void {
         // Unpack the material scalars from the single packed attachment (kept to
         // four MRT targets above to fit WebGPU's 32-byte/sample cap).
         const mat = sw(scenePass.getTextureNode('material'));
-        const ssrTex = texNode(ssr(beauty, depth, normal, mat.r, mat.g, camera));
+        // three r185 moved SSR's material scalars + camera into an options object.
+        const ssrTex = texNode(ssr(beauty, depth, normal as never, { metalnessNode: mat.r, roughnessNode: mat.g, camera }));
         // Reflection is additive over the beauty; spatial-denoise it first.
         const refl = sw(denoise(ssrTex as never, depth, normal, camera));
         composite = vec4(beauty.rgb.add(refl.rgb), beauty.a);

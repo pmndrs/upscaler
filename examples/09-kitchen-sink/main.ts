@@ -138,7 +138,8 @@ function configure(): void {
         // Unpack material scalars (current-pixel reads inside SSR).
         const mtl = diffuseTex.a;
         const rgh = normal.a;
-        const ssrTex = texNode(ssr(beauty, depth, normal, mtl, rgh, camera));
+        // three r185 moved SSR's material scalars + camera into an options object.
+        const ssrTex = texNode(ssr(beauty, depth, normal as never, { metalnessNode: mtl, roughnessNode: rgh, camera }));
         const refl = sw(denoise(ssrTex as never, depth, normal, camera));
         rgb = rgb.add(refl.rgb);
     }
