@@ -134,8 +134,11 @@ function configure(): void {
     //* directly (float MRT), velocity feeds FSR3, depth is the pass's own buffer.
     const mrtInputs: Record<string, unknown> = { output, normal: normalView, velocity };
     if (state.effect === 'ssr') {
-        mrtInputs.metalness = metalness;
-        mrtInputs.roughness = roughness;
+        // WebGPU caps color-attachment bytes/sample at 32 = four RGBA16Float
+        // targets. output + normal + velocity is three; SSR's two material
+        // scalars would push it to five (40 bytes) and blow the cap — so PACK
+        // metalness + roughness into one vec4 attachment. (Same trick as ex. 09.)
+        mrtInputs.material = vec4(metalness, roughness, 0, 0);
     } else if (state.effect === 'ssgi') {
         mrtInputs.diffuse = diffuseColor;
     }
@@ -160,9 +163,10 @@ function configure(): void {
         const aoTex = sw(texNode(ao(depth, normal, camera)));
         composite = sw(beauty.mul(vec4(aoTex.r, aoTex.r, aoTex.r, 1)));
     } else if (state.effect === 'ssr') {
-        const mtl = scenePass.getTextureNode('metalness');
-        const rgh = scenePass.getTextureNode('roughness');
-        const ssrTex = texNode(ssr(beauty, depth, normal, mtl, rgh, camera));
+        // Unpack the material scalars from the single packed attachment (kept to
+        // four MRT targets above to fit WebGPU's 32-byte/sample cap).
+        const mat = sw(scenePass.getTextureNode('material'));
+        const ssrTex = texNode(ssr(beauty, depth, normal, mat.r, mat.g, camera));
         // Reflection is additive over the beauty; spatial-denoise it first.
         const refl = sw(denoise(ssrTex as never, depth, normal, camera));
         composite = vec4(beauty.rgb.add(refl.rgb), beauty.a);
