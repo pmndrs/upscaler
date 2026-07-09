@@ -53,7 +53,7 @@ window.addEventListener('resize', () => {
 
 const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
-    const t = clock.elapsedTime;
+    const t = clock.getElapsedTime();
     knot.rotation.y = t * 0.5;
     knot.rotation.x = t * 0.35;
     camera.position.set(Math.cos(t * 0.2) * 10, 4.5, Math.sin(t * 0.2) * 10);

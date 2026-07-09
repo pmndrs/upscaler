@@ -202,7 +202,7 @@ renderer.setAnimationLoop(() => {
     // Gentle front-facing orbit so the camera stays *inside* the room (a full
     // 360° would swing it behind the walls into darkness) — and the slow motion
     // keeps the temporal history working.
-    const t = clock.elapsedTime;
+    const t = clock.getElapsedTime();
     camera.position.set(Math.sin(t * 0.15) * 7, 4, 9 + Math.cos(t * 0.15) * 1.5);
     camera.lookAt(0, 3, -5);
 
