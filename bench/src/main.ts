@@ -121,11 +121,12 @@ function updateStats(dt: number): void {
 }
 
 //* Main Loop
-const clock = new THREE.Clock();
+const timer = new THREE.Timer();
 
 renderer.setAnimationLoop(() => {
-    const dt = Math.min(clock.getDelta(), 0.1);
-    const time = clock.elapsedTime;
+    timer.update();
+    const dt = Math.min(timer.getDelta(), 0.1);
+    const time = timer.getElapsed();
 
     if (state.autoOrbit) {
         controls.autoRotate = true;

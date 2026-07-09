@@ -100,10 +100,11 @@ function updateHud(): void {
 }
 
 //* Loop — a slow dolly through the fences keeps sub-pixel motion continuous.
-const clock = new THREE.Clock();
+const timer = new THREE.Timer();
 renderer.setAnimationLoop(() => {
-    const dt = Math.min(clock.getDelta(), 0.1);
-    const t = clock.elapsedTime;
+    timer.update();
+    const dt = Math.min(timer.getDelta(), 0.1);
+    const t = timer.getElapsed();
     camera.position.set(Math.sin(t * 0.15) * 4, 3.2, 22 - ((t * 1.5) % 30));
     camera.lookAt(Math.sin(t * 0.15 + 0.5) * 2, 2.5, -20);
 

@@ -197,12 +197,13 @@ function updateHud(): void {
 
 //* Loop — the node graph renders the reduced-res scene + effects and runs FSR3
 //* internally; we just orbit and render the post graph.
-const clock = new THREE.Clock();
+const timer = new THREE.Timer();
 renderer.setAnimationLoop(() => {
     // Gentle front-facing orbit so the camera stays *inside* the room (a full
     // 360° would swing it behind the walls into darkness) — and the slow motion
     // keeps the temporal history working.
-    const t = clock.getElapsedTime();
+    timer.update();
+    const t = timer.getElapsed();
     camera.position.set(Math.sin(t * 0.15) * 7, 4, 9 + Math.cos(t * 0.15) * 1.5);
     camera.lookAt(0, 3, -5);
 

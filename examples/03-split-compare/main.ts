@@ -112,9 +112,10 @@ window.addEventListener('resize', () => {
 });
 
 //* Loop — draw both offscreen, then composite to the canvas.
-const clock = new THREE.Clock();
+const timer = new THREE.Timer();
 renderer.setAnimationLoop(() => {
-    const dt = Math.min(clock.getDelta(), 0.1);
+    timer.update();
+    const dt = Math.min(timer.getDelta(), 0.1);
     controls.update();
 
     // Native first (no jitter), then FSR (jitters the camera internally).

@@ -209,10 +209,11 @@ window.addEventListener('resize', () => {
 });
 
 //* Loop.
-const clock = new THREE.Clock();
+const timer = new THREE.Timer();
 renderer.setAnimationLoop(() => {
-    const dt = Math.min(clock.getDelta(), 0.1);
-    const t = clock.elapsedTime;
+    timer.update();
+    const dt = Math.min(timer.getDelta(), 0.1);
+    const t = timer.getElapsed();
     controls.update();
 
     glass.forEach((q, i) => {

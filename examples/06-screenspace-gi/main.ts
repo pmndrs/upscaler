@@ -217,9 +217,10 @@ function isBacked(tex: THREE.Texture | null | undefined): boolean {
 }
 
 //* Loop.
-const clock = new THREE.Clock();
+const timer = new THREE.Timer();
 renderer.setAnimationLoop(() => {
-    const dt = Math.min(clock.getDelta(), 0.1);
+    timer.update();
+    const dt = Math.min(timer.getDelta(), 0.1);
     controls.update();
     if (!colorRT || !scenePass) return;
     upscaler.settings.rcasDenoise = state.rcasDenoise;

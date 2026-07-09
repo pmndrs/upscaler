@@ -51,9 +51,10 @@ window.addEventListener('resize', () => {
     camera.updateProjectionMatrix();
 });
 
-const clock = new THREE.Clock();
+const timer = new THREE.Timer();
 renderer.setAnimationLoop(() => {
-    const t = clock.getElapsedTime();
+    timer.update();
+    const t = timer.getElapsed();
     knot.rotation.y = t * 0.5;
     knot.rotation.x = t * 0.35;
     camera.position.set(Math.cos(t * 0.2) * 10, 4.5, Math.sin(t * 0.2) * 10);

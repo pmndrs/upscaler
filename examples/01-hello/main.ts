@@ -59,10 +59,11 @@ window.addEventListener('resize', () => {
 });
 
 //* Loop — orbit the camera slowly so the temporal history keeps working.
-const clock = new THREE.Clock();
+const timer = new THREE.Timer();
 renderer.setAnimationLoop(() => {
-    const dt = Math.min(clock.getDelta(), 0.1);
-    const t = clock.elapsedTime;
+    timer.update();
+    const dt = Math.min(timer.getDelta(), 0.1);
+    const t = timer.getElapsed();
 
     knot.rotation.y = t * 0.5;
     knot.rotation.x = t * 0.35;

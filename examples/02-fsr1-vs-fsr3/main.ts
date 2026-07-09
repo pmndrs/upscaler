@@ -123,13 +123,14 @@ function updateHud(fps: number): void {
 }
 
 //* Loop.
-const clock = new THREE.Clock();
+const timer = new THREE.Timer();
 let acc = 0;
 let frames = 0;
 let fps = 0;
 renderer.setAnimationLoop(() => {
-    const dt = Math.min(clock.getDelta(), 0.1);
-    const t = clock.elapsedTime;
+    timer.update();
+    const dt = Math.min(timer.getDelta(), 0.1);
+    const t = timer.getElapsed();
     acc += dt;
     frames++;
     if (acc >= 0.5) {
