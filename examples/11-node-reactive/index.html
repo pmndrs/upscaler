@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>11 · upscaler — reactive mask on the composable node</title>
+        <style>
+            html,
+            body {
+                margin: 0;
+                height: 100%;
+                overflow: hidden;
+                background: #0b0d10;
+            }
+            canvas {
+                display: block;
+            }
+            #hud {
+                position: fixed;
+                left: 12px;
+                top: 12px;
+                padding: 8px 11px;
+                background: rgba(8, 10, 14, 0.8);
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                border-radius: 8px;
+                color: #cfd8e3;
+                font: 11px/1.5 ui-monospace, Menlo, monospace;
+                white-space: pre;
+                pointer-events: none;
+            }
+            #hud b {
+                color: #7dd3fc;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="hud"></div>
+        <script type="module" src="./main.ts"></script>
+    </body>
+</html>

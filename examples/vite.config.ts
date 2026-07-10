@@ -29,6 +29,7 @@ export default defineConfig({
                 compose: resolve(root, '08-tsl-compose/index.html'),
                 kitchensink: resolve(root, '09-kitchen-sink/index.html'),
                 ssgidenoise: resolve(root, '10-ssgi-denoise/index.html'),
+                nodereactive: resolve(root, '11-node-reactive/index.html'),
             },
         },
     },
