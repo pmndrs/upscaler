@@ -1,27 +1,33 @@
 name: Publish to npm
 
-# Publishes @pmndrs/upscaler on push to main — but ONLY when package.json's
-# version is one npm doesn't already have. So day-to-day commits are a no-op;
-# to cut a release, bump the version (npm version patch/minor/major) and merge.
-# `npm publish` runs the package's own prepublishOnly gate (lint + typecheck +
-# test + build), so a broken tree can't ship.
+# Publishes @pmndrs/upscaler on push to main. Two paths:
 #
-# Auth is npm Trusted Publishing (OIDC) — NO token/secret. GitHub Actions
-# authenticates to npm over OpenID Connect. One-time setup on npm:
-#   1. Publish 0.1.0 once locally (`npm publish`) so the package exists.
-#   2. npmjs.com → the package → Settings → Trusted Publisher → GitHub Actions:
-#      organization "pmndrs", repository "upscaler", workflow "publish.yml".
-# After that this workflow publishes tokenless, with provenance, on every bump.
+#   A. Manual / prerelease — if package.json already names a version npm doesn't
+#      have (you ran `npm version …` yourself), publish that as-is. Prereleases
+#      (0.2.0-beta.1) route to their own dist-tag so they never touch `latest`.
+#
+#   B. Auto-bump — otherwise, derive the next version from Conventional Commit
+#      messages since the last tag (feat→minor, fix/perf→patch, breaking→major
+#      capped to minor while 0.x; docs/chore/ci/etc → no release), then bump,
+#      publish, and push the release commit + tag back with [skip ci].
+#
+# So: just push. feat/fix commits ship a release; everything else is a no-op.
+# `npm publish` runs the package's prepublishOnly gate (lint/typecheck/test/
+# build) first, so a broken tree can't ship.
+#
+# Auth is npm Trusted Publishing (OIDC) — no token/secret; provenance is
+# attached automatically. One-time npm setup: publish once so the package
+# exists, then register the trusted publisher (org pmndrs, repo upscaler,
+# workflow publish.yml).
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
-# id-token: write is what lets OIDC trusted publishing (and provenance) work.
 permissions:
-  contents: read
-  id-token: write
+  contents: write # push the auto-bump release commit + tag
+  id-token: write # OIDC trusted publishing + provenance
 
 concurrency:
   group: npm-publish
@@ -32,6 +38,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history + tags, for the version computation
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -41,26 +49,20 @@ jobs:
       - run: npm install -g npm@latest
       - run: npm ci
 
-      - name: Is this version already on npm?
+      - name: Is package.json's version already on npm?
         id: check
         run: |
           NAME=$(node -p "require('./package.json').name")
           VERSION=$(node -p "require('./package.json').version")
           if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
-            echo "Already published: $NAME@$VERSION — skipping."
-            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "on_npm=true" >> "$GITHUB_OUTPUT"
           else
-            echo "New version: $NAME@$VERSION — will publish."
-            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "on_npm=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # No NODE_AUTH_TOKEN: OIDC trusted publishing handles auth + provenance.
-      # prepublishOnly (lint/typecheck/test/build) runs automatically here.
-      # dist-tag: stable → latest; a prerelease (0.2.0-beta.1) → its preid
-      # (beta/next/rc), so previews are `@pmndrs/upscaler@next` and never
-      # become the default install. Use a preid: `npm version prerelease --preid next`.
-      - name: Publish
-        if: steps.check.outputs.publish == 'true'
+      # --- Path A: manual / prerelease version already set ---------------------
+      - name: Publish (manual version)
+        if: steps.check.outputs.on_npm == 'false'
         run: |
           VERSION=$(node -p "require('./package.json').version")
           if [[ "$VERSION" == *-* ]]; then
@@ -71,3 +73,29 @@ jobs:
           fi
           echo "Publishing $VERSION under dist-tag '$TAG'"
           npm publish --access public --tag "$TAG"
+
+      # --- Path B: auto-bump from Conventional Commits -------------------------
+      - name: Compute next version
+        if: steps.check.outputs.on_npm == 'true'
+        id: next
+        run: echo "version=$(node scripts/release-version.mjs)" >> "$GITHUB_OUTPUT"
+
+      - name: Publish (auto-bump)
+        if: steps.check.outputs.on_npm == 'true' && steps.next.outputs.version != 'none'
+        run: |
+          NEXT="${{ steps.next.outputs.version }}"
+          NAME=$(node -p "require('./package.json').name")
+          # Guard: if a prior run published this but failed to push its tag, just
+          # (re)create + push the tag instead of a doomed republish.
+          if npm view "$NAME@$NEXT" version >/dev/null 2>&1; then
+            echo "$NAME@$NEXT already on npm — tagging only."
+            git tag "v$NEXT" || true
+            git push origin "v$NEXT" || true
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          echo "Auto-releasing v$NEXT"
+          npm version "$NEXT" -m "release: v%s [skip ci]"
+          npm publish --access public
+          git push origin HEAD:main --follow-tags

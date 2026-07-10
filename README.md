@@ -186,21 +186,30 @@ The bench (in [`bench/`](./bench/README.md)) renders an aliasing-hostile scene a
 
 ## Releasing
 
-Publishing is automated: pushing a **new** `package.json` version to `main` publishes it to npm (via GitHub Actions with OIDC **Trusted Publishing** — no tokens — and provenance). Ordinary commits are a no-op; the workflow only publishes when the version isn't already on the registry, after the full lint/typecheck/test/build gate.
+Publishing is automated — **just push to `main`**. A GitHub Action reads your [Conventional Commit](https://www.conventionalcommits.org/) messages since the last release and, if any warrant one, bumps the version, publishes to npm, and pushes the release commit + tag back. Auth is OIDC **Trusted Publishing** (no tokens, provenance attached); `npm publish` runs the full lint/typecheck/test/build gate first.
+
+| Commit type on `main`                     | Bump              | Example         |
+| ----------------------------------------- | ----------------- | --------------- |
+| `feat: …`                                 | minor             | 0.1.0 → 0.2.0   |
+| `fix: …` / `perf: …`                       | patch             | 0.1.0 → 0.1.1   |
+| `feat!: …` / `BREAKING CHANGE:`            | major\*           | 0.1.0 → 0.2.0\* |
+| `docs:` / `chore:` / `ci:` / `refactor:` …| _no release_      | —               |
+
+\* While in `0.x`, a breaking change bumps **minor** (not `1.0.0`) so a stray break can't cut a major. Edit [`scripts/release-version.mjs`](./scripts/release-version.mjs) to change the policy.
+
+**Manual / prerelease override.** Set an explicit version yourself and the Action publishes exactly that instead of auto-bumping — prereleases route to their own dist-tag so they never overwrite `latest`:
 
 ```bash
-npm version patch                     # 0.1.0 → 0.1.1 (commits + tags)
-git push origin main --follow-tags    # → Action publishes to the `latest` tag
+npm version prerelease --preid next   # 0.2.0-next.0
+git push origin main --follow-tags    # → publishes to the `next` tag
 ```
 
-Prereleases route to their own dist-tag automatically, so previews never overwrite the default install:
-
-| Command                                   | Version         | Publishes to | Install                        |
-| ----------------------------------------- | --------------- | ------------ | ------------------------------ |
-| `npm version patch` / `minor` / `major`   | `0.2.0`         | `latest`     | `npm i @pmndrs/upscaler`       |
-| `npm version prerelease --preid next`     | `0.2.0-next.0`  | `next`       | `npm i @pmndrs/upscaler@next`  |
-| `npm version prerelease --preid beta`     | `0.2.0-beta.0`  | `beta`       | `npm i @pmndrs/upscaler@beta`  |
-| `npm version prerelease --preid rc`       | `1.0.0-rc.0`    | `rc`         | `npm i @pmndrs/upscaler@rc`    |
+| You set                       | Publishes to | Install                        |
+| ----------------------------- | ------------ | ------------------------------ |
+| `0.2.0` (stable)              | `latest`     | `npm i @pmndrs/upscaler`       |
+| `0.2.0-next.0`                | `next`       | `npm i @pmndrs/upscaler@next`  |
+| `0.2.0-beta.0`                | `beta`       | `npm i @pmndrs/upscaler@beta`  |
+| `1.0.0-rc.0`                  | `rc`         | `npm i @pmndrs/upscaler@rc`    |
 
 ## References
 
