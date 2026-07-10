@@ -46,6 +46,26 @@ export interface UpscalerNodeOptions {
      * the better fit (see `examples/06-screenspace-gi`).
      */
     jitter?: boolean;
+    /**
+     * Optional reduced-res **reactive mask** texture node (red channel in
+     * `[0, 1]`): flagged pixels favour the current frame over history, for
+     * additive particles / transparent surfaces that have no reliable motion
+     * and would otherwise ghost. Like the other inputs it's registered as a
+     * graph dependency, so hand it a node chain (e.g. a coverage pass) and
+     * three renders it in-pipeline. Mirrors {@link DispatchInputs.reactive} on
+     * the raw {@link Upscaler}. Leave unset for no reactive masking (zero cost).
+     */
+    reactive?: TextureNodeLike;
+    /**
+     * Optional reduced-res **opaque-only color** texture node. When set (and no
+     * explicit {@link reactive} mask is given), the reactive mask is
+     * auto-generated from the difference between this and the composited
+     * `color` — FSR2's `GenerateReactiveMask`. Render your scene with
+     * transparents hidden into this node's chain; it must be jittered like the
+     * `color` input (it renders in-pipeline, so it is). Mirrors
+     * {@link DispatchInputs.reactiveOpaqueColor}.
+     */
+    reactiveOpaqueColor?: TextureNodeLike;
 }
 
 /**
@@ -91,6 +111,11 @@ export class UpscalerNode extends TempNode {
     private readonly _color: TextureNodeLike;
     private readonly _depth: TextureNodeLike;
     private readonly _velocity: TextureNodeLike;
+    // Optional reactive inputs — either an explicit mask, or an opaque-color
+    // buffer we auto-diff into one (mutually exclusive; explicit wins). Both
+    // render in-graph like the other inputs (see setup).
+    private readonly _reactive: TextureNodeLike;
+    private readonly _reactiveOpaqueColor: TextureNodeLike;
     private readonly _camera: CameraLike;
     private readonly _options: UpscalerNodeOptions;
     // Temporal nodes default to jittered: a composable node's inputs render
@@ -123,6 +148,8 @@ export class UpscalerNode extends TempNode {
         this._color = colorNode;
         this._depth = depthNode;
         this._velocity = velocityNode;
+        this._reactive = options.reactive ?? null;
+        this._reactiveOpaqueColor = options.reactiveOpaqueColor ?? null;
         this._camera = camera;
         this._options = options;
         this._jitter = options.jitter ?? true;
@@ -160,6 +187,11 @@ export class UpscalerNode extends TempNode {
         props.colorNode = this._color;
         if (this._depth) props.depthNode = this._depth;
         if (this._velocity) props.velocityNode = this._velocity;
+        // Reactive inputs are graph deps too, so they render in-pipeline
+        // (jittered) alongside color — otherwise the auto-diff opaque buffer
+        // would be un-jittered and misalign against the composited color.
+        if (this._reactive) props.reactiveNode = this._reactive;
+        if (this._reactiveOpaqueColor) props.reactiveOpaqueColorNode = this._reactiveOpaqueColor;
 
         // Apply the sub-pixel jitter before the input passes render — same hook
         // three's TAAUNode uses. Only installed when jittering: the hook is
@@ -264,11 +296,19 @@ export class UpscalerNode extends TempNode {
         const dt = this._lastTime ? Math.min((now - this._lastTime) / 1000, 0.1) : 1 / 60;
         this._lastTime = now;
 
+        // Optional reactive inputs (temporal path only; ignored elsewhere).
+        const reactive = this._reactive ? this._texture(this._reactive) : null;
+        const reactiveOpaqueColor = this._reactiveOpaqueColor
+            ? this._texture(this._reactiveOpaqueColor)
+            : null;
+
         this._upscaler.dispatch(
             {
                 color,
                 depth: depth ?? undefined,
                 velocity: velocityTex ?? undefined,
+                reactive: reactive ?? undefined,
+                reactiveOpaqueColor: reactiveOpaqueColor ?? undefined,
                 deltaTime: dt,
             },
             this._camera as never,
@@ -299,8 +339,18 @@ export const upscale = (
 ): ReturnType<typeof nodeObject> =>
     // Materialize the (possibly composited) color into a texture — same as
     // FSR1/TAAU do with their beauty input. depth/velocity are already pass
-    // texture nodes, so they pass through untouched (matching TAAUNode).
-    nodeObject(new UpscalerNode(convertToTexture(color), depth, velocityNode, camera, options));
+    // texture nodes, so they pass through untouched (matching TAAUNode). The
+    // reactive inputs get the same convertToTexture treatment as color (a
+    // passthrough for pass/texture nodes; the caller controls their resolution).
+    nodeObject(
+        new UpscalerNode(convertToTexture(color), depth, velocityNode, camera, {
+            ...options,
+            reactive: options.reactive ? convertToTexture(options.reactive) : undefined,
+            reactiveOpaqueColor: options.reactiveOpaqueColor
+                ? convertToTexture(options.reactiveOpaqueColor)
+                : undefined,
+        }),
+    );
 
 // Stand-in camera for the spatial path. EASU is purely spatial — it reprojects
 // nothing — but `Upscaler._writeConstants` still stages `camera.near/far`
