@@ -8,6 +8,11 @@
         "type": "git",
         "url": "git+https://github.com/pmndrs/upscaler.git"
     },
+    "homepage": "https://github.com/pmndrs/upscaler#readme",
+    "bugs": {
+        "url": "https://github.com/pmndrs/upscaler/issues"
+    },
+    "sideEffects": false,
     "keywords": [
         "three",
         "threejs",
