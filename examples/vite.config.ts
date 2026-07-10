@@ -7,6 +7,11 @@ const root = __dirname;
 
 export default defineConfig({
     root,
+    // Deploy base. GitHub Pages serves a project site under /<repo>/, so the CI
+    // build sets PAGES_BASE=/upscaler/; local dev/build default to '/'. A custom
+    // domain later just drops PAGES_BASE. Gallery links are relative so they
+    // resolve correctly under either base.
+    base: process.env.PAGES_BASE ?? '/',
     resolve: {
         alias: {
             '@pmndrs/upscaler': resolve(root, '../src/index.ts'),

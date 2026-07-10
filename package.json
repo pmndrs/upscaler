@@ -43,6 +43,7 @@
         "dev": "vite --config bench/vite.config.ts",
         "bench": "vite --config bench/vite.config.ts",
         "examples": "vite --config examples/vite.config.ts",
+        "examples:build": "vite build --config examples/vite.config.ts",
         "build": "vite build && tsc --declaration --emitDeclarationOnly -p tsconfig.build.json",
         "lint": "eslint .",
         "typecheck": "tsc --noEmit",
