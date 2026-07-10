@@ -172,11 +172,14 @@ function configure(): void {
         const refl = sw(denoise(ssrTex as never, depth, normal, camera));
         composite = vec4(beauty.rgb.add(refl.rgb), beauty.a);
     } else {
-        const giTex = texNode(ssgi(beauty, depth, normal, camera));
-        const gi = sw(denoise(giTex as never, depth, normal, camera));
+        // three r185's SSGINode splits its output into separate AO + GI nodes
+        // (getAONode/getGINode) — the old single-texture getTextureNode() is gone.
+        const giPass = ssgi(beauty, depth, normal, camera);
+        const aoTex = sw(giPass.getAONode());
+        const gi = sw(denoise(giPass.getGINode() as never, depth, normal, camera));
         const diffuse = scenePass.getTextureNode('diffuse');
         // color * AO + albedo * GI  (indirect diffuse recombination)
-        composite = vec4(beauty.rgb.mul(gi.a).add(diffuse.rgb.mul(gi.rgb)), beauty.a);
+        composite = vec4(beauty.rgb.mul(aoTex.r).add(diffuse.rgb.mul(gi.rgb)), beauty.a);
     }
 
     compositeMat.colorNode = composite;

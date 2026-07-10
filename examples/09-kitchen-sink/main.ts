@@ -129,10 +129,13 @@ function configure(): void {
     //* Composite the enabled effects onto the beauty, all at reduced res.
     let rgb = beauty.rgb;
     if (state.ssgi) {
-        const giTex = texNode(ssgi(beauty, depth, normal, camera));
-        const gi = sw(denoise(giTex as never, depth, normal, camera));
-        // beauty * AO (gi.a)  +  albedo * indirect-bounce (gi.rgb)
-        rgb = beauty.rgb.mul(gi.a).add(diffuseTex.rgb.mul(gi.rgb));
+        // three r185's SSGINode splits its output into separate AO + GI nodes
+        // (getAONode/getGINode) — the old single-texture getTextureNode() is gone.
+        const giPass = ssgi(beauty, depth, normal, camera);
+        const ao = sw(giPass.getAONode());
+        const gi = sw(denoise(giPass.getGINode() as never, depth, normal, camera));
+        // beauty * AO  +  albedo * indirect-bounce
+        rgb = beauty.rgb.mul(ao.r).add(diffuseTex.rgb.mul(gi.rgb));
     }
     if (state.ssr) {
         // Unpack material scalars (current-pixel reads inside SSR).
