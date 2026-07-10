@@ -5,13 +5,20 @@ name: Publish to npm
 # to cut a release, bump the version (npm version patch/minor/major) and merge.
 # `npm publish` runs the package's own prepublishOnly gate (lint + typecheck +
 # test + build), so a broken tree can't ship.
+#
+# Auth is npm Trusted Publishing (OIDC) — NO token/secret. GitHub Actions
+# authenticates to npm over OpenID Connect. One-time setup on npm:
+#   1. Publish 0.1.0 once locally (`npm publish`) so the package exists.
+#   2. npmjs.com → the package → Settings → Trusted Publisher → GitHub Actions:
+#      organization "pmndrs", repository "upscaler", workflow "publish.yml".
+# After that this workflow publishes tokenless, with provenance, on every bump.
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
-# id-token: write lets npm attach a build-provenance attestation to the release.
+# id-token: write is what lets OIDC trusted publishing (and provenance) work.
 permissions:
   contents: read
   id-token: write
@@ -23,10 +30,6 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    # Evaluate the secret once so the publish step can skip gracefully (green
-    # run) until NPM_TOKEN is configured, instead of failing on a 401.
-    env:
-      HAS_NPM_TOKEN: ${{ secrets.NPM_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -34,6 +37,8 @@ jobs:
           node-version: 22
           cache: npm
           registry-url: https://registry.npmjs.org
+      # Trusted Publishing needs npm >= 11.5.1; Node 22 bundles npm 10.x.
+      - run: npm install -g npm@latest
       - run: npm ci
 
       - name: Is this version already on npm?
@@ -49,13 +54,8 @@ jobs:
             echo "publish=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Skipping (no NPM_TOKEN yet)
-        if: steps.check.outputs.publish == 'true' && env.HAS_NPM_TOKEN != 'true'
-        run: echo "::notice::New version detected but NPM_TOKEN secret is not set — skipping publish. Add the secret to enable automated releases."
-
+      # No NODE_AUTH_TOKEN: OIDC trusted publishing handles auth + provenance.
       # prepublishOnly (lint/typecheck/test/build) runs automatically here.
       - name: Publish
-        if: steps.check.outputs.publish == 'true' && env.HAS_NPM_TOKEN == 'true'
-        run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        if: steps.check.outputs.publish == 'true'
+        run: npm publish --access public
