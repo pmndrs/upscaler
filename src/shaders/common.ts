@@ -35,7 +35,7 @@ struct FsrConstants {
     deltaTime       : f32,    // offset 76 — seconds
     flags           : u32,    // offset 80 — FLAG_* bits
     frameIndex      : u32,    // offset 84
-    debugMode       : u32,    // offset 88 — FSRDebugView
+    debugMode       : u32,    // offset 88 — DebugView
     _pad            : u32,    // offset 92
 }
 @group(0) @binding(0) var<uniform> C : FsrConstants;

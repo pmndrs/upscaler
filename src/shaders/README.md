@@ -30,7 +30,7 @@ a thin feature as a luminance outlier vs its neighborhood (`peakiness` × `contr
 a lock while the feature is present, and breaks it on disocclusion or a shading change.
 A locked pixel widens its rectification AABB (`LOCK_CLAMP_RELAX`) and leans on history in
 the blend (`LOCK_HISTORY_BOOST`). Toggle via `settings.lockThinFeatures` (the `FLAG_LOCKS`
-bit); inspect via `FSRDebugView.Locks`. The tuning constants at the top of `accumulate.ts`
+bit); inspect via `DebugView.Locks`. The tuning constants at the top of `accumulate.ts`
 are sensible defaults, not final — tighten if you see thin features ghost, loosen if they
 still dim.
 
@@ -42,7 +42,7 @@ invertible tonemap; the output pass (`rcas.ts` / `blit.ts`) divides it back out 
 display transform — so a very bright or very dark HDR scene accumulates in the same working
 range (steadier variance clip + firefly guard) **without changing final brightness**. Toggle
 via `settings.autoExposure` (the `FLAG_AUTO_EXPOSURE` bit); with it off, the fixed
-`settings.exposure` is published through the same path. Inspect via `FSRDebugView.Exposure`
+`settings.exposure` is published through the same path. Inspect via `DebugView.Exposure`
 (the exposed scene luminance should read near mid-grey everywhere).
 
 **Shading-change detection** (Phase 3, done) tells a genuine shading change (a light
@@ -55,7 +55,7 @@ aging (aliasing on a thin feature is not a shading change — and by constructio
 background-dominated neighborhood mean always disagrees with a thin feature's history, so
 the detector must not touch locked pixels or drive lock-breaking; locks break on their own
 self-referential luma term). Toggle via `settings.detectShadingChanges` (`FLAG_SHADING_CHANGE`); inspect via
-`FSRDebugView.ShadingChange`. **Simplification vs FSR2:** the comparison uses the 3×3
+`DebugView.ShadingChange`. **Simplification vs FSR2:** the comparison uses the 3×3
 neighborhood mean rather than a dedicated coarse luminance-pyramid mip — cheaper, and
 jitter-robust enough in practice, but a true SPD mip would be steadier on high-frequency
 content (a Phase-5 refinement). Constants (`SHADING_LO/HI/AGE` at the top of
@@ -72,12 +72,12 @@ Author the mask however you like — render your transparents' coverage, or let 
 generate it: pass `dispatch({ reactiveOpaqueColor })` (an opaque-only render at render res)
 and `generateReactive.ts` diffs it against the final `color` (FSR2's `GenerateReactiveMask`)
 to produce the mask automatically. `examples/05-transparency` demonstrates both. Inspect via
-`FSRDebugView.Reactivity`. (Auto-gen note: render the opaque pass with the same jitter as the
+`DebugView.Reactivity`. (Auto-gen note: render the opaque pass with the same jitter as the
 final frame, or high-contrast edges leave faint reactivity from sub-pixel misalignment.)
 
 ## Debugging
 
-Set `settings.debugView` (`FSRDebugView`) to render pipeline internals instead of the final image: motion vectors, disocclusion mask, linearized depth, accumulation age, locks, auto-exposed luminance, or the shading-change factor. When integrating a new scene, check in this order:
+Set `settings.debugView` (`DebugView`) to render pipeline internals instead of the final image: motion vectors, disocclusion mask, linearized depth, accumulation age, locks, auto-exposed luminance, or the shading-change factor. When integrating a new scene, check in this order:
 
 1. **Motion vectors** — static scene + moving camera should produce smooth gradients, no per-object noise (if objects flash, their previous model matrices aren't tracked — did you bypass the `velocity` node?).
 2. **Disocclusion** — should outline moving silhouettes, thin and stable. Full-screen flashing means depth linearization flags are wrong (reversed-depth mismatch).

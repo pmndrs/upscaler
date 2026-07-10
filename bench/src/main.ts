@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-import { FSRDebugView, FSRQualityMode } from 'three-fsr3';
+import { DebugView, QualityMode } from '@pmndrs/upscaler';
 
 import { BenchPipeline } from './BenchPipeline';
 import { createBenchScene } from './BenchScene';
@@ -18,8 +18,8 @@ if (!navigator.gpu) {
 
 //* State
 const state: BenchState = {
-    mode: 'fsr3-temporal',
-    quality: FSRQualityMode.Performance,
+    mode: 'upscale-temporal',
+    quality: QualityMode.Performance,
     sharpness: 0.8,
     rcasDenoise: false,
     maxAccumulation: 24,
@@ -27,7 +27,7 @@ const state: BenchState = {
     autoExposure: true,
     lockThinFeatures: true,
     detectShadingChanges: true,
-    debugView: FSRDebugView.None,
+    debugView: DebugView.None,
     animate: true,
     autoOrbit: true,
 };

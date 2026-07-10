@@ -28,12 +28,12 @@ import { LUMINANCE_PYRAMID_SHADER } from './shaders/luminancePyramid';
 import { RCAS_SHADER } from './shaders/rcas';
 import { RECONSTRUCT_SHADER } from './shaders/reconstruct';
 import {
-    FSRDebugView,
-    FSRQualityMode,
-    type FSRConfig,
-    type FSRDispatchInputs,
-    type FSRRuntimeSettings,
-    type FSRUpscalePath,
+    DebugView,
+    QualityMode,
+    type UpscalerConfig,
+    type DispatchInputs,
+    type RuntimeSettings,
+    type UpscalePath,
 } from './types';
 
 type JitterableCamera = PerspectiveCamera | OrthographicCamera;
@@ -59,11 +59,11 @@ type JitterableCamera = PerspectiveCamera | OrthographicCamera;
  * Feed `upscaler.unjitteredProjectionMatrix` to the scene's `velocity` node
  * via `setProjectionMatrix` so motion vectors stay jitter-free.
  */
-export class FSR3Upscaler {
+export class Upscaler {
     //* Public State
 
     /** Runtime tuning knobs — mutate freely between frames. */
-    readonly settings: FSRRuntimeSettings = {
+    readonly settings: RuntimeSettings = {
         sharpness: 0.8,
         rcasDenoise: false,
         maxAccumulation: 24,
@@ -71,7 +71,7 @@ export class FSR3Upscaler {
         autoExposure: true,
         lockThinFeatures: true,
         detectShadingChanges: true,
-        debugView: FSRDebugView.None,
+        debugView: DebugView.None,
     };
 
     /**
@@ -98,7 +98,7 @@ export class FSR3Upscaler {
     private _generateReactivePass!: ComputePass;
     private _debugPass!: ComputePass;
 
-    private _path: FSRUpscalePath = 'temporal';
+    private _path: UpscalePath = 'temporal';
     private _displayWidth = 0;
     private _displayHeight = 0;
     private _renderWidth = 0;
@@ -149,7 +149,7 @@ export class FSR3Upscaler {
         this._constants = new ConstantsBuffer(device);
         this._timer = new GpuTimer(device);
         this._linearSampler = device.createSampler({
-            label: 'fsr3-linear-clamp',
+            label: 'upscale-linear-clamp',
             magFilter: 'linear',
             minFilter: 'linear',
             addressModeU: 'clamp-to-edge',
@@ -174,7 +174,7 @@ export class FSR3Upscaler {
      * working texture set — call on startup, resize, or mode change.
      * @param config - Display size, quality mode/ratio, and pipeline path
      */
-    configure(config: FSRConfig): void {
+    configure(config: UpscalerConfig): void {
         if (!this._initialized) this.init();
 
         this._path = config.path ?? 'temporal';
@@ -192,7 +192,7 @@ export class FSR3Upscaler {
         } else {
             this._ratio =
                 config.customUpscaleRatio ??
-                getQualityModeRatio(config.qualityMode ?? FSRQualityMode.Quality);
+                getQualityModeRatio(config.qualityMode ?? QualityMode.Quality);
             const render = getRenderResolution(this._displayWidth, this._displayHeight, this._ratio);
             this._renderWidth = render.width;
             this._renderHeight = render.height;
@@ -240,7 +240,7 @@ export class FSR3Upscaler {
      */
     get outputTexture(): Texture {
         if (!this._output) {
-            throw new Error('three-fsr3: configure() must run before outputTexture is used.');
+            throw new Error('@pmndrs/upscaler: configure() must run before outputTexture is used.');
         }
         return this._output;
     }
@@ -300,9 +300,9 @@ export class FSR3Upscaler {
      * the scene has been rendered into the input textures.
      * @param inputs - Scene color (+ depth/velocity for the temporal path) and camera info
      */
-    dispatch(inputs: FSRDispatchInputs, camera: JitterableCamera): void {
+    dispatch(inputs: DispatchInputs, camera: JitterableCamera): void {
         if (!this._output || !this._outputGPU) {
-            throw new Error('three-fsr3: configure() must run before dispatch().');
+            throw new Error('@pmndrs/upscaler: configure() must run before dispatch().');
         }
 
         this._writeConstants(inputs, camera);
@@ -310,7 +310,7 @@ export class FSR3Upscaler {
 
         const colorGPU = getGPUTexture(this._renderer, inputs.color);
         this._checkMsaa(colorGPU, 'color');
-        const encoder = this._device.createCommandEncoder({ label: 'fsr3' });
+        const encoder = this._device.createCommandEncoder({ label: 'upscale' });
         this._timer.beginFrame();
 
         switch (this._path) {
@@ -360,7 +360,7 @@ export class FSR3Upscaler {
             this._outputView(),
         ]);
         const pass = encoder.beginComputePass({
-            label: 'fsr3-blit',
+            label: 'upscale-blit',
             timestampWrites: this._timer.passDescriptor('blit'),
         });
         this._blitPass.dispatch(pass, bindGroup, this._displayWidth, this._displayHeight);
@@ -375,7 +375,7 @@ export class FSR3Upscaler {
             this._easuOutput!.createView(),
         ]);
         const easuPass = encoder.beginComputePass({
-            label: 'fsr3-easu',
+            label: 'upscale-easu',
             timestampWrites: this._timer.passDescriptor('easu'),
         });
         this._easuPass.dispatch(easuPass, easuBindGroup, this._displayWidth, this._displayHeight);
@@ -393,10 +393,10 @@ export class FSR3Upscaler {
     private _encodeTemporal(
         encoder: GPUCommandEncoder,
         colorGPU: GPUTexture,
-        inputs: FSRDispatchInputs,
+        inputs: DispatchInputs,
     ): void {
         if (!inputs.depth || !inputs.velocity) {
-            throw new Error('three-fsr3: the temporal path requires depth and velocity inputs.');
+            throw new Error('@pmndrs/upscaler: the temporal path requires depth and velocity inputs.');
         }
 
         const depthGPU = getGPUTexture(this._renderer, inputs.depth);
@@ -431,7 +431,7 @@ export class FSR3Upscaler {
                 this._reactiveGenerated!.createView(),
             ]);
             const genPass = encoder.beginComputePass({
-                label: 'fsr3-gen-reactive',
+                label: 'upscale-gen-reactive',
                 timestampWrites: this._timer.passDescriptor('genReactive'),
             });
             this._generateReactivePass.dispatch(
@@ -456,7 +456,7 @@ export class FSR3Upscaler {
             exposureCur.createView(),
         ]);
         const exposurePass = encoder.beginComputePass({
-            label: 'fsr3-exposure',
+            label: 'upscale-exposure',
             timestampWrites: this._timer.passDescriptor('exposure'),
         });
         // One workgroup performs the whole reduction (see luminancePyramid.ts).
@@ -475,7 +475,7 @@ export class FSR3Upscaler {
             this._masks!.createView(),
         ]);
         const reconstructPass = encoder.beginComputePass({
-            label: 'fsr3-reconstruct',
+            label: 'upscale-reconstruct',
             timestampWrites: this._timer.passDescriptor('reconstruct'),
         });
         this._reconstructPass.dispatch(
@@ -501,7 +501,7 @@ export class FSR3Upscaler {
             reactiveView,
         ]);
         const accumulatePass = encoder.beginComputePass({
-            label: 'fsr3-accumulate',
+            label: 'upscale-accumulate',
             timestampWrites: this._timer.passDescriptor('accumulate'),
         });
         this._accumulatePass.dispatch(
@@ -513,7 +513,7 @@ export class FSR3Upscaler {
         accumulatePass.end();
 
         //* Output — debug view, RCAS sharpen, or plain resolve
-        if (this.settings.debugView !== FSRDebugView.None) {
+        if (this.settings.debugView !== DebugView.None) {
             const debugBindGroup = this._debugPass.createBindGroup([
                 { buffer: this._constants.buffer },
                 this._dilatedMotion!.createView(),
@@ -527,7 +527,7 @@ export class FSR3Upscaler {
                 this._outputView(),
             ]);
             const debugPass = encoder.beginComputePass({
-                label: 'fsr3-debug',
+                label: 'upscale-debug',
                 timestampWrites: this._timer.passDescriptor('output'),
             });
             this._debugPass.dispatch(
@@ -556,7 +556,7 @@ export class FSR3Upscaler {
             this._outputView(),
         ]);
         const pass = encoder.beginComputePass({
-            label: 'fsr3-rcas',
+            label: 'upscale-rcas',
             timestampWrites: this._timer.passDescriptor('rcas'),
         });
         this._rcasPass.dispatch(pass, bindGroup, this._displayWidth, this._displayHeight);
@@ -573,7 +573,7 @@ export class FSR3Upscaler {
         if (this._warnedMsaa || tex.sampleCount <= 1) return;
         this._warnedMsaa = true;
         console.warn(
-            `three-fsr3: the ${label} input is multisampled (sampleCount=${tex.sampleCount}). ` +
+            `@pmndrs/upscaler: the ${label} input is multisampled (sampleCount=${tex.sampleCount}). ` +
                 `FSR does its own anti-aliasing — feed it an aliased, single-sample, jittered ` +
                 `render with MSAA disabled. Multisampled inputs are not supported.`,
         );
@@ -596,7 +596,7 @@ export class FSR3Upscaler {
         return flags;
     }
 
-    private _writeConstants(inputs: FSRDispatchInputs, camera: JitterableCamera): void {
+    private _writeConstants(inputs: DispatchInputs, camera: JitterableCamera): void {
         const c = this._constants;
         c.setRenderSize(this._renderWidth, this._renderHeight);
         c.setDisplaySize(this._displayWidth, this._displayHeight);
@@ -646,7 +646,7 @@ export class FSR3Upscaler {
         format: GPUTextureFormat,
     ): GPUTexture {
         return this._device.createTexture({
-            label: `fsr3-${label}`,
+            label: `upscale-${label}`,
             size: { width: w, height: h },
             format,
             usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING,
@@ -664,7 +664,7 @@ export class FSR3Upscaler {
         // like any other texture; initTexture forces GPU-side creation so
         // the storage view exists before the first dispatch.
         this._output = new StorageTexture(dw, dh);
-        this._output.name = 'fsr3-output';
+        this._output.name = 'upscale-output';
         this._output.colorSpace = NoColorSpace;
         // Texture.generateMipmaps defaults to true, which would make three
         // allocate a mip chain — storage views must cover exactly one level.
@@ -682,7 +682,7 @@ export class FSR3Upscaler {
         // Sampled-only (no storage) so a non-storage format is fine; zero-init
         // gives a "nothing reactive" default when the caller passes no mask.
         this._reactiveDummy = this._device.createTexture({
-            label: 'fsr3-reactive-dummy',
+            label: 'upscale-reactive-dummy',
             size: { width: 1, height: 1 },
             format: 'r8unorm',
             usage: GPUTextureUsage.TEXTURE_BINDING,

@@ -1,12 +1,12 @@
 {
-    "name": "three-fsr3",
+    "name": "@pmndrs/upscaler",
     "version": "0.1.0",
     "description": "AMD FidelityFX Super Resolution (FSR1 spatial + FSR2/3-style temporal upscaling) for three.js WebGPURenderer, implemented as raw WGSL compute passes",
     "author": "Dennis Smolek <dennis@smolek.dev>",
     "license": "MIT",
     "repository": {
         "type": "git",
-        "url": "git+https://github.com/DennisSmolek/fsr3.git"
+        "url": "git+https://github.com/pmndrs/upscaler.git"
     },
     "keywords": [
         "three",
@@ -14,7 +14,7 @@
         "webgpu",
         "wgsl",
         "fsr",
-        "fsr3",
+        "upscale",
         "upscaling",
         "temporal",
         "taa",

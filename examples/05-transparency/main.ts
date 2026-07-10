@@ -2,10 +2,10 @@ import * as THREE from 'three/webgpu';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import GUI from 'lil-gui';
 
-import { FSRDebugView, type FSRUpscalePath } from 'three-fsr3';
+import { DebugView, type UpscalePath } from '@pmndrs/upscaler';
 
 import { bootRenderer, displaySize } from '../shared/boot';
-import { FSRPresenter } from '../shared/FSRPresenter';
+import { UpscalePresenter } from '../shared/UpscalePresenter';
 import { addStudioLighting, createGridFloor } from '../shared/props';
 import { addRenderScale } from '../shared/ui';
 
@@ -109,12 +109,12 @@ let opaqueRT: THREE.RenderTarget | null = null;
 //* Presenter + state.
 type MaskSource = 'off' | 'manual' | 'auto';
 const state = {
-    tier: 'temporal' as FSRUpscalePath,
+    tier: 'temporal' as UpscalePath,
     ratio: 2.0,
     maskSource: 'manual' as MaskSource,
-    debug: FSRDebugView.None,
+    debug: DebugView.None,
 };
-const presenter = new FSRPresenter(renderer);
+const presenter = new UpscalePresenter(renderer);
 function configure(): void {
     const { width, height } = displaySize(dpr);
     presenter.configure({
@@ -196,9 +196,9 @@ gui.add(state, 'maskSource', {
     'Auto (opaque diff)': 'auto',
 }).name('reactive mask');
 gui.add(state, 'debug', {
-    Off: FSRDebugView.None,
-    Reactivity: FSRDebugView.Reactivity,
-    'Accumulation age': FSRDebugView.AccumulationAge,
+    Off: DebugView.None,
+    Reactivity: DebugView.Reactivity,
+    'Accumulation age': DebugView.AccumulationAge,
 }).name('debug view');
 
 window.addEventListener('resize', () => {

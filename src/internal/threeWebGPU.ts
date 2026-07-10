@@ -30,7 +30,7 @@ export function getDevice(renderer: WebGPURenderer): GPUDevice {
     const device = backend?.device;
     if (!device) {
         throw new Error(
-            'three-fsr3: renderer has no GPUDevice. ' +
+            '@pmndrs/upscaler: renderer has no GPUDevice. ' +
                 'Await renderer.init() and ensure the WebGPU backend is active (not the WebGL fallback).',
         );
     }
@@ -53,7 +53,7 @@ export function getGPUTexture(renderer: WebGPURenderer, texture: Texture): GPUTe
     const gpuTexture = backend.get(texture)?.texture;
     if (!gpuTexture) {
         throw new Error(
-            `three-fsr3: no GPUTexture behind "${texture.name || texture.uuid}". ` +
+            `@pmndrs/upscaler: no GPUTexture behind "${texture.name || texture.uuid}". ` +
                 'Render to it once or call renderer.initTexture(texture) before dispatching.',
         );
     }

@@ -1,26 +1,26 @@
 import * as THREE from 'three/webgpu';
 import { mrt, output, texture, velocity } from 'three/tsl';
 
-import { FSR3Upscaler } from './FSR3Upscaler';
+import { Upscaler } from './Upscaler';
 import { getQualityModeRatio } from './math/resolution';
-import { FSRQualityMode, type FSRRuntimeSettings, type FSRUpscalePath } from './types';
+import { QualityMode, type RuntimeSettings, type UpscalePath } from './types';
 
-/** Options for {@link FSR3Pass.configure}. */
-export interface FSR3PassConfig {
+/** Options for {@link UpscalePass.configure}. */
+export interface UpscalePassConfig {
     /** Output size in physical pixels. */
     displayWidth: number;
     displayHeight: number;
     /** Which FSR path to run. Defaults to `'temporal'`. */
-    path?: FSRUpscalePath;
+    path?: UpscalePath;
     /** Quality preset (render-resolution ratio). Ignored if `ratio` is set. */
-    quality?: FSRQualityMode;
+    quality?: QualityMode;
     /** Explicit upscale ratio (overrides `quality`). `1` = render at display res. */
     ratio?: number;
 }
 
 /**
  * High-level drop-in driver: turns "a scene + camera" into an upscaled texture,
- * wrapping every non-obvious integration detail {@link FSR3Upscaler} needs.
+ * wrapping every non-obvious integration detail {@link Upscaler} needs.
  *
  * - jitter-free velocity (`velocity.setProjectionMatrix(unjitteredProjectionMatrix)`)
  * - MRT output count matched to the render-target attachment count (a `count: 2`
@@ -31,10 +31,10 @@ export interface FSR3PassConfig {
  * Use {@link renderScene} for the common single-view case, or {@link draw} +
  * {@link outputTexture} when you want to present the result yourself (split
  * views, custom composites, feeding another pass). For fine-grained control,
- * drive {@link FSR3Upscaler} directly instead.
+ * drive {@link Upscaler} directly instead.
  */
-export class FSR3Pass {
-    readonly upscaler: FSR3Upscaler;
+export class UpscalePass {
+    readonly upscaler: Upscaler;
 
     private readonly _renderer: THREE.WebGPURenderer;
     private readonly _mrtFull = mrt({ output, velocity });
@@ -43,7 +43,7 @@ export class FSR3Pass {
     private readonly _quadMaterial: THREE.NodeMaterial;
 
     private _rt: THREE.RenderTarget | null = null;
-    private _path: FSRUpscalePath = 'temporal';
+    private _path: UpscalePath = 'temporal';
     private _reactive: THREE.Texture | null = null;
     private _reactiveOpaque: THREE.Texture | null = null;
 
@@ -58,7 +58,7 @@ export class FSR3Pass {
         options: { shareVelocityMatrix?: boolean } = {},
     ) {
         this._renderer = renderer;
-        this.upscaler = new FSR3Upscaler({ renderer });
+        this.upscaler = new Upscaler({ renderer });
         this.upscaler.init();
 
         // Motion vectors must be jitter-free — hand the velocity node the
@@ -86,9 +86,9 @@ export class FSR3Pass {
     }
 
     /** (Re)builds the pipeline + render target for a size/path/quality. */
-    configure(config: FSR3PassConfig): void {
+    configure(config: UpscalePassConfig): void {
         this._path = config.path ?? 'temporal';
-        const ratio = config.ratio ?? getQualityModeRatio(config.quality ?? FSRQualityMode.Quality);
+        const ratio = config.ratio ?? getQualityModeRatio(config.quality ?? QualityMode.Quality);
 
         this.upscaler.configure({
             displayWidth: config.displayWidth,
@@ -172,7 +172,7 @@ export class FSR3Pass {
     }
 
     /** Applies runtime settings (sharpness / accumulation / exposure / locks / debug). */
-    applySettings(settings: Partial<FSRRuntimeSettings>): void {
+    applySettings(settings: Partial<RuntimeSettings>): void {
         Object.assign(this.upscaler.settings, settings);
     }
 

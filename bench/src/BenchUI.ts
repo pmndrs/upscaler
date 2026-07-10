@@ -1,13 +1,13 @@
 import GUI from 'lil-gui';
 
-import { FSRDebugView, FSRQualityMode } from 'three-fsr3';
+import { DebugView, QualityMode } from '@pmndrs/upscaler';
 
 import type { BenchMode } from './BenchPipeline';
 
 /** UI-owned state; the main loop reads it and reacts to change callbacks. */
 export interface BenchState {
     mode: BenchMode;
-    quality: FSRQualityMode;
+    quality: QualityMode;
     sharpness: number;
     rcasDenoise: boolean;
     maxAccumulation: number;
@@ -15,7 +15,7 @@ export interface BenchState {
     autoExposure: boolean;
     lockThinFeatures: boolean;
     detectShadingChanges: boolean;
-    debugView: FSRDebugView;
+    debugView: DebugView;
     animate: boolean;
     autoOrbit: boolean;
 }
@@ -38,15 +38,15 @@ export function createBenchUI(
         'Native (full res)': 'native',
         'Bilinear upscale': 'bilinear',
         'FSR1 spatial (EASU+RCAS)': 'fsr1-spatial',
-        'FSR3 temporal': 'fsr3-temporal',
+        'FSR3 temporal': 'upscale-temporal',
     }).onChange(onPipelineChange);
 
     gui.add(state, 'quality', {
-        'Native AA (1.0x)': FSRQualityMode.NativeAA,
-        'Quality (1.5x)': FSRQualityMode.Quality,
-        'Balanced (1.7x)': FSRQualityMode.Balanced,
-        'Performance (2.0x)': FSRQualityMode.Performance,
-        'Ultra Performance (3.0x)': FSRQualityMode.UltraPerformance,
+        'Native AA (1.0x)': QualityMode.NativeAA,
+        'Quality (1.5x)': QualityMode.Quality,
+        'Balanced (1.7x)': QualityMode.Balanced,
+        'Performance (2.0x)': QualityMode.Performance,
+        'Ultra Performance (3.0x)': QualityMode.UltraPerformance,
     }).onChange(onPipelineChange);
 
     const tuning = gui.addFolder('Tuning');
@@ -60,14 +60,14 @@ export function createBenchUI(
 
     const debug = gui.addFolder('Debug');
     debug.add(state, 'debugView', {
-        Off: FSRDebugView.None,
-        'Motion vectors': FSRDebugView.MotionVectors,
-        Disocclusion: FSRDebugView.Disocclusion,
-        Depth: FSRDebugView.Depth,
-        'Accumulation age': FSRDebugView.AccumulationAge,
-        Locks: FSRDebugView.Locks,
-        Exposure: FSRDebugView.Exposure,
-        'Shading change': FSRDebugView.ShadingChange,
+        Off: DebugView.None,
+        'Motion vectors': DebugView.MotionVectors,
+        Disocclusion: DebugView.Disocclusion,
+        Depth: DebugView.Depth,
+        'Accumulation age': DebugView.AccumulationAge,
+        Locks: DebugView.Locks,
+        Exposure: DebugView.Exposure,
+        'Shading change': DebugView.ShadingChange,
     });
     debug.add({ resetHistory: onResetHistory }, 'resetHistory').name('Reset history');
 

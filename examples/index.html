@@ -3,7 +3,7 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>three-fsr3 — Examples</title>
+        <title>@pmndrs/upscaler — Examples</title>
         <style>
             :root {
                 color-scheme: dark;
@@ -97,7 +97,7 @@
     </head>
     <body>
         <div class="wrap">
-            <h1><span>three-fsr3</span> — Examples</h1>
+            <h1><span>@pmndrs/upscaler</span> — Examples</h1>
             <p class="sub">
                 FSR1 spatial + FSR2/3-style temporal upscaling for the three.js WebGPURenderer.
             </p>
@@ -164,7 +164,7 @@
                     <div class="num">07</div>
                     <div class="title">FSR3 as a TSL node</div>
                     <div class="desc">
-                        The declarative drop-in — <code>post.outputNode = fsrScene(scene, camera)</code>.
+                        The declarative drop-in — <code>post.outputNode = upscaleScene(scene, camera)</code>.
                         The whole upscaler as one node in a THREE.PostProcessing graph.
                     </div>
                     <span class="tag">integration</span>
@@ -173,7 +173,7 @@
                     <div class="num">08</div>
                     <div class="title">Composing FSR3</div>
                     <div class="desc">
-                        The upscaler node feeding a downstream TSL effect — <code>fsrScene(...).mul(vignette)</code> — showing it lives in a post graph.
+                        The upscaler node feeding a downstream TSL effect — <code>upscaleScene(...).mul(vignette)</code> — showing it lives in a post graph.
                     </div>
                     <span class="tag">integration</span>
                 </a>
@@ -182,7 +182,7 @@
                     <div class="title">Kitchen sink — SSGI + SSR</div>
                     <div class="desc">
                         A full screen-space stack (SSGI + SSR) rendered at low res and upscaled by the
-                        composable <code>fsr3(...)</code> node — one TSL post graph, effects and all.
+                        composable <code>upscale(...)</code> node — one TSL post graph, effects and all.
                     </div>
                     <span class="tag">advanced</span>
                 </a>

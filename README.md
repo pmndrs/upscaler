@@ -1,4 +1,4 @@
-# three-fsr3
+# @pmndrs/upscaler
 
 AMD FidelityFX Super Resolution (FSR) brought to **three.js `WebGPURenderer`** as raw **WGSL compute passes**, with an interactive test bench.
 
@@ -19,16 +19,16 @@ The bench (in [`bench/`](./bench/README.md)) renders an aliasing-hostile scene a
 ## Using the upscaler
 
 ```ts
-import { FSR3Upscaler, FSRQualityMode } from 'three-fsr3';
+import { Upscaler, QualityMode } from '@pmndrs/upscaler';
 import { velocity, mrt, output } from 'three/tsl';
 
 //* Setup (once, after renderer.init())
-const upscaler = new FSR3Upscaler({ renderer });
+const upscaler = new Upscaler({ renderer });
 upscaler.init();
 upscaler.configure({
     displayWidth: canvas.width,
     displayHeight: canvas.height,
-    qualityMode: FSRQualityMode.Quality, // renders at 1/1.5 res per axis
+    qualityMode: QualityMode.Quality, // renders at 1/1.5 res per axis
     path: 'temporal',
 });
 
@@ -115,7 +115,7 @@ Frame generation (the other half of "FSR3") needs swapchain-level frame pacing t
 
 ```
 src/
-  FSR3Upscaler.ts      — public API / pass orchestration
+  Upscaler.ts      — public API / pass orchestration
   types.ts             — quality modes, config, settings
   math/                — Halton, jitter sequencing, resolution presets (unit-tested)
   shaders/             — WGSL sources as TS modules + assembler (unit-tested)

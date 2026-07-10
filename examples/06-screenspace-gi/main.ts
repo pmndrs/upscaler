@@ -18,7 +18,7 @@ import { ssgi } from 'three/addons/tsl/display/SSGINode.js';
 import { denoise } from 'three/addons/tsl/display/DenoiseNode.js';
 import GUI from 'lil-gui';
 
-import { FSR3Upscaler } from 'three-fsr3';
+import { Upscaler } from '@pmndrs/upscaler';
 
 import { bootRenderer, displaySize } from '../shared/boot';
 import { addStudioLighting } from '../shared/props';
@@ -88,7 +88,7 @@ controls.autoRotate = true;
 controls.autoRotateSpeed = 0.3;
 
 //* FSR3 — raw upscaler (this example drives the passes itself).
-const upscaler = new FSR3Upscaler({ renderer });
+const upscaler = new Upscaler({ renderer });
 upscaler.init();
 velocity.setProjectionMatrix(upscaler.unjitteredProjectionMatrix);
 

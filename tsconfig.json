@@ -18,7 +18,7 @@
         "types": ["@webgpu/types", "vite/client"],
         "baseUrl": ".",
         "paths": {
-            "three-fsr3": ["src/index.ts"]
+            "@pmndrs/upscaler": ["src/index.ts"]
         }
     },
     "include": ["src", "bench/src", "examples"],

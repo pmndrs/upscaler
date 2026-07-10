@@ -1,7 +1,7 @@
 import { resolve } from 'path';
 import { defineConfig } from 'vitest/config';
 
-// Library build for three-fsr3. The interactive test bench has its own
+// Library build for @pmndrs/upscaler. The interactive test bench has its own
 // config at bench/vite.config.ts (run via `yarn dev` / `yarn bench`).
 export default defineConfig({
     test: {

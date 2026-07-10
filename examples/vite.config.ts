@@ -9,7 +9,7 @@ export default defineConfig({
     root,
     resolve: {
         alias: {
-            'three-fsr3': resolve(root, '../src/index.ts'),
+            '@pmndrs/upscaler': resolve(root, '../src/index.ts'),
         },
     },
     // Top-level await (renderer.init) needs a modern target.

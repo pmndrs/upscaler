@@ -3,7 +3,7 @@ import { assembleShader } from './wgsl';
 
 /**
  * Debug visualization pass. Replaces the RCAS output when a debug view is
- * active so pipeline inputs can be validated visually (see `FSRDebugView`).
+ * active so pipeline inputs can be validated visually (see `DebugView`).
  *
  * Bindings:
  * - 1: dilated motion (render size)

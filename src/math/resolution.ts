@@ -1,15 +1,15 @@
-import { FSRQualityMode } from '../types';
+import { QualityMode } from '../types';
 
 /**
  * Per-axis scaling ratios for each quality preset, matching the official
  * FSR3 documentation (display / render).
  */
-export const QUALITY_MODE_RATIOS: Record<FSRQualityMode, number> = {
-    [FSRQualityMode.NativeAA]: 1.0,
-    [FSRQualityMode.Quality]: 1.5,
-    [FSRQualityMode.Balanced]: 1.7,
-    [FSRQualityMode.Performance]: 2.0,
-    [FSRQualityMode.UltraPerformance]: 3.0,
+export const QUALITY_MODE_RATIOS: Record<QualityMode, number> = {
+    [QualityMode.NativeAA]: 1.0,
+    [QualityMode.Quality]: 1.5,
+    [QualityMode.Balanced]: 1.7,
+    [QualityMode.Performance]: 2.0,
+    [QualityMode.UltraPerformance]: 3.0,
 };
 
 /**
@@ -39,6 +39,6 @@ export function getRenderResolution(
  * @param mode - The quality preset
  * @returns The per-axis upscale ratio
  */
-export function getQualityModeRatio(mode: FSRQualityMode): number {
+export function getQualityModeRatio(mode: QualityMode): number {
     return QUALITY_MODE_RATIOS[mode];
 }

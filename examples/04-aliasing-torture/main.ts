@@ -1,10 +1,10 @@
 import * as THREE from 'three/webgpu';
 import GUI from 'lil-gui';
 
-import { type FSRUpscalePath } from 'three-fsr3';
+import { type UpscalePath } from '@pmndrs/upscaler';
 
 import { bootRenderer, displaySize } from '../shared/boot';
-import { FSRPresenter } from '../shared/FSRPresenter';
+import { UpscalePresenter } from '../shared/UpscalePresenter';
 import { addStudioLighting, createGridTexture } from '../shared/props';
 import { addRenderScale, basePercent } from '../shared/ui';
 
@@ -60,8 +60,8 @@ for (let i = 0; i < 6; i++) {
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 300);
 
 //* Presenter + state.
-const state = { tier: 'temporal' as FSRUpscalePath, ratio: 2.0 };
-const presenter = new FSRPresenter(renderer);
+const state = { tier: 'temporal' as UpscalePath, ratio: 2.0 };
+const presenter = new UpscalePresenter(renderer);
 function configure(): void {
     const { width, height } = displaySize(dpr);
     presenter.configure({

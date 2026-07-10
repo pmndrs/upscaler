@@ -16,7 +16,7 @@ import { ssgi } from 'three/addons/tsl/display/SSGINode.js';
 import { denoise } from 'three/addons/tsl/display/DenoiseNode.js';
 import GUI from 'lil-gui';
 
-import { fsr3, type FSR3Upscaler } from 'three-fsr3';
+import { upscale, type Upscaler } from '@pmndrs/upscaler';
 
 import { bootRenderer, displaySize } from '../shared/boot';
 import { addStudioLighting } from '../shared/props';
@@ -26,13 +26,13 @@ import { addRenderScale, basePercent } from '../shared/ui';
 //* (glossy reflections) — rendered at REDUCED resolution and upscaled to display
 //* size by FSR3, all as ONE TSL post graph:
 //*
-//*   pass(scene) → SSGI + SSR → denoise → composite → fsr3() → screen
+//*   pass(scene) → SSGI + SSR → denoise → composite → upscale() → screen
 //*
 //* This is the whole-scene temporal path: the scene *and* both effects render at
 //* 1/ratio, and FSR3 upscales the final composited frame. FSR3 doubles as the
 //* effects' temporal resolver (their per-frame noise rotation converges under
 //* FSR3's jittered accumulation) — so, like example 06, there is NO separate
-//* TRAA. Because the composable `fsr3()` node registers its inputs as graph
+//* TRAA. Because the composable `upscale()` node registers its inputs as graph
 //* dependencies, three renders the whole reduced-res chain in-pipeline, jittered,
 //* right before the FSR compute — no manual driving.
 
@@ -93,7 +93,7 @@ const texNode = (n: unknown) => (n as { getTextureNode(): unknown }).getTextureN
 const post = new THREE.PostProcessing(renderer);
 
 const state = { ssgi: true, ssr: true, ratio: 2.0, rcasDenoise: true, jitter: true };
-let fsrNode: ReturnType<typeof fsr3> | null = null;
+let fsrNode: ReturnType<typeof upscale> | null = null;
 
 /** (Re)builds the whole reduced-res post graph and points FSR3 at its output. */
 function configure(): void {
@@ -156,7 +156,7 @@ function configure(): void {
     // (the reduced pass IS re-rendered under the jittered projection each frame)
     // and buys sub-pixel reconstruction — on by default for exactly this reason.
     // The toggle lets you A/B it against a non-jittered (reproject-only) upscale.
-    fsrNode = fsr3(colorTex, depth, vel, camera, { path: 'temporal', ratio, jitter: state.jitter });
+    fsrNode = upscale(colorTex, depth, vel, camera, { path: 'temporal', ratio, jitter: state.jitter });
     post.outputNode = fsrNode as unknown as THREE.Node;
     post.needsUpdate = true;
 }
@@ -184,10 +184,10 @@ window.addEventListener('resize', () => {
 
 const hud = document.getElementById('hud')!;
 function updateHud(): void {
-    const u = (fsrNode as unknown as { upscaler?: FSR3Upscaler }).upscaler;
+    const u = (fsrNode as unknown as { upscaler?: Upscaler }).upscaler;
     const fx = [state.ssgi && 'SSGI', state.ssr && 'SSR'].filter(Boolean).join(' + ') || 'none';
     hud.innerHTML =
-        `<b>three-fsr3</b>  kitchen sink (node graph)\n` +
+        `<b>@pmndrs/upscaler</b>  kitchen sink (node graph)\n` +
         `effects  ${fx}\n` +
         `jitter   ${state.jitter ? 'on (reconstruct)' : 'off (stable)'}\n` +
         (u
@@ -208,7 +208,7 @@ renderer.setAnimationLoop(() => {
     camera.position.set(Math.sin(t * 0.15) * 7, 4, 9 + Math.cos(t * 0.15) * 1.5);
     camera.lookAt(0, 3, -5);
 
-    const u = (fsrNode as unknown as { upscaler?: FSR3Upscaler }).upscaler;
+    const u = (fsrNode as unknown as { upscaler?: Upscaler }).upscaler;
     if (u) u.settings.rcasDenoise = state.rcasDenoise;
     post.render();
     updateHud();

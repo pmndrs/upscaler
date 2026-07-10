@@ -18,7 +18,7 @@ import { temporalReproject } from 'three/addons/tsl/display/TemporalReprojectNod
 import { recurrentDenoise } from 'three/addons/tsl/display/RecurrentDenoiseNode.js';
 import GUI from 'lil-gui';
 
-import { fsr3, type FSR3Upscaler } from 'three-fsr3';
+import { upscale, type Upscaler } from '@pmndrs/upscaler';
 
 import { bootRenderer, displaySize } from '../shared/boot';
 import { addStudioLighting } from '../shared/props';
@@ -119,7 +119,7 @@ const state = {
     // `recurrent` are the experiments (see the header for GPU-observed results).
     ssgiDenoiser: 'builtin' as 'recurrent' | 'builtin' | 'spatial',
 };
-let fsrNode: ReturnType<typeof fsr3> | null = null;
+let fsrNode: ReturnType<typeof upscale> | null = null;
 
 /** (Re)builds the whole reduced-res post graph and points FSR3 at its output. */
 function configure(): void {
@@ -216,7 +216,7 @@ function configure(): void {
 
     // Dispose the previous node's upscaler before replacing the graph.
     (fsrNode as unknown as { dispose?(): void } | null)?.dispose?.();
-    fsrNode = fsr3(colorTex, depth, vel, camera, { path: 'temporal', ratio, jitter: state.jitter });
+    fsrNode = upscale(colorTex, depth, vel, camera, { path: 'temporal', ratio, jitter: state.jitter });
     post.outputNode = fsrNode as unknown as THREE.Node;
     post.needsUpdate = true;
 }
@@ -247,10 +247,10 @@ window.addEventListener('resize', () => {
 
 const hud = document.getElementById('hud')!;
 function updateHud(): void {
-    const u = (fsrNode as unknown as { upscaler?: FSR3Upscaler }).upscaler;
+    const u = (fsrNode as unknown as { upscaler?: Upscaler }).upscaler;
     const fx = [state.ssgi && 'SSGI', state.ssr && 'SSR'].filter(Boolean).join(' + ') || 'none';
     hud.innerHTML =
-        `<b>three-fsr3</b>  SSGI denoise A/B  ⚠ experimental\n` +
+        `<b>@pmndrs/upscaler</b>  SSGI denoise A/B  ⚠ experimental\n` +
         `effects  ${fx}\n` +
         `SSGI     ${state.ssgiDenoiser} · ${state.ssgiSlices} slices / ${state.ssgiSteps} steps\n` +
         `jitter   ${state.jitter ? 'on (reconstruct)' : 'off (stable)'}\n` +
@@ -268,7 +268,7 @@ renderer.setAnimationLoop(() => {
     camera.position.set(Math.sin(t * 0.15) * 7, 4, 9 + Math.cos(t * 0.15) * 1.5);
     camera.lookAt(0, 3, -5);
 
-    const u = (fsrNode as unknown as { upscaler?: FSR3Upscaler }).upscaler;
+    const u = (fsrNode as unknown as { upscaler?: Upscaler }).upscaler;
     if (u) u.settings.rcasDenoise = state.rcasDenoise;
     post.render();
     updateHud();

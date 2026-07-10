@@ -2,14 +2,14 @@ import * as THREE from 'three/webgpu';
 import { mrt, output, texture, velocity } from 'three/tsl';
 
 import {
-    FSR3Upscaler,
-    FSRQualityMode,
+    Upscaler,
+    QualityMode,
     getQualityModeRatio,
-    type FSRDebugView,
-} from 'three-fsr3';
+    type DebugView,
+} from '@pmndrs/upscaler';
 
 /** Bench render modes — what fills the screen each frame. */
-export type BenchMode = 'native' | 'bilinear' | 'fsr1-spatial' | 'fsr3-temporal';
+export type BenchMode = 'native' | 'bilinear' | 'fsr1-spatial' | 'upscale-temporal';
 
 /**
  * Owns everything between "a scene + camera" and "pixels on the canvas":
@@ -21,7 +21,7 @@ export type BenchMode = 'native' | 'bilinear' | 'fsr1-spatial' | 'fsr3-temporal'
  * comparisons are apples-to-apples.
  */
 export class BenchPipeline {
-    readonly upscaler: FSR3Upscaler;
+    readonly upscaler: Upscaler;
 
     //* Presentation
     private readonly _renderer: THREE.WebGPURenderer;
@@ -35,14 +35,14 @@ export class BenchPipeline {
     // count:1 render target so color attachment 0 is actually written.
     private readonly _mrtOutputOnly = mrt({ output });
 
-    private _mode: BenchMode = 'fsr3-temporal';
-    private _quality: FSRQualityMode = FSRQualityMode.Quality;
+    private _mode: BenchMode = 'upscale-temporal';
+    private _quality: QualityMode = QualityMode.Quality;
     private _displayWidth = 0;
     private _displayHeight = 0;
 
     constructor(renderer: THREE.WebGPURenderer) {
         this._renderer = renderer;
-        this.upscaler = new FSR3Upscaler({ renderer });
+        this.upscaler = new Upscaler({ renderer });
         this.upscaler.init();
 
         // Motion vectors must be jitter-free — hand the velocity node the
@@ -76,7 +76,7 @@ export class BenchPipeline {
         displayWidth: number,
         displayHeight: number,
         mode: BenchMode,
-        quality: FSRQualityMode,
+        quality: QualityMode,
     ): void {
         this._mode = mode;
         this._quality = quality;
@@ -90,7 +90,7 @@ export class BenchPipeline {
             displayHeight,
             customUpscaleRatio: ratio,
             path:
-                mode === 'fsr3-temporal'
+                mode === 'upscale-temporal'
                     ? 'temporal'
                     : mode === 'fsr1-spatial'
                       ? 'spatial'
@@ -104,7 +104,7 @@ export class BenchPipeline {
         this._renderTarget?.dispose();
         const rw = this.upscaler.renderWidth;
         const rh = this.upscaler.renderHeight;
-        const temporal = mode === 'fsr3-temporal';
+        const temporal = mode === 'upscale-temporal';
         const depthTexture = new THREE.DepthTexture(rw, rh);
         depthTexture.type = THREE.FloatType;
         this._renderTarget = new THREE.RenderTarget(rw, rh, {
@@ -131,7 +131,7 @@ export class BenchPipeline {
     render(scene: THREE.Scene, camera: THREE.PerspectiveCamera, deltaTime: number): void {
         const rt = this._renderTarget;
         if (!rt) return;
-        const temporal = this._mode === 'fsr3-temporal';
+        const temporal = this._mode === 'upscale-temporal';
 
         //* Scene Pass (jittered when temporal)
         this.upscaler.beginFrame(camera);
@@ -170,7 +170,7 @@ export class BenchPipeline {
         autoExposure: boolean;
         lockThinFeatures: boolean;
         detectShadingChanges: boolean;
-        debugView: FSRDebugView;
+        debugView: DebugView;
     }): void {
         Object.assign(this.upscaler.settings, settings);
     }

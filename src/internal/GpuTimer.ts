@@ -26,17 +26,17 @@ export class GpuTimer {
 
         const count = GpuTimer.MAX_PASSES * 2;
         this._querySet = device.createQuerySet({
-            label: 'fsr3-timer',
+            label: 'upscale-timer',
             type: 'timestamp',
             count,
         });
         this._resolveBuffer = device.createBuffer({
-            label: 'fsr3-timer-resolve',
+            label: 'upscale-timer-resolve',
             size: count * 8,
             usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC,
         });
         this._readBuffer = device.createBuffer({
-            label: 'fsr3-timer-read',
+            label: 'upscale-timer-read',
             size: count * 8,
             usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
         });

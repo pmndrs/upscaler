@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
-import { FSRQualityMode } from '../types';
+import { QualityMode } from '../types';
 import { getQualityModeRatio, getRenderResolution } from './resolution';
 
 describe('quality presets', () => {
     it('matches the official FSR3 scaling ratios', () => {
-        expect(getQualityModeRatio(FSRQualityMode.NativeAA)).toBe(1.0);
-        expect(getQualityModeRatio(FSRQualityMode.Quality)).toBe(1.5);
-        expect(getQualityModeRatio(FSRQualityMode.Balanced)).toBe(1.7);
-        expect(getQualityModeRatio(FSRQualityMode.Performance)).toBe(2.0);
-        expect(getQualityModeRatio(FSRQualityMode.UltraPerformance)).toBe(3.0);
+        expect(getQualityModeRatio(QualityMode.NativeAA)).toBe(1.0);
+        expect(getQualityModeRatio(QualityMode.Quality)).toBe(1.5);
+        expect(getQualityModeRatio(QualityMode.Balanced)).toBe(1.7);
+        expect(getQualityModeRatio(QualityMode.Performance)).toBe(2.0);
+        expect(getQualityModeRatio(QualityMode.UltraPerformance)).toBe(3.0);
     });
 });
 

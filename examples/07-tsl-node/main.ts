@@ -1,18 +1,18 @@
 import * as THREE from 'three/webgpu';
 
-import { fsrScene, FSRQualityMode, type FSR3Upscaler } from 'three-fsr3';
+import { upscaleScene, QualityMode, type Upscaler } from '@pmndrs/upscaler';
 
 import { bootRenderer } from '../shared/boot';
 import { addStudioLighting, createGridFloor } from '../shared/props';
 
 //* FSR3 as a TSL node — the declarative drop-in.
-// Instead of driving the upscaler imperatively (FSR3Pass), hand `fsrScene(scene,
+// Instead of driving the upscaler imperatively (UpscalePass), hand `upscaleScene(scene,
 // camera)` to a THREE.PostProcessing graph as the output node. It builds a
-// reduced-res scene pass and feeds it to the composable `fsr3()` node, which
+// reduced-res scene pass and feeds it to the composable `upscale()` node, which
 // runs the FSR compute passes and outputs the upscaled texture — so the whole
 // "render small, reconstruct big" pipeline is one line, and other TSL effects
 // can sit around it (see 08). For an effect pipeline as the input (SSGI etc.),
-// use `fsr3(color, depth, velocity, camera)` directly — see 06.
+// use `upscale(color, depth, velocity, camera)` directly — see 06.
 
 const { renderer } = await bootRenderer();
 
@@ -47,15 +47,15 @@ camera.lookAt(0, 1.6, 0);
 
 //* The whole upscaler, as one post-processing node.
 const post = new THREE.PostProcessing(renderer);
-const fsrNode = fsrScene(scene, camera, { quality: FSRQualityMode.Performance }); // 2.0x
+const fsrNode = upscaleScene(scene, camera, { quality: QualityMode.Performance }); // 2.0x
 post.outputNode = fsrNode as unknown as THREE.Node;
 
 const badge = document.getElementById('badge')!;
 function updateBadge(): void {
-    const u = (fsrNode as unknown as { upscaler?: FSR3Upscaler }).upscaler;
+    const u = (fsrNode as unknown as { upscaler?: Upscaler }).upscaler;
     badge.innerHTML =
-        `<b>three-fsr3</b>  fsrScene() TSL node\n` +
-        `post.outputNode = fsrScene(scene, camera)\n` +
+        `<b>@pmndrs/upscaler</b>  upscaleScene() TSL node\n` +
+        `post.outputNode = upscaleScene(scene, camera)\n` +
         (u ? `render   ${u.renderWidth}×${u.renderHeight}\n` +
             `display  ${u.displayWidth}×${u.displayHeight}  (${u.upscaleRatio.toFixed(1)}x)` : '');
 }

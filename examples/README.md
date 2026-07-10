@@ -1,4 +1,4 @@
-# three-fsr3 — Examples
+# @pmndrs/upscaler — Examples
 
 Standalone, single-purpose demos of the upscaler, from a minimal starter to an
 expensive screen-space effect rendered small and upscaled. WebGPU-only — open in
@@ -9,7 +9,7 @@ npm install
 npm run examples     # http://localhost:5300  (landing page links every demo)
 ```
 
-The library is consumed straight from `../src` (aliased as `three-fsr3`), so
+The library is consumed straight from `../src` (aliased as `@pmndrs/upscaler`), so
 shader/pipeline edits hot-reload here just like in the bench.
 
 ## The demos
@@ -58,11 +58,11 @@ inspector can't give you per-GPU-pass times. Notes for the DPR demo:
 
 ## How they're built
 
-Every demo drives the library through [`shared/FSRPresenter.ts`](shared/FSRPresenter.ts),
+Every demo drives the library through [`shared/UpscalePresenter.ts`](shared/UpscalePresenter.ts),
 which encapsulates the whole integration recipe (jitter-free velocity, MRT output
 count matched to the render-target attachment count, float depth, the
 `NoToneMapping` present). New demos should reuse it rather than re-deriving the
-wiring — the one exception is `06`, which drives the raw `FSR3Upscaler` directly
+wiring — the one exception is `06`, which drives the raw `Upscaler` directly
 so it can feed FSR3 the output of a TSL pass graph.
 
 ### The `06` pattern (TSL effect graph → FSR3)

@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu';
 import { screenUV, smoothstep } from 'three/tsl';
 
-import { fsrScene, FSRQualityMode } from 'three-fsr3';
+import { upscaleScene, QualityMode } from '@pmndrs/upscaler';
 
 import { bootRenderer } from '../shared/boot';
 import { addStudioLighting, createGridFloor } from '../shared/props';
@@ -10,7 +10,7 @@ import { addStudioLighting, createGridFloor } from '../shared/props';
 // The reason FSR3 is a node and not just an imperative driver: it slots into a
 // THREE.PostProcessing graph so other TSL effects can sit around it. Here the
 // upscaled result feeds a simple vignette before hitting the screen —
-// `post.outputNode = fsr3(scene, camera).mul(vignette)`.
+// `post.outputNode = upscale(scene, camera).mul(vignette)`.
 
 const { renderer } = await bootRenderer();
 
@@ -32,8 +32,8 @@ camera.lookAt(0, 1.6, 0);
 
 //* FSR3 node → vignette → screen, all in the post graph.
 const post = new THREE.PostProcessing(renderer);
-// fsrScene() returns a loosely-typed TSL node; cast to reach the node math ops.
-const fsrNode = fsrScene(scene, camera, { quality: FSRQualityMode.Performance }) as {
+// upscaleScene() returns a loosely-typed TSL node; cast to reach the node math ops.
+const fsrNode = upscaleScene(scene, camera, { quality: QualityMode.Performance }) as {
     mul(n: unknown): unknown;
 };
 // Darken toward the frame edges (1 at centre, ~0.35 at the corners).
@@ -42,8 +42,8 @@ post.outputNode = fsrNode.mul(vignette) as unknown as THREE.Node;
 
 const badge = document.getElementById('badge')!;
 badge.innerHTML =
-    `<b>three-fsr3</b>  node composition\n` +
-    `post.outputNode = fsrScene(scene, camera)\n                   .mul(vignette)`;
+    `<b>@pmndrs/upscaler</b>  node composition\n` +
+    `post.outputNode = upscaleScene(scene, camera)\n                   .mul(vignette)`;
 
 window.addEventListener('resize', () => {
     renderer.setSize(window.innerWidth, window.innerHeight);

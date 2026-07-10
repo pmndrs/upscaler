@@ -17,11 +17,11 @@ export class ComputePass {
     constructor(device: GPUDevice, label: string, code: string) {
         this._device = device;
         this.label = label;
-        const module = device.createShaderModule({ label: `fsr3-${label}`, code });
+        const module = device.createShaderModule({ label: `upscale-${label}`, code });
         // 'auto' layout keeps the TS side free of duplicated binding tables —
         // the WGSL source is the single source of truth for bindings.
         this.pipeline = device.createComputePipeline({
-            label: `fsr3-${label}`,
+            label: `upscale-${label}`,
             layout: 'auto',
             compute: { module, entryPoint: 'main' },
         });
@@ -34,7 +34,7 @@ export class ComputePass {
      */
     createBindGroup(entries: Array<GPUBindingResource>): GPUBindGroup {
         return this._device.createBindGroup({
-            label: `fsr3-${this.label}`,
+            label: `upscale-${this.label}`,
             layout: this.pipeline.getBindGroupLayout(0),
             entries: entries.map((resource, binding) => ({ binding, resource })),
         });

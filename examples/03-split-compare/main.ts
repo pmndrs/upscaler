@@ -4,7 +4,7 @@ import { abs, mix, smoothstep, step, texture, uniform, uv, vec4 } from 'three/ts
 import GUI from 'lil-gui';
 
 import { bootRenderer, displaySize } from '../shared/boot';
-import { FSRPresenter } from '../shared/FSRPresenter';
+import { UpscalePresenter } from '../shared/UpscalePresenter';
 import { addStudioLighting, createGridFloor } from '../shared/props';
 import { addRenderScale } from '../shared/ui';
 
@@ -52,8 +52,8 @@ controls.autoRotateSpeed = 0.5;
 //* Two presenters sharing the renderer.
 // The FSR presenter owns the global velocity node; native (bilinear @ 1.0x)
 // needs no motion vectors, so it opts out.
-const fsr = new FSRPresenter(renderer, { shareVelocityMatrix: true });
-const native = new FSRPresenter(renderer, { shareVelocityMatrix: false });
+const fsr = new UpscalePresenter(renderer, { shareVelocityMatrix: true });
+const native = new UpscalePresenter(renderer, { shareVelocityMatrix: false });
 
 const state = { ratio: 2.0 };
 const fsrLabel = document.getElementById('labFsr')!;

@@ -2,10 +2,10 @@ import * as THREE from 'three/webgpu';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import GUI from 'lil-gui';
 
-import { FSRDebugView, type FSRUpscalePath } from 'three-fsr3';
+import { DebugView, type UpscalePath } from '@pmndrs/upscaler';
 
 import { bootRenderer, displaySize } from '../shared/boot';
-import { FSRPresenter } from '../shared/FSRPresenter';
+import { UpscalePresenter } from '../shared/UpscalePresenter';
 import { addStudioLighting, createGridFloor } from '../shared/props';
 import { addRenderScale, basePercent } from '../shared/ui';
 
@@ -59,17 +59,17 @@ const state = {
     locks: true,
     autoExposure: true,
     shadingChange: true,
-    debug: FSRDebugView.None,
+    debug: DebugView.None,
     autoRotate: true,
 };
 
-const presenter = new FSRPresenter(renderer);
+const presenter = new UpscalePresenter(renderer);
 function configure(): void {
     const { width, height } = displaySize(dpr);
     presenter.configure({
         displayWidth: width,
         displayHeight: height,
-        path: state.tier as FSRUpscalePath,
+        path: state.tier as UpscalePath,
         ratio: state.ratio,
     });
 }
@@ -90,14 +90,14 @@ gui.add(state, 'locks').name('lock thin features');
 gui.add(state, 'autoExposure').name('auto exposure');
 gui.add(state, 'shadingChange').name('detect shading changes');
 gui.add(state, 'debug', {
-    Off: FSRDebugView.None,
-    'Motion vectors': FSRDebugView.MotionVectors,
-    Disocclusion: FSRDebugView.Disocclusion,
-    Depth: FSRDebugView.Depth,
-    'Accumulation age': FSRDebugView.AccumulationAge,
-    Locks: FSRDebugView.Locks,
-    Exposure: FSRDebugView.Exposure,
-    'Shading change': FSRDebugView.ShadingChange,
+    Off: DebugView.None,
+    'Motion vectors': DebugView.MotionVectors,
+    Disocclusion: DebugView.Disocclusion,
+    Depth: DebugView.Depth,
+    'Accumulation age': DebugView.AccumulationAge,
+    Locks: DebugView.Locks,
+    Exposure: DebugView.Exposure,
+    'Shading change': DebugView.ShadingChange,
 }).name('debug view');
 gui.add(state, 'autoRotate').name('auto orbit');
 gui.add({ reset: () => presenter.upscaler.resetHistory() }, 'reset').name('reset history');

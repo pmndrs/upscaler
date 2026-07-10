@@ -15,7 +15,7 @@ import type { Texture } from 'three';
  * `NativeAA` renders at display resolution and uses the temporal pipeline
  * purely as an anti-aliasing solution (equivalent to AMD's "Native AA" mode).
  */
-export enum FSRQualityMode {
+export enum QualityMode {
     NativeAA = 'native-aa',
     Quality = 'quality',
     Balanced = 'balanced',
@@ -34,13 +34,13 @@ export enum FSRQualityMode {
  * - `temporal` — FSR2/3-style jittered temporal accumulation. Requires depth
  *   and motion vectors. Phase 2.
  */
-export type FSRUpscalePath = 'bilinear' | 'spatial' | 'temporal';
+export type UpscalePath = 'bilinear' | 'spatial' | 'temporal';
 
 /**
  * Debug visualization modes rendered by the debug pass instead of the final
  * image. Useful for validating pipeline inputs while integrating.
  */
-export enum FSRDebugView {
+export enum DebugView {
     /** Normal output — no debug visualization. */
     None = 0,
     /** Dilated motion vectors, magnitude/direction encoded as color. */
@@ -62,9 +62,9 @@ export enum FSRDebugView {
 }
 
 /**
- * Static configuration for {@link FSR3Upscaler.configure}.
+ * Static configuration for {@link Upscaler.configure}.
  */
-export interface FSRConfig {
+export interface UpscalerConfig {
     /** Output (display) resolution in physical pixels. */
     displayWidth: number;
     /** Output (display) resolution in physical pixels. */
@@ -73,7 +73,7 @@ export interface FSRConfig {
      * Quality preset controlling the render resolution. Ignored when
      * `customUpscaleRatio` is provided.
      */
-    qualityMode?: FSRQualityMode;
+    qualityMode?: QualityMode;
     /** Explicit upscale ratio (e.g. `1.5` renders at 1/1.5 of display size). */
     customUpscaleRatio?: number;
     /**
@@ -86,7 +86,7 @@ export interface FSRConfig {
     /** Explicit render (input) height — see {@link renderWidth}. */
     renderHeight?: number;
     /** Which upscaling pipeline to run. Defaults to `'temporal'`. */
-    path?: FSRUpscalePath;
+    path?: UpscalePath;
     /**
      * Apply the sub-pixel camera jitter each frame (temporal path only).
      * Defaults to `true`.
@@ -104,19 +104,19 @@ export interface FSRConfig {
      * Set `false` for those inputs: the temporal path still reprojects, clips,
      * and accumulates (so it denoises noisy GI and holds temporal stability, and
      * upscales), it just skips the sub-pixel offset — no reconstruction gain, no
-     * smear risk. Owning-the-render integrations (the `fsrScene` node, `FSR3Pass`)
-     * default it on; the composable `fsr3` node defaults it off for exactly this
+     * smear risk. Owning-the-render integrations (the `upscaleScene` node, `UpscalePass`)
+     * default it on; the composable `upscale` node defaults it off for exactly this
      * reason.
      */
     jitter?: boolean;
 }
 
 /**
- * Per-frame inputs consumed by {@link FSR3Upscaler.dispatch}. All textures
+ * Per-frame inputs consumed by {@link Upscaler.dispatch}. All textures
  * are three textures (render-target attachments) — the upscaler resolves
  * the raw GPU handles internally.
  */
-export interface FSRDispatchInputs {
+export interface DispatchInputs {
     /** Scene color at render resolution (linear HDR, rgba16float). */
     color: Texture;
     /** Scene depth at render resolution. Required for the temporal path. */
@@ -152,7 +152,7 @@ export interface FSRDispatchInputs {
 /**
  * Runtime tuning knobs that can change every frame without a pipeline rebuild.
  */
-export interface FSRRuntimeSettings {
+export interface RuntimeSettings {
     /**
      * RCAS sharpening amount in `[0, 1]`. `1` is maximum sharpness (0 stops
      * of attenuation in FidelityFX terms), `0` disables sharpening.
@@ -199,5 +199,5 @@ export interface FSRRuntimeSettings {
      */
     detectShadingChanges: boolean;
     /** Debug visualization mode. */
-    debugView: FSRDebugView;
+    debugView: DebugView;
 }

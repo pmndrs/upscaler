@@ -19,7 +19,7 @@ export class ConstantsBuffer {
     constructor(device: GPUDevice) {
         this._device = device;
         this.buffer = device.createBuffer({
-            label: 'fsr3-constants',
+            label: 'upscale-constants',
             size: ConstantsBuffer.SIZE,
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
         });

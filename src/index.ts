@@ -1,13 +1,13 @@
-export { FSR3Upscaler } from './FSR3Upscaler';
-export { FSR3Pass, type FSR3PassConfig } from './FSR3Pass';
-export { FSR3Node, fsr3, fsr3Spatial, fsrScene, type FSR3NodeOptions } from './FSR3Node';
+export { Upscaler } from './Upscaler';
+export { UpscalePass, type UpscalePassConfig } from './UpscalePass';
+export { UpscalerNode, upscale, upscaleSpatial, upscaleScene, type UpscalerNodeOptions } from './UpscalerNode';
 export {
-    FSRDebugView,
-    FSRQualityMode,
-    type FSRConfig,
-    type FSRDispatchInputs,
-    type FSRRuntimeSettings,
-    type FSRUpscalePath,
+    DebugView,
+    QualityMode,
+    type UpscalerConfig,
+    type DispatchInputs,
+    type RuntimeSettings,
+    type UpscalePath,
 } from './types';
 export { halton, generateJitterSequence } from './math/halton';
 export { getJitterPhaseCount, JitterSequence } from './math/jitter';

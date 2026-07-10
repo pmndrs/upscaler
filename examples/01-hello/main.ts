@@ -1,14 +1,14 @@
 import * as THREE from 'three/webgpu';
 
-import { FSRQualityMode } from 'three-fsr3';
+import { QualityMode } from '@pmndrs/upscaler';
 
 import { bootRenderer, displaySize } from '../shared/boot';
-import { FSRPresenter } from '../shared/FSRPresenter';
+import { UpscalePresenter } from '../shared/UpscalePresenter';
 import { addStudioLighting, createGridFloor } from '../shared/props';
 
 //* The smallest possible FSR3 temporal upscale.
 // Render a scene at a fraction of the display resolution, then let FSR3
-// reconstruct it back to full size. Everything tricky lives in FSRPresenter.
+// reconstruct it back to full size. Everything tricky lives in UpscalePresenter.
 
 const { renderer, dpr } = await bootRenderer();
 
@@ -30,14 +30,14 @@ camera.position.set(6, 4, 8);
 camera.lookAt(0, 1.6, 0);
 
 //* Upscaler — render at half resolution per axis (2x), reconstruct to display.
-const presenter = new FSRPresenter(renderer);
+const presenter = new UpscalePresenter(renderer);
 function configure(): void {
     const { width, height } = displaySize(dpr);
     presenter.configure({
         displayWidth: width,
         displayHeight: height,
         path: 'temporal',
-        quality: FSRQualityMode.Performance, // 2.0x
+        quality: QualityMode.Performance, // 2.0x
     });
 }
 configure();
@@ -46,7 +46,7 @@ const badge = document.getElementById('badge')!;
 function updateBadge(): void {
     const u = presenter.upscaler;
     badge.innerHTML =
-        `<b>three-fsr3</b>  FSR3 temporal\n` +
+        `<b>@pmndrs/upscaler</b>  FSR3 temporal\n` +
         `render   ${u.renderWidth}×${u.renderHeight}\n` +
         `display  ${u.displayWidth}×${u.displayHeight}  (${u.upscaleRatio.toFixed(1)}x)`;
 }
