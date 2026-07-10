@@ -66,6 +66,13 @@ export interface UpscalerNodeOptions {
      * {@link DispatchInputs.reactiveOpaqueColor}.
      */
     reactiveOpaqueColor?: TextureNodeLike;
+    /**
+     * Optional app-supplied **exposure** texture node (value in the red texel).
+     * When set it overrides auto-exposure and the fixed exposure setting — feed
+     * it your own metering pass. Registered as a graph dependency like the
+     * other inputs. Mirrors {@link DispatchInputs.exposureTexture}.
+     */
+    exposureTexture?: TextureNodeLike;
 }
 
 /**
@@ -116,6 +123,7 @@ export class UpscalerNode extends TempNode {
     // render in-graph like the other inputs (see setup).
     private readonly _reactive: TextureNodeLike;
     private readonly _reactiveOpaqueColor: TextureNodeLike;
+    private readonly _exposureTexture: TextureNodeLike;
     private readonly _camera: CameraLike;
     private readonly _options: UpscalerNodeOptions;
     // Temporal nodes default to jittered: a composable node's inputs render
@@ -150,6 +158,7 @@ export class UpscalerNode extends TempNode {
         this._velocity = velocityNode;
         this._reactive = options.reactive ?? null;
         this._reactiveOpaqueColor = options.reactiveOpaqueColor ?? null;
+        this._exposureTexture = options.exposureTexture ?? null;
         this._camera = camera;
         this._options = options;
         this._jitter = options.jitter ?? true;
@@ -192,6 +201,7 @@ export class UpscalerNode extends TempNode {
         // would be un-jittered and misalign against the composited color.
         if (this._reactive) props.reactiveNode = this._reactive;
         if (this._reactiveOpaqueColor) props.reactiveOpaqueColorNode = this._reactiveOpaqueColor;
+        if (this._exposureTexture) props.exposureNode = this._exposureTexture;
 
         // Apply the sub-pixel jitter before the input passes render — same hook
         // three's TAAUNode uses. Only installed when jittering: the hook is
@@ -301,6 +311,9 @@ export class UpscalerNode extends TempNode {
         const reactiveOpaqueColor = this._reactiveOpaqueColor
             ? this._texture(this._reactiveOpaqueColor)
             : null;
+        const exposureTexture = this._exposureTexture
+            ? this._texture(this._exposureTexture)
+            : null;
 
         this._upscaler.dispatch(
             {
@@ -309,6 +322,7 @@ export class UpscalerNode extends TempNode {
                 velocity: velocityTex ?? undefined,
                 reactive: reactive ?? undefined,
                 reactiveOpaqueColor: reactiveOpaqueColor ?? undefined,
+                exposureTexture: exposureTexture ?? undefined,
                 deltaTime: dt,
             },
             this._camera as never,

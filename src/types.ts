@@ -143,6 +143,17 @@ export interface DispatchInputs {
      * hidden into this buffer; `color` stays the full composited render.
      */
     reactiveOpaqueColor?: Texture;
+    /**
+     * Optional app-supplied **exposure** texture (value in the red texel, any
+     * float format — a 1×1 is typical). When provided it overrides both
+     * auto-exposure and the fixed {@link RuntimeSettings.exposure}: a pipeline
+     * that already meters exposure (its own luminance/adaptation pass) feeds
+     * the result here and the upscaler conditions accumulation on it instead of
+     * computing its own. Divided back out before display, so — like the other
+     * exposure modes — it steadies accumulation without changing final
+     * brightness. Mirrors FSR3's `exposure` dispatch resource.
+     */
+    exposureTexture?: Texture;
     /** Drop all history this frame (camera cut, teleport, resize). */
     reset?: boolean;
     /** Seconds since the previous frame. */

@@ -26,6 +26,8 @@ import { assembleShader } from './wgsl';
  * - 2: linear clamp sampler
  * - 3: previous frame's exposure (rgba16float; r = exposure, g = avg luma)
  * - 4: exposure out (rgba16float storage, 1×1)
+ * - 5: external exposure (app-supplied; r = exposure). Read only when
+ *      FLAG_EXTERNAL_EXPOSURE is set — else a 1×1 dummy is bound and ignored.
  */
 export const LUMINANCE_PYRAMID_SHADER = assembleShader(
     WGSL_CONSTANTS,
@@ -35,6 +37,7 @@ export const LUMINANCE_PYRAMID_SHADER = assembleShader(
 @group(0) @binding(2) var linearSampler : sampler;
 @group(0) @binding(3) var prevExposure : texture_2d<f32>;
 @group(0) @binding(4) var exposureOut : texture_storage_2d<rgba16float, write>;
+@group(0) @binding(5) var externalExposure : texture_2d<f32>;
 
 // 32×32 = 1024 bilinear taps across the whole frame — a coarse but stable
 // average for exposure (each tap already averages 4 texels).
@@ -80,6 +83,13 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
     // Manual override: when auto-exposure is off, publish the fixed setting so
     // downstream passes read exposure from one place regardless of mode.
     exposure = select(C.exposure, exposure, hasFlag(FLAG_AUTO_EXPOSURE));
+
+    // App-supplied exposure wins over both: a pipeline that already computes
+    // exposure (its own metering pass) feeds it here, and every downstream
+    // pass keeps reading this one 1×1 value. avgLum stays our own measurement
+    // so the shading-change detector still has a neighbourhood reference.
+    let ext = textureLoad(externalExposure, vec2i(0), 0).r;
+    exposure = select(exposure, ext, hasFlag(FLAG_EXTERNAL_EXPOSURE));
 
     textureStore(exposureOut, vec2i(0), vec4f(exposure, avgLum, 0.0, 0.0));
 }

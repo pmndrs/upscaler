@@ -11,6 +11,7 @@ import { ACCUMULATE_SHADER } from './shaders/accumulate';
 import { BLIT_SHADER } from './shaders/blit';
 import {
     FLAG_AUTO_EXPOSURE,
+    FLAG_EXTERNAL_EXPOSURE,
     FLAG_INPUT_DISPLAY,
     FLAG_INPUT_REINHARD,
     FLAG_LOCKS,
@@ -448,12 +449,19 @@ export class Upscaler {
 
         //* Exposure — reduce scene luminance to a pre-exposure (auto-exposure).
         // Runs first; every later pass reads this frame's value from exposureCur.
+        // App-supplied exposure when given, else the 1×1 dummy (ignored unless
+        // FLAG_EXTERNAL_EXPOSURE is set — reuse the reactive dummy as a valid
+        // texture_2d<f32> placeholder rather than allocate a second one).
+        const externalExposureView = inputs.exposureTexture
+            ? getGPUTexture(this._renderer, inputs.exposureTexture).createView()
+            : this._reactiveDummy!.createView();
         const exposureBindGroup = this._exposurePass.createBindGroup([
             { buffer: this._constants.buffer },
             colorGPU.createView(),
             this._linearSampler,
             exposurePrev.createView(),
             exposureCur.createView(),
+            externalExposureView,
         ]);
         const exposurePass = encoder.beginComputePass({
             label: 'upscale-exposure',
@@ -633,6 +641,7 @@ export class Upscaler {
         if (this.settings.autoExposure) flags |= FLAG_AUTO_EXPOSURE;
         if (this.settings.detectShadingChanges) flags |= FLAG_SHADING_CHANGE;
         if (inputs.reactive || inputs.reactiveOpaqueColor) flags |= FLAG_REACTIVE;
+        if (inputs.exposureTexture) flags |= FLAG_EXTERNAL_EXPOSURE;
         if (this.settings.rcasDenoise) flags |= FLAG_RCAS_DENOISE;
         c.setFlags(flags);
     }
