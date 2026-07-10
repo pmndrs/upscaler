@@ -56,6 +56,18 @@ jobs:
 
       # No NODE_AUTH_TOKEN: OIDC trusted publishing handles auth + provenance.
       # prepublishOnly (lint/typecheck/test/build) runs automatically here.
+      # dist-tag: stable → latest; a prerelease (0.2.0-beta.1) → its preid
+      # (beta/next/rc), so previews are `@pmndrs/upscaler@next` and never
+      # become the default install. Use a preid: `npm version prerelease --preid next`.
       - name: Publish
         if: steps.check.outputs.publish == 'true'
-        run: npm publish --access public
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if [[ "$VERSION" == *-* ]]; then
+            TAG="${VERSION#*-}"; TAG="${TAG%%.*}"          # 0.2.0-beta.1 → beta
+            [[ "$TAG" =~ ^[0-9]+$ ]] && TAG="next"         # 0.2.0-0 (no preid) → next
+          else
+            TAG="latest"
+          fi
+          echo "Publishing $VERSION under dist-tag '$TAG'"
+          npm publish --access public --tag "$TAG"
