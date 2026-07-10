@@ -24,29 +24,32 @@ import { bootRenderer, displaySize } from '../shared/boot';
 import { addStudioLighting } from '../shared/props';
 import { addRenderScale, basePercent } from '../shared/ui';
 
-//* Kitchen sink, denoised-SSGI variant (a copy of 09 that leaves 09 untouched).
+//* ⚠ EXPERIMENTAL — NOT part of the FSR3 library. A copy of 09 (which it leaves
+//* untouched) used to explore denoising noisy SSGI ahead of FSR3. None of the
+//* options here is production-ready; this exists to document the tradeoffs. The
+//* FSR3 library (src/) is untouched by any of it.
 //*
 //* SSGI is genuinely noisy: SSGINode's `useTemporalFiltering` only *rotates* the
 //* sampling noise each frame for a downstream temporal resolver to average — it
-//* is not a denoiser, so on its own the GI stays grainy. This demo runs the r185
-//* recurrent spatiotemporal denoiser (`recurrentDenoise`, the same node that
-//* cleans the SSR demo) over the GI in `diffuse` mode:
+//* is not a denoiser, so on its own the GI stays grainy. The `SSGI denoiser`
+//* toggle A/Bs three approaches; GPU-observed results (2026-07):
 //*
-//*   ssgi.getGINode() -> temporalReproject(velocity) -> recurrentDenoise -> composite
+//* - `builtin`  — raw SSGI, FSR3 resolves it. Stable, but soft/weak.
+//* - `spatial`  — recurrentDenoise as SPATIAL-ONLY à-trous, FSR3 owns temporal
+//*                (no jitter conflict). Cleaner than builtin, BUT shows à-trous
+//*                edge halos + faint step-lines on flat walls, and a frame-skip
+//*                cadence from the node's own render-target update. Tuning those
+//*                means tuning a third-party node we don't own — not worth it.
+//* - `recurrent`— full spatiotemporal (temporalReproject + accumulate). WORST
+//*                under FSR3 jitter: its velocity-only reprojection can't see
+//*                FSR3's sub-pixel jitter, so it rejects misaligned history (GI
+//*                noise survives) AND cancels the jitter variance FSR3 needs to
+//*                reconstruct (aliasing returns). Same class as TRAA-before-FSR3.
 //*
-//* KNOWN ISSUE (why the toggle defaults to `builtin`): with FSR3 jitter ON, the
-//* recurrent path adds noise (bright/colored GI) and brings BACK aliasing. Root
-//* cause is a temporal-resolver conflict: recurrentDenoise/temporalReproject
-//* reproject history by *velocity*, which is jitter-free — so FSR3's sub-pixel
-//* jitter misaligns their history every frame. They then (a) reject that
-//* misaligned history → the GI noise survives, and (b) temporally stabilize the
-//* signal, cancelling the very per-frame jitter variance FSR3 needs to
-//* reconstruct → aliasing returns. It's the same reason this project never puts
-//* TRAA before FSR3 (double-jitter). Making them coexist needs a jitter-aware
-//* reprojection (hand the denoiser FSR3's offset), which is deferred — FSR3
-//* itself is the priority, not bending every upstream node to it. Left here as a
-//* documented A/B: `builtin` (raw SSGI, FSR3 resolves it — weak but stable) vs
-//* `recurrent` (cleaner in theory, but see above). FSR3 stays the sole AA.
+//* CONCLUSION: a second temporal stage before FSR3 fundamentally fights its
+//* jitter. The real fix is to fuse GI history into FSR3's own accumulation (our
+//* jitter, our motion vectors) — deferred as a future project (see CLAUDE.md
+//* roadmap). FSR3 stays the sole AA here; this demo is left as documentation.
 
 const { renderer, dpr } = await bootRenderer();
 
@@ -112,10 +115,9 @@ const state = {
     jitter: true,
     ssgiSlices: 2,
     ssgiSteps: 8,
-    // `builtin` = raw SSGI (stable, weak). `spatial` = recurrentDenoise as a
-    // spatial-only à-trous with FSR3 owning all temporal (no jitter conflict).
-    // `recurrent` = full spatiotemporal denoise (fights FSR3 jitter — see header).
-    ssgiDenoiser: 'spatial' as 'recurrent' | 'builtin' | 'spatial',
+    // Defaults to the stable path for a clean first impression; `spatial` and
+    // `recurrent` are the experiments (see the header for GPU-observed results).
+    ssgiDenoiser: 'builtin' as 'recurrent' | 'builtin' | 'spatial',
 };
 let fsrNode: ReturnType<typeof fsr3> | null = null;
 
@@ -248,7 +250,7 @@ function updateHud(): void {
     const u = (fsrNode as unknown as { upscaler?: FSR3Upscaler }).upscaler;
     const fx = [state.ssgi && 'SSGI', state.ssr && 'SSR'].filter(Boolean).join(' + ') || 'none';
     hud.innerHTML =
-        `<b>three-fsr3</b>  SSGI denoise A/B\n` +
+        `<b>three-fsr3</b>  SSGI denoise A/B  ⚠ experimental\n` +
         `effects  ${fx}\n` +
         `SSGI     ${state.ssgiDenoiser} · ${state.ssgiSlices} slices / ${state.ssgiSteps} steps\n` +
         `jitter   ${state.jitter ? 'on (reconstruct)' : 'off (stable)'}\n` +
