@@ -1,0 +1,61 @@
+name: Publish to npm
+
+# Publishes @pmndrs/upscaler on push to main — but ONLY when package.json's
+# version is one npm doesn't already have. So day-to-day commits are a no-op;
+# to cut a release, bump the version (npm version patch/minor/major) and merge.
+# `npm publish` runs the package's own prepublishOnly gate (lint + typecheck +
+# test + build), so a broken tree can't ship.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# id-token: write lets npm attach a build-provenance attestation to the release.
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # Evaluate the secret once so the publish step can skip gracefully (green
+    # run) until NPM_TOKEN is configured, instead of failing on a 401.
+    env:
+      HAS_NPM_TOKEN: ${{ secrets.NPM_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      - run: npm ci
+
+      - name: Is this version already on npm?
+        id: check
+        run: |
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
+            echo "Already published: $NAME@$VERSION — skipping."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "New version: $NAME@$VERSION — will publish."
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skipping (no NPM_TOKEN yet)
+        if: steps.check.outputs.publish == 'true' && env.HAS_NPM_TOKEN != 'true'
+        run: echo "::notice::New version detected but NPM_TOKEN secret is not set — skipping publish. Add the secret to enable automated releases."
+
+      # prepublishOnly (lint/typecheck/test/build) runs automatically here.
+      - name: Publish
+        if: steps.check.outputs.publish == 'true' && env.HAS_NPM_TOKEN == 'true'
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

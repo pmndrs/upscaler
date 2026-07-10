@@ -27,6 +27,9 @@
         "fidelityfx"
     ],
     "type": "module",
+    "publishConfig": {
+        "access": "public"
+    },
     "exports": {
         ".": {
             "types": "./dist/index.d.ts",
