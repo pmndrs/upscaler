@@ -45,6 +45,9 @@
     "scripts": {
         "dev": "vite --config bench/vite.config.ts",
         "bench": "vite --config bench/vite.config.ts",
+        "bench:run": "node scripts/run-benchmark.mjs --mode performance",
+        "bench:capture": "node scripts/run-benchmark.mjs --mode capture",
+        "bench:compare:rcas": "node scripts/compare-rcas.mjs",
         "examples": "vite --config examples/vite.config.ts",
         "examples:build": "vite build --config examples/vite.config.ts",
         "build": "vite build && tsc --declaration --emitDeclarationOnly -p tsconfig.build.json",

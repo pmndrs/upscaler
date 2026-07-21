@@ -14,7 +14,7 @@ import { assembleShader } from './wgsl';
  * - 6: exposure (1×1; r = pre-exposure, g = avg luma)
  * - 7: scene color (render size)
  * - 8: reactive mask (render size; r = reactivity)
- * - 9: output storage (rgba8unorm, display size)
+ * - 9: output storage (rgba16float, display size)
  */
 export const DEBUG_SHADER = assembleShader(
     WGSL_CONSTANTS,
@@ -28,7 +28,7 @@ export const DEBUG_SHADER = assembleShader(
 @group(0) @binding(6) var exposureTex : texture_2d<f32>;
 @group(0) @binding(7) var inputColor : texture_2d<f32>;
 @group(0) @binding(8) var reactiveMask : texture_2d<f32>;
-@group(0) @binding(9) var outputColor : texture_storage_2d<rgba8unorm, write>;
+@group(0) @binding(9) var outputColor : texture_storage_2d<rgba16float, write>;
 
 // Simple HSV-ish direction coloring for motion vectors.
 fn motionToColor(m : vec2f) -> vec3f {

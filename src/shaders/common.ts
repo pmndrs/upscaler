@@ -98,28 +98,6 @@ fn tonemapInvert(c : vec3f) -> vec3f {
 `;
 
 /**
- * Display transform: ACES filmic approximation (Narkowicz) + sRGB OETF.
- * Every output path (blit, EASU, RCAS) funnels through this so all bench
- * modes are visually comparable.
- */
-export const WGSL_DISPLAY_TRANSFORM = /* wgsl */ `
-fn acesFilm(x : vec3f) -> vec3f {
-    let a = 2.51; let b = 0.03; let c = 2.43; let d = 0.59; let e = 0.14;
-    return clamp((x * (a * x + b)) / (x * (c * x + d) + e), vec3f(0.0), vec3f(1.0));
-}
-
-fn srgbEncode(c : vec3f) -> vec3f {
-    let lo = c * 12.92;
-    let hi = 1.055 * pow(max(c, vec3f(0.0)), vec3f(1.0 / 2.4)) - 0.055;
-    return select(hi, lo, c <= vec3f(0.0031308));
-}
-
-fn displayTransform(linearHdr : vec3f) -> vec3f {
-    return srgbEncode(acesFilm(linearHdr));
-}
-`;
-
-/**
  * Depth linearization for three's WebGPU projection conventions
  * (see Matrix4.makePerspective — both standard and reversed [0,1] depth).
  * Returns positive view-space distance; orthographic depth interpolates

@@ -2,8 +2,7 @@ import * as THREE from 'three/webgpu';
 
 /**
  * Shared WebGPU bootstrap for the examples. Guards for WebGPU support, creates
- * a `WebGPURenderer` configured for FSR3 presentation (the FSR output is
- * already display-referred sRGB, so tone mapping / output encoding are off),
+ * a `WebGPURenderer` configured to present the upscaler's linear/HDR output,
  * and awaits `init()` — throwing loudly if three falls back to WebGL.
  *
  * @param options - Optional canvas parent (defaults to `document.body`)
@@ -28,9 +27,9 @@ export async function bootRenderer(options: { parent?: HTMLElement } = {}): Prom
     const renderer = new THREE.WebGPURenderer({ antialias: false });
     renderer.setPixelRatio(dpr);
     renderer.setSize(window.innerWidth, window.innerHeight);
-    // FSR output is already tonemapped + sRGB-encoded in WGSL — present untouched.
-    renderer.toneMapping = THREE.NoToneMapping;
-    renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
+    // The upscaler does not own presentation; examples choose ACES + sRGB.
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
     (options.parent ?? document.body).appendChild(renderer.domElement);
 
     await renderer.init();

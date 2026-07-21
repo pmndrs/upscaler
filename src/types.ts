@@ -136,6 +136,15 @@ export interface DispatchInputs {
      */
     reactive?: Texture;
     /**
+     * Optional Transparency & Composition mask at render resolution. This is
+     * intentionally softer than {@link reactive}: it tightens history
+     * rectification and reduces lock/history confidence without forcing the
+     * aggressive current-frame reset used for particles and untracked transparents.
+     * Consumed by source-style structural resolver candidates; ignored by the
+     * production fallback.
+     */
+    transparencyAndComposition?: Texture;
+    /**
      * Opaque-only scene color at render resolution. When provided (and no
      * explicit {@link reactive} mask is given), the upscaler auto-generates the
      * reactive mask from the difference between this and the final `color` —
@@ -154,6 +163,14 @@ export interface DispatchInputs {
      * brightness. Mirrors FSR3's `exposure` dispatch resource.
      */
     exposureTexture?: Texture;
+    /**
+     * Optional host pre-exposure texture (red texel, typically 1×1). Unlike
+     * {@link exposureTexture}, this factor is part of the caller's color
+     * domain and is therefore preserved at output. Source-style candidates
+     * track its previous/current ratio to correct reprojected history.
+     * Omission is equivalent to `1`.
+     */
+    preExposureTexture?: Texture;
     /** Drop all history this frame (camera cut, teleport, resize). */
     reset?: boolean;
     /** Seconds since the previous frame. */

@@ -26,10 +26,9 @@ The recommended integration is the **TSL node** — drop it in as the output of 
 import * as THREE from 'three/webgpu';
 import { upscaleScene, QualityMode } from '@pmndrs/upscaler';
 
-// The upscaler outputs display-ready sRGB, so make the post output transform
-// identity: boot the renderer with NoToneMapping + LinearSRGBColorSpace.
-renderer.toneMapping = THREE.NoToneMapping;
-renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
+// The upscaler remains linear/HDR. Choose presentation independently.
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const post = new THREE.PostProcessing(renderer);
 post.outputNode = upscaleScene(scene, camera, { quality: QualityMode.Quality });
@@ -101,9 +100,8 @@ upscaler.dispatch(
     { color: rt.textures[0], depth: rt.depthTexture, velocity: rt.textures[1], deltaTime },
     camera,
 );
-// upscaler.outputTexture is a display-resolution three texture — present it on
-// a fullscreen quad (already tonemapped + sRGB, so keep renderer tone mapping /
-// output encoding off for that draw).
+// upscaler.outputTexture is a display-resolution linear/HDR texture. Present it
+// through the renderer's normal output transform or continue post-processing it.
 ```
 
 Runtime knobs live on `upscaler.settings` (`sharpness`, `maxAccumulation`, `exposure`, `debugView`) and take effect next frame. `upscaler.resetHistory()` drops accumulation on camera cuts.

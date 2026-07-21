@@ -26,7 +26,7 @@ export interface UpscalePassConfig {
  * - MRT output count matched to the render-target attachment count (a `count: 2`
  *   target rendered without a velocity output yields black)
  * - render resolution taken from the upscaler, float depth + half-float color
- * - a `NoToneMapping` full-screen present of the display-referred FSR output
+ * - a full-screen present that uses the renderer's normal output transform
  *
  * Use {@link renderScene} for the common single-view case, or {@link draw} +
  * {@link outputTexture} when you want to present the result yourself (split
@@ -80,7 +80,7 @@ export class UpscalePass {
         return this._rt;
     }
 
-    /** The upscaled result — sample it however you like (already sRGB). */
+    /** The upscaled linear/HDR result — sample or post-process before presentation. */
     get outputTexture(): THREE.Texture {
         return this.upscaler.outputTexture;
     }
@@ -156,7 +156,7 @@ export class UpscalePass {
         );
     }
 
-    /** Presents {@link outputTexture} full-screen (no re-tonemap). */
+    /** Presents {@link outputTexture} using the renderer's output transform. */
     present(): void {
         this._quad.render(this._renderer);
     }

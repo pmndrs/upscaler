@@ -6,24 +6,50 @@
  * the upscaler whenever textures resize or ping-pong, so `dispatch` takes
  * the group per call instead of caching it here.
  */
+export interface ComputePassOptions {
+    /** Compile-time values for WGSL `override` declarations. */
+    constants?: Record<string, GPUPipelineConstantValue>;
+    /** Stable shader identity included in benchmark evidence. */
+    shaderKey?: string;
+    /** Ordered TypeScript-assembled WGSL chunk identities. */
+    assembledChunks?: readonly string[];
+}
+
+/** Immutable pipeline construction metadata used by benchmark evidence. */
+export interface ComputePassMetadata {
+    shaderKey: string;
+    constants: Readonly<Record<string, GPUPipelineConstantValue>>;
+    assembledChunks: readonly string[];
+}
+
 export class ComputePass {
     static readonly WORKGROUP_SIZE = 8;
 
     readonly label: string;
     readonly pipeline: GPUComputePipeline;
+    readonly metadata: ComputePassMetadata;
 
     private readonly _device: GPUDevice;
 
-    constructor(device: GPUDevice, label: string, code: string) {
+    constructor(device: GPUDevice, label: string, code: string, options: ComputePassOptions = {}) {
         this._device = device;
         this.label = label;
+        this.metadata = Object.freeze({
+            shaderKey: options.shaderKey ?? `baseline:${label}`,
+            constants: Object.freeze({ ...options.constants }),
+            assembledChunks: Object.freeze([...(options.assembledChunks ?? [])]),
+        });
         const module = device.createShaderModule({ label: `upscale-${label}`, code });
         // 'auto' layout keeps the TS side free of duplicated binding tables —
         // the WGSL source is the single source of truth for bindings.
         this.pipeline = device.createComputePipeline({
             label: `upscale-${label}`,
             layout: 'auto',
-            compute: { module, entryPoint: 'main' },
+            compute: {
+                module,
+                entryPoint: 'main',
+                constants: options.constants,
+            },
         });
     }
 

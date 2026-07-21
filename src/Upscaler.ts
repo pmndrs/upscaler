@@ -1,4 +1,10 @@
-import { Matrix4, NoColorSpace, type OrthographicCamera, type PerspectiveCamera } from 'three';
+import {
+    HalfFloatType,
+    Matrix4,
+    NoColorSpace,
+    type OrthographicCamera,
+    type PerspectiveCamera,
+} from 'three';
 import { StorageTexture, type Texture, type WebGPURenderer } from 'three/webgpu';
 
 import { ComputePass } from './internal/ComputePass';
@@ -10,9 +16,32 @@ import { getQualityModeRatio, getRenderResolution } from './math/resolution';
 import { ACCUMULATE_SHADER } from './shaders/accumulate';
 import { BLIT_SHADER } from './shaders/blit';
 import {
+    ACCUMULATE_SOURCE_FILTER_SHADER,
+    ACCUMULATE_SOURCE_STRUCTURAL_SHADER,
+    EASU_SOURCE_APPROX_SHADER,
+} from './shaders/candidateFilters';
+import {
+    DEBUG_SOURCE_FILTER_SHADER,
+    DEBUG_SOURCE_RESOLVER_SHADER,
+    DEBUG_SOURCE_STRUCTURAL_SHADER,
+} from './shaders/candidateDebug';
+import {
+    DEPTH_CLIP_SOURCE_SHADER,
+    GENERATE_REACTIVE_SOURCE_SHADER,
+    PREPARE_INPUTS_SOURCE_SHADER,
+    PREPARE_REACTIVITY_SOURCE_SHADER,
+} from './shaders/candidateInputs';
+import {
+    ACCUMULATE_SOURCE_RESOLVER_SHADER,
+    EXPOSURE_HISTORY_SOURCE_SHADER,
+    LUMA_INSTABILITY_SOURCE_SHADER,
+    LUMA_SPD_SOURCE_SHADER,
+    SHADING_CHANGE_RESOLVE_SOURCE_SHADER,
+    SHADING_CHANGE_SPD_SOURCE_SHADER,
+} from './shaders/candidateTemporal';
+import {
     FLAG_AUTO_EXPOSURE,
     FLAG_EXTERNAL_EXPOSURE,
-    FLAG_INPUT_DISPLAY,
     FLAG_INPUT_REINHARD,
     FLAG_LOCKS,
     FLAG_PERSPECTIVE,
@@ -38,6 +67,15 @@ import {
 } from './types';
 
 type JitterableCamera = PerspectiveCamera | OrthographicCamera;
+type CandidateBundleId =
+    | 'source-filter-bundle-v1'
+    | 'source-structural-bundle-v1'
+    | 'source-spd-resolver-bundle-v1';
+type UpscalerInternalOptions = {
+    renderer: WebGPURenderer;
+    _rcasShader?: string;
+    _candidateBundle?: string;
+};
 
 /**
  * FSR3-style upscaler for three's `WebGPURenderer`, implemented as raw WGSL
@@ -85,6 +123,8 @@ export class Upscaler {
     //* Internals
 
     private readonly _renderer: WebGPURenderer;
+    private readonly _rcasShader: string;
+    private readonly _candidateBundle: CandidateBundleId | null;
     private _device!: GPUDevice;
     private _constants!: ConstantsBuffer;
     private _timer!: GpuTimer;
@@ -98,6 +138,11 @@ export class Upscaler {
     private _exposurePass!: ComputePass;
     private _generateReactivePass!: ComputePass;
     private _debugPass!: ComputePass;
+    private _depthClipPass: ComputePass | null = null;
+    private _prepareReactivityPass: ComputePass | null = null;
+    private _shadingSpdPass: ComputePass | null = null;
+    private _shadingResolvePass: ComputePass | null = null;
+    private _lumaInstabilityPass: ComputePass | null = null;
 
     private _path: UpscalePath = 'temporal';
     private _displayWidth = 0;
@@ -135,9 +180,42 @@ export class Upscaler {
     // Render-res target the auto-generated reactive mask is written into when
     // the caller passes an opaque-only color to diff against the final color.
     private _reactiveGenerated: GPUTexture | null = null;
+    // Candidate-only source graph resources. Production never allocates these.
+    private _reconstructedDepth: GPUBuffer | null = null;
+    private _inputSignals: GPUTexture | null = null;
+    private _preparedMasks: GPUTexture | null = null;
+    private _accumulation: [GPUTexture, GPUTexture] | null = null;
+    private _newLocks: GPUBuffer | null = null;
+    private _lumaPyramid: GPUTexture | null = null;
+    private _shadingPyramid: GPUTexture | null = null;
+    private _shadingChange: GPUTexture | null = null;
+    private _lumaHistory: [GPUTexture, GPUTexture] | null = null;
+    private _lumaInstability: GPUTexture | null = null;
 
-    constructor(options: { renderer: WebGPURenderer }) {
+    constructor(options: { renderer: WebGPURenderer });
+    constructor(options: UpscalerInternalOptions) {
         this._renderer = options.renderer;
+        this._rcasShader = options._rcasShader ?? RCAS_SHADER;
+        const candidate = options._candidateBundle;
+        if (
+            candidate !== undefined &&
+            candidate !== 'source-filter-bundle-v1' &&
+            candidate !== 'source-structural-bundle-v1' &&
+            candidate !== 'source-spd-resolver-bundle-v1'
+        )
+            throw new Error(`@pmndrs/upscaler: unknown internal candidate bundle ${candidate}.`);
+        this._candidateBundle = candidate ?? null;
+    }
+
+    private get _usesStructuralInputs(): boolean {
+        return (
+            this._candidateBundle === 'source-structural-bundle-v1' ||
+            this._candidateBundle === 'source-spd-resolver-bundle-v1'
+        );
+    }
+
+    private get _usesSourceResolver(): boolean {
+        return this._candidateBundle === 'source-spd-resolver-bundle-v1';
     }
 
     /**
@@ -158,13 +236,161 @@ export class Upscaler {
         });
 
         this._blitPass = new ComputePass(device, 'blit', BLIT_SHADER);
-        this._easuPass = new ComputePass(device, 'easu', EASU_SHADER);
-        this._rcasPass = new ComputePass(device, 'rcas', RCAS_SHADER);
-        this._reconstructPass = new ComputePass(device, 'reconstruct', RECONSTRUCT_SHADER);
-        this._accumulatePass = new ComputePass(device, 'accumulate', ACCUMULATE_SHADER);
-        this._exposurePass = new ComputePass(device, 'exposure', LUMINANCE_PYRAMID_SHADER);
-        this._generateReactivePass = new ComputePass(device, 'gen-reactive', GENERATE_REACTIVE_SHADER);
-        this._debugPass = new ComputePass(device, 'debug', DEBUG_SHADER);
+        this._easuPass = new ComputePass(
+            device,
+            'easu',
+            this._candidateBundle ? EASU_SOURCE_APPROX_SHADER : EASU_SHADER,
+            this._candidateBundle
+                ? {
+                      shaderKey: 'fsr1-source-approx-v1',
+                      assembledChunks: ['constants', 'easu-source-approx'],
+                  }
+                : {},
+        );
+        this._rcasPass = new ComputePass(device, 'rcas', this._rcasShader);
+        this._reconstructPass = new ComputePass(
+            device,
+            'reconstruct',
+            this._candidateBundle ? PREPARE_INPUTS_SOURCE_SHADER : RECONSTRUCT_SHADER,
+            this._candidateBundle
+                ? {
+                      shaderKey: this._usesStructuralInputs
+                          ? 'fsr315-prepare-inputs-structural-v1'
+                          : 'fsr315-prepare-inputs-filter-v1',
+                      assembledChunks: ['constants', 'color', 'depth', 'candidate-depth', 'prepare-inputs'],
+                      constants: {
+                          MOTION_INPUT_AT_DISPLAY_RESOLUTION: 0,
+                          MOTION_CANCEL_JITTER: 0,
+                          MOTION_SCALE_X: 1,
+                          MOTION_SCALE_Y: 1,
+                          PREPARE_STRUCTURAL_SIGNALS: this._usesStructuralInputs ? 1 : 0,
+                      },
+                  }
+                : {},
+        );
+        const accumulateShader = this._usesSourceResolver
+            ? ACCUMULATE_SOURCE_RESOLVER_SHADER
+            : this._usesStructuralInputs
+              ? ACCUMULATE_SOURCE_STRUCTURAL_SHADER
+              : this._candidateBundle
+                ? ACCUMULATE_SOURCE_FILTER_SHADER
+                : ACCUMULATE_SHADER;
+        this._accumulatePass = new ComputePass(device, 'accumulate', accumulateShader, {
+            shaderKey: this._candidateBundle
+                ? this._usesSourceResolver
+                    ? 'fsr315-source-resolver-v1'
+                    : this._usesStructuralInputs
+                      ? 'fsr315-source-filter-structural-v1'
+                      : 'fsr315-source-filter-v1'
+                : 'baseline:accumulate',
+            assembledChunks: this._candidateBundle
+                ? ['constants', 'color', 'tonemap', 'candidate-accumulate']
+                : [],
+        });
+        this._exposurePass = new ComputePass(
+            device,
+            'exposure',
+            this._usesSourceResolver
+                ? LUMA_SPD_SOURCE_SHADER
+                : this._candidateBundle
+                  ? EXPOSURE_HISTORY_SOURCE_SHADER
+                  : LUMINANCE_PYRAMID_SHADER,
+            this._candidateBundle
+                ? {
+                      shaderKey: this._usesSourceResolver
+                          ? 'fsr315-luma-spd-v1'
+                          : 'fsr315-exposure-history-v1',
+                      assembledChunks: ['constants', 'candidate-exposure'],
+                  }
+                : {},
+        );
+        this._generateReactivePass = new ComputePass(
+            device,
+            'gen-reactive',
+            this._usesStructuralInputs
+                ? GENERATE_REACTIVE_SOURCE_SHADER
+                : GENERATE_REACTIVE_SHADER,
+            this._usesStructuralInputs
+                ? {
+                      shaderKey: 'fsr315-generate-reactive-policy-v1',
+                      assembledChunks: ['constants', 'generate-reactive-source-policy'],
+                      constants: {
+                          REACTIVE_USE_COMPONENT_MAX: 1,
+                          REACTIVE_APPLY_THRESHOLD: 1,
+                          REACTIVE_BINARY: 0,
+                          REACTIVE_THRESHOLD: 0.04,
+                          REACTIVE_SCALE: 2,
+                          REACTIVE_BINARY_VALUE: 1,
+                      },
+                  }
+                : {},
+        );
+        const debugShader = this._usesSourceResolver
+            ? DEBUG_SOURCE_RESOLVER_SHADER
+            : this._usesStructuralInputs
+              ? DEBUG_SOURCE_STRUCTURAL_SHADER
+              : this._candidateBundle
+                ? DEBUG_SOURCE_FILTER_SHADER
+                : DEBUG_SHADER;
+        this._debugPass = new ComputePass(device, 'debug', debugShader, {
+            shaderKey: this._candidateBundle
+                ? `${this._candidateBundle}:debug-v1`
+                : 'baseline:debug',
+            assembledChunks: this._candidateBundle
+                ? ['constants', 'color', 'candidate-debug']
+                : [],
+        });
+        if (this._candidateBundle) {
+            this._depthClipPass = new ComputePass(device, 'depth-clip', DEPTH_CLIP_SOURCE_SHADER, {
+                shaderKey: this._usesStructuralInputs
+                    ? 'fsr315-depth-clip-structural-v1'
+                    : 'fsr315-depth-clip-filter-v1',
+                assembledChunks: ['constants', 'depth', 'candidate-depth', 'depth-clip'],
+                constants: {
+                    DEPTH_CLIP_MOTION_DIVERGENCE: this._usesStructuralInputs ? 1 : 0,
+                },
+            });
+        }
+        if (this._usesStructuralInputs) {
+            this._prepareReactivityPass = new ComputePass(
+                device,
+                'prepare-reactivity',
+                PREPARE_REACTIVITY_SOURCE_SHADER,
+                {
+                    shaderKey: 'fsr315-prepare-reactivity-v1',
+                    assembledChunks: ['constants', 'prepare-reactivity'],
+                },
+            );
+        }
+        if (this._usesSourceResolver) {
+            this._shadingSpdPass = new ComputePass(
+                device,
+                'shading-spd',
+                SHADING_CHANGE_SPD_SOURCE_SHADER,
+                {
+                    shaderKey: 'fsr315-shading-change-spd-v1',
+                    assembledChunks: ['constants', 'shading-change-spd'],
+                },
+            );
+            this._shadingResolvePass = new ComputePass(
+                device,
+                'shading-resolve',
+                SHADING_CHANGE_RESOLVE_SOURCE_SHADER,
+                {
+                    shaderKey: 'fsr315-shading-change-resolve-v1',
+                    assembledChunks: ['constants', 'shading-change-resolve'],
+                },
+            );
+            this._lumaInstabilityPass = new ComputePass(
+                device,
+                'luma-instability',
+                LUMA_INSTABILITY_SOURCE_SHADER,
+                {
+                    shaderKey: 'fsr315-luma-instability-v1',
+                    assembledChunks: ['constants', 'luma-instability'],
+                },
+            );
+        }
 
         this._jitter = new JitterSequence(this._ratio);
         this._initialized = true;
@@ -236,8 +462,8 @@ export class Upscaler {
 
     /**
      * The upscaled result as a three texture — sample it on a fullscreen
-     * quad (values are display-referred sRGB; disable further tone mapping
-     * and output encoding when presenting).
+     * quad or feed it into later post-processing. Values remain in the
+     * caller's linear/HDR domain; presentation is the caller's responsibility.
      */
     get outputTexture(): Texture {
         if (!this._output) {
@@ -382,7 +608,7 @@ export class Upscaler {
         this._easuPass.dispatch(easuPass, easuBindGroup, this._displayWidth, this._displayHeight);
         easuPass.end();
 
-        //* RCAS — sharpen (input already display-referred)
+        //* RCAS — sharpen in the caller's color domain
         const exposureView = this._exposure![0].createView();
         if (this.settings.sharpness > 0) {
             this._encodeRcas(encoder, this._easuOutput!.createView(), exposureView);
@@ -398,6 +624,10 @@ export class Upscaler {
     ): void {
         if (!inputs.depth || !inputs.velocity) {
             throw new Error('@pmndrs/upscaler: the temporal path requires depth and velocity inputs.');
+        }
+        if (this._candidateBundle) {
+            this._encodeCandidateTemporal(encoder, colorGPU, inputs);
+            return;
         }
 
         const depthGPU = getGPUTexture(this._renderer, inputs.depth);
@@ -552,6 +782,357 @@ export class Upscaler {
         }
     }
 
+    private _encodeCandidateTemporal(
+        encoder: GPUCommandEncoder,
+        colorGPU: GPUTexture,
+        inputs: DispatchInputs,
+    ): void {
+        const depthGPU = getGPUTexture(this._renderer, inputs.depth!);
+        const velocityGPU = getGPUTexture(this._renderer, inputs.velocity!);
+        this._checkMsaa(depthGPU, 'depth');
+        this._checkMsaa(velocityGPU, 'velocity');
+        const depthView = depthGPU.createView(
+            depthGPU.format.includes('stencil') ? { aspect: 'depth-only' } : undefined,
+        );
+
+        const historyIn = this._history![this._historyIndex];
+        const historyOut = this._history![1 - this._historyIndex];
+        const locksIn = this._locks![this._historyIndex];
+        const locksOut = this._locks![1 - this._historyIndex];
+        const exposurePrev = this._exposure![this._historyIndex];
+        const exposureCur = this._exposure![1 - this._historyIndex];
+        const depthCur = this._dilatedDepth![this._depthIndex];
+        const externalConditioning = inputs.exposureTexture
+            ? getGPUTexture(this._renderer, inputs.exposureTexture).createView()
+            : this._reactiveDummy!.createView();
+        const hostPreExposure = inputs.preExposureTexture
+            ? getGPUTexture(this._renderer, inputs.preExposureTexture).createView()
+            : this._reactiveDummy!.createView();
+
+        // Atomic scatter/lock buffers are frame-transient. GPU clears preserve
+        // the pass boundary without a CPU upload proportional to resolution.
+        encoder.clearBuffer(this._reconstructedDepth!);
+        if (this._newLocks) encoder.clearBuffer(this._newLocks);
+
+        //* Reactive Generation ===
+        let reactiveView: GPUTextureView;
+        if (inputs.reactive) {
+            reactiveView = getGPUTexture(this._renderer, inputs.reactive).createView();
+        } else if (inputs.reactiveOpaqueColor) {
+            const opaqueGPU = getGPUTexture(this._renderer, inputs.reactiveOpaqueColor);
+            const bindGroup = this._generateReactivePass.createBindGroup([
+                { buffer: this._constants.buffer },
+                opaqueGPU.createView(),
+                colorGPU.createView(),
+                this._reactiveGenerated!.createView(),
+            ]);
+            const pass = encoder.beginComputePass({
+                label: 'upscale-gen-reactive',
+                timestampWrites: this._timer.passDescriptor('genReactive'),
+            });
+            this._generateReactivePass.dispatch(pass, bindGroup, this._renderWidth, this._renderHeight);
+            pass.end();
+            reactiveView = this._reactiveGenerated!.createView();
+        } else {
+            reactiveView = this._reactiveDummy!.createView();
+        }
+
+        //* Prepare Inputs + Atomic Depth Scatter ===
+        const prepareInputsBindGroup = this._reconstructPass.createBindGroup([
+            { buffer: this._constants.buffer },
+            depthView,
+            velocityGPU.createView(),
+            colorGPU.createView(),
+            { buffer: this._reconstructedDepth! },
+            depthCur.createView(),
+            this._dilatedMotion!.createView(),
+            this._inputSignals!.createView(),
+        ]);
+        const prepareInputsPass = encoder.beginComputePass({
+            label: 'upscale-prepare-inputs',
+            timestampWrites: this._timer.passDescriptor('prepareInputs'),
+        });
+        this._reconstructPass.dispatch(
+            prepareInputsPass,
+            prepareInputsBindGroup,
+            this._renderWidth,
+            this._renderHeight,
+        );
+        prepareInputsPass.end();
+
+        //* Exposure State / Luma SPD ===
+        if (this._usesSourceResolver) {
+            const lumaSpdBindGroup = this._exposurePass.createBindGroup([
+                { buffer: this._constants.buffer },
+                this._inputSignals!.createView(),
+                exposurePrev.createView(),
+                externalConditioning,
+                hostPreExposure,
+                exposureCur.createView(),
+                this._mipView(this._lumaPyramid!, 0),
+                this._mipView(this._lumaPyramid!, 1),
+                this._mipView(this._lumaPyramid!, 2),
+            ]);
+            const lumaSpdPass = encoder.beginComputePass({
+                label: 'upscale-luma-spd',
+                timestampWrites: this._timer.passDescriptor('lumaSpd'),
+            });
+            this._exposurePass.dispatch(
+                lumaSpdPass,
+                lumaSpdBindGroup,
+                Math.max(1, Math.ceil(this._renderWidth / 2)),
+                Math.max(1, Math.ceil(this._renderHeight / 2)),
+            );
+            lumaSpdPass.end();
+        } else {
+            const exposureBindGroup = this._exposurePass.createBindGroup([
+                { buffer: this._constants.buffer },
+                colorGPU.createView(),
+                this._linearSampler,
+                exposurePrev.createView(),
+                exposureCur.createView(),
+                externalConditioning,
+                hostPreExposure,
+            ]);
+            const exposurePass = encoder.beginComputePass({
+                label: 'upscale-exposure-history',
+                timestampWrites: this._timer.passDescriptor('exposure'),
+            });
+            this._exposurePass.dispatch(exposurePass, exposureBindGroup, 8, 8);
+            exposurePass.end();
+        }
+
+        //* Reconstructed Depth Resolve ===
+        const depthClipBindGroup = this._depthClipPass!.createBindGroup([
+            { buffer: this._constants.buffer },
+            { buffer: this._reconstructedDepth! },
+            depthCur.createView(),
+            this._dilatedMotion!.createView(),
+            this._masks!.createView(),
+        ]);
+        const depthClipPass = encoder.beginComputePass({
+            label: 'upscale-depth-clip',
+            timestampWrites: this._timer.passDescriptor('depthClip'),
+        });
+        this._depthClipPass!.dispatch(
+            depthClipPass,
+            depthClipBindGroup,
+            this._renderWidth,
+            this._renderHeight,
+        );
+        depthClipPass.end();
+
+        //* Signed-Difference Shading SPD ===
+        if (this._usesSourceResolver) {
+            const lumaHistoryIn = this._lumaHistory![this._historyIndex];
+            const shadingSpdBindGroup = this._shadingSpdPass!.createBindGroup([
+                { buffer: this._constants.buffer },
+                this._inputSignals!.createView(),
+                lumaHistoryIn.createView(),
+                this._dilatedMotion!.createView(),
+                exposureCur.createView(),
+                exposurePrev.createView(),
+                this._mipView(this._shadingPyramid!, 0),
+                this._mipView(this._shadingPyramid!, 1),
+                this._mipView(this._shadingPyramid!, 2),
+            ]);
+            const shadingSpdPass = encoder.beginComputePass({
+                label: 'upscale-shading-spd',
+                timestampWrites: this._timer.passDescriptor('shadingSpd'),
+            });
+            this._shadingSpdPass!.dispatch(
+                shadingSpdPass,
+                shadingSpdBindGroup,
+                Math.max(1, Math.ceil(this._renderWidth / 2)),
+                Math.max(1, Math.ceil(this._renderHeight / 2)),
+            );
+            shadingSpdPass.end();
+
+            const shadingResolveBindGroup = this._shadingResolvePass!.createBindGroup([
+                { buffer: this._constants.buffer },
+                this._shadingPyramid!.createView({
+                    baseMipLevel: 0,
+                    mipLevelCount: 3,
+                }),
+                this._shadingChange!.createView(),
+            ]);
+            const shadingResolvePass = encoder.beginComputePass({
+                label: 'upscale-shading-resolve',
+                timestampWrites: this._timer.passDescriptor('shadingResolve'),
+            });
+            this._shadingResolvePass!.dispatch(
+                shadingResolvePass,
+                shadingResolveBindGroup,
+                Math.max(1, Math.ceil(this._renderWidth / 2)),
+                Math.max(1, Math.ceil(this._renderHeight / 2)),
+            );
+            shadingResolvePass.end();
+        }
+
+        //* Prepare Reactivity / Accumulation State ===
+        if (this._usesStructuralInputs) {
+            const accumulationIn = this._accumulation![this._historyIndex];
+            const accumulationOut = this._accumulation![1 - this._historyIndex];
+            const compositionView = inputs.transparencyAndComposition
+                ? getGPUTexture(this._renderer, inputs.transparencyAndComposition).createView()
+                : this._reactiveDummy!.createView();
+            const shadingView = this._usesSourceResolver
+                ? this._shadingChange!.createView()
+                : this._reactiveDummy!.createView();
+            const prepareReactivityBindGroup = this._prepareReactivityPass!.createBindGroup([
+                { buffer: this._constants.buffer },
+                this._masks!.createView(),
+                this._dilatedMotion!.createView(),
+                this._inputSignals!.createView(),
+                reactiveView,
+                compositionView,
+                accumulationIn.createView(),
+                shadingView,
+                this._preparedMasks!.createView(),
+                accumulationOut.createView(),
+                { buffer: this._newLocks! },
+            ]);
+            const prepareReactivityPass = encoder.beginComputePass({
+                label: 'upscale-prepare-reactivity',
+                timestampWrites: this._timer.passDescriptor('prepareReactivity'),
+            });
+            this._prepareReactivityPass!.dispatch(
+                prepareReactivityPass,
+                prepareReactivityBindGroup,
+                this._renderWidth,
+                this._renderHeight,
+            );
+            prepareReactivityPass.end();
+        }
+
+        //* Four-Frame Luma Instability ===
+        if (this._usesSourceResolver) {
+            const lumaHistoryIn = this._lumaHistory![this._historyIndex];
+            const lumaHistoryOut = this._lumaHistory![1 - this._historyIndex];
+            const instabilityBindGroup = this._lumaInstabilityPass!.createBindGroup([
+                { buffer: this._constants.buffer },
+                this._inputSignals!.createView(),
+                this._dilatedMotion!.createView(),
+                this._preparedMasks!.createView(),
+                lumaHistoryIn.createView(),
+                exposureCur.createView(),
+                exposurePrev.createView(),
+                lumaHistoryOut.createView(),
+                this._lumaInstability!.createView(),
+            ]);
+            const instabilityPass = encoder.beginComputePass({
+                label: 'upscale-luma-instability',
+                timestampWrites: this._timer.passDescriptor('lumaInstability'),
+            });
+            this._lumaInstabilityPass!.dispatch(
+                instabilityPass,
+                instabilityBindGroup,
+                this._renderWidth,
+                this._renderHeight,
+            );
+            instabilityPass.end();
+        }
+
+        //* Candidate Accumulation ===
+        let accumulateResources: GPUBindingResource[];
+        if (this._usesSourceResolver) {
+            accumulateResources = [
+                { buffer: this._constants.buffer },
+                colorGPU.createView(),
+                this._dilatedMotion!.createView(),
+                this._preparedMasks!.createView(),
+                historyIn.createView(),
+                historyOut.createView(),
+                this._inputSignals!.createView(),
+                this._lumaInstability!.createView(),
+                { buffer: this._newLocks! },
+                exposureCur.createView(),
+                exposurePrev.createView(),
+            ];
+        } else if (this._usesStructuralInputs) {
+            accumulateResources = [
+                { buffer: this._constants.buffer },
+                colorGPU.createView(),
+                this._dilatedMotion!.createView(),
+                this._preparedMasks!.createView(),
+                historyIn.createView(),
+                this._linearSampler,
+                historyOut.createView(),
+                locksIn.createView(),
+                locksOut.createView(),
+                exposureCur.createView(),
+                exposurePrev.createView(),
+            ];
+        } else {
+            accumulateResources = [
+                { buffer: this._constants.buffer },
+                colorGPU.createView(),
+                this._dilatedMotion!.createView(),
+                this._masks!.createView(),
+                historyIn.createView(),
+                this._linearSampler,
+                historyOut.createView(),
+                locksIn.createView(),
+                locksOut.createView(),
+                exposureCur.createView(),
+                reactiveView,
+                exposurePrev.createView(),
+            ];
+        }
+        const accumulateBindGroup = this._accumulatePass.createBindGroup(accumulateResources);
+        const accumulatePass = encoder.beginComputePass({
+            label: 'upscale-accumulate-candidate',
+            timestampWrites: this._timer.passDescriptor('accumulate'),
+        });
+        this._accumulatePass.dispatch(
+            accumulatePass,
+            accumulateBindGroup,
+            this._displayWidth,
+            this._displayHeight,
+        );
+        accumulatePass.end();
+
+        //* Output ===
+        if (this.settings.debugView !== DebugView.None) {
+            const debugMasks = this._usesStructuralInputs
+                ? this._preparedMasks!.createView()
+                : this._masks!.createView();
+            const debugAuxiliary = this._usesSourceResolver
+                ? this._lumaInstability!.createView()
+                : locksOut.createView();
+            const debugReactive = this._usesStructuralInputs
+                ? this._preparedMasks!.createView()
+                : reactiveView;
+            const debugBindGroup = this._debugPass.createBindGroup([
+                { buffer: this._constants.buffer },
+                this._dilatedMotion!.createView(),
+                debugMasks,
+                this._inputSignals!.createView(),
+                historyOut.createView(),
+                debugAuxiliary,
+                exposureCur.createView(),
+                colorGPU.createView(),
+                debugReactive,
+                this._outputView(),
+            ]);
+            const debugPass = encoder.beginComputePass({
+                label: 'upscale-debug',
+                timestampWrites: this._timer.passDescriptor('output'),
+            });
+            this._debugPass.dispatch(
+                debugPass,
+                debugBindGroup,
+                this._displayWidth,
+                this._displayHeight,
+            );
+            debugPass.end();
+        } else if (this.settings.sharpness > 0) {
+            this._encodeRcas(encoder, historyOut.createView(), exposureCur.createView());
+        } else {
+            this._encodeBlit(encoder, historyOut.createView(), exposureCur.createView());
+        }
+    }
+
     private _encodeRcas(
         encoder: GPUCommandEncoder,
         input: GPUTextureView,
@@ -591,6 +1172,10 @@ export class Upscaler {
     // rather than trusting the texture to be single-mip.
     private _outputView(): GPUTextureView {
         return this._outputGPU!.createView({ baseMipLevel: 0, mipLevelCount: 1 });
+    }
+
+    private _mipView(texture: GPUTexture, level: number): GPUTextureView {
+        return texture.createView({ baseMipLevel: level, mipLevelCount: 1 });
     }
 
     //* Constants Staging
@@ -635,8 +1220,7 @@ export class Upscaler {
             flags |= FLAG_RESET;
         }
         if ((camera as PerspectiveCamera).isPerspectiveCamera) flags |= FLAG_PERSPECTIVE;
-        if (this._path === 'temporal') flags |= FLAG_INPUT_REINHARD;
-        if (this._path === 'spatial') flags |= FLAG_INPUT_DISPLAY;
+        if (this._path === 'temporal' && !this._usesSourceResolver) flags |= FLAG_INPUT_REINHARD;
         if (this.settings.lockThinFeatures) flags |= FLAG_LOCKS;
         if (this.settings.autoExposure) flags |= FLAG_AUTO_EXPOSURE;
         if (this.settings.detectShadingChanges) flags |= FLAG_SHADING_CHANGE;
@@ -675,6 +1259,7 @@ export class Upscaler {
         this._output = new StorageTexture(dw, dh);
         this._output.name = 'upscale-output';
         this._output.colorSpace = NoColorSpace;
+        this._output.type = HalfFloatType;
         // Texture.generateMipmaps defaults to true, which would make three
         // allocate a mip chain — storage views must cover exactly one level.
         this._output.generateMipmaps = false;
@@ -715,8 +1300,78 @@ export class Upscaler {
                 this._createTexture('dilated-depth-1', rw, rh, 'r32float'),
             ];
             this._dilatedMotion = this._createTexture('dilated-motion', rw, rh, 'rgba16float');
-            this._masks = this._createTexture('masks', rw, rh, 'rgba8unorm');
+            this._masks = this._createTexture(
+                'masks',
+                rw,
+                rh,
+                this._candidateBundle ? 'rgba16float' : 'rgba8unorm',
+            );
             this._reactiveGenerated = this._createTexture('reactive-gen', rw, rh, 'rgba8unorm');
+
+            if (this._candidateBundle) {
+                this._reconstructedDepth = this._device.createBuffer({
+                    label: 'upscale-reconstructed-depth-atomic',
+                    size: Math.max(4, rw * rh * Uint32Array.BYTES_PER_ELEMENT),
+                    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+                });
+                this._inputSignals = this._createTexture('input-signals', rw, rh, 'rgba16float');
+            }
+
+            if (this._usesStructuralInputs) {
+                this._preparedMasks = this._createTexture(
+                    'prepared-masks',
+                    rw,
+                    rh,
+                    'rgba16float',
+                );
+                this._accumulation = [
+                    this._createTexture('accumulation-0', rw, rh, 'r32float'),
+                    this._createTexture('accumulation-1', rw, rh, 'r32float'),
+                ];
+                this._newLocks = this._device.createBuffer({
+                    label: 'upscale-new-locks-atomic',
+                    size: Math.max(4, dw * dh * Uint32Array.BYTES_PER_ELEMENT),
+                    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+                });
+            }
+
+            if (this._usesSourceResolver) {
+                // Each successive mip uses floor(base / 2). Round the base to
+                // four so odd render sizes still have room for every ceil-sized
+                // direct reduction written by the single-dispatch shaders.
+                const halfWidth = Math.max(4, Math.ceil(rw / 8) * 4);
+                const halfHeight = Math.max(4, Math.ceil(rh / 8) * 4);
+                this._lumaPyramid = this._device.createTexture({
+                    label: 'upscale-luma-spd',
+                    size: { width: halfWidth, height: halfHeight },
+                    mipLevelCount: 3,
+                    format: 'rgba16float',
+                    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING,
+                });
+                this._shadingPyramid = this._device.createTexture({
+                    label: 'upscale-shading-change-spd',
+                    size: { width: halfWidth, height: halfHeight },
+                    mipLevelCount: 3,
+                    format: 'rgba16float',
+                    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING,
+                });
+                this._shadingChange = this._createTexture(
+                    'shading-change',
+                    Math.max(1, Math.ceil(rw / 2)),
+                    Math.max(1, Math.ceil(rh / 2)),
+                    'r32float',
+                );
+                this._lumaHistory = [
+                    this._createTexture('luma-history-0', rw, rh, 'rgba16float'),
+                    this._createTexture('luma-history-1', rw, rh, 'rgba16float'),
+                ];
+                this._lumaInstability = this._createTexture(
+                    'luma-instability',
+                    rw,
+                    rh,
+                    'r32float',
+                );
+            }
         }
     }
 
@@ -750,5 +1405,29 @@ export class Upscaler {
         this._reactiveDummy = null;
         this._reactiveGenerated?.destroy();
         this._reactiveGenerated = null;
+        this._reconstructedDepth?.destroy();
+        this._reconstructedDepth = null;
+        this._inputSignals?.destroy();
+        this._inputSignals = null;
+        this._preparedMasks?.destroy();
+        this._preparedMasks = null;
+        if (this._accumulation) {
+            this._accumulation.forEach((texture) => texture.destroy());
+            this._accumulation = null;
+        }
+        this._newLocks?.destroy();
+        this._newLocks = null;
+        this._lumaPyramid?.destroy();
+        this._lumaPyramid = null;
+        this._shadingPyramid?.destroy();
+        this._shadingPyramid = null;
+        this._shadingChange?.destroy();
+        this._shadingChange = null;
+        if (this._lumaHistory) {
+            this._lumaHistory.forEach((texture) => texture.destroy());
+            this._lumaHistory = null;
+        }
+        this._lumaInstability?.destroy();
+        this._lumaInstability = null;
     }
 }

@@ -61,7 +61,7 @@ inspector can't give you per-GPU-pass times. Notes for the DPR demo:
 Every demo drives the library through [`shared/UpscalePresenter.ts`](shared/UpscalePresenter.ts),
 which encapsulates the whole integration recipe (jitter-free velocity, MRT output
 count matched to the render-target attachment count, float depth, the
-`NoToneMapping` present). New demos should reuse it rather than re-deriving the
+linear/HDR output, and renderer-owned presentation). New demos should reuse it rather than re-deriving the
 wiring — the one exception is `06`, which drives the raw `Upscaler` directly
 so it can feed FSR3 the output of a TSL pass graph.
 

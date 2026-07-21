@@ -1,0 +1,1764 @@
+{
+  "schema_version": 1,
+  "experiment": {
+    "id": "E00",
+    "name": "Harness Foundation",
+    "phase": 1,
+    "task": "Tasks 1.1 through 1.6",
+    "status": "implementing",
+    "fix_round": 2,
+    "fix_round_limit_reached": true,
+    "contract_revision": 4,
+    "contract_correction": "Controller redesign 4 binds every run and review to one manifest plus working-tree digest, isolates review persistence, closes user-owned CDP targets, and finalizes E00 timing acceptance from measured baseline variance."
+  },
+  "purpose": "Build and accept the deterministic, single-variant benchmark foundation required before any FSR parity algorithm experiment begins.",
+  "hypothesis": "The local baseline can run through a deterministic one-variant harness with frame-exact captures, fresh timestamp-query samples, and reproducible reset behavior while preserving its shader algorithms and output. Baseline-versus-baseline ABBA runs will establish a usable machine and browser timing noise floor.",
+  "comparison": {
+    "class": "infrastructure-equivalence",
+    "baseline_variant": "local-baseline-5d6a65e",
+    "candidate_variant": "local-baseline-through-e00-harness",
+    "single_variable": "Execution, capture, validation, and timing infrastructure; resolver shader algorithms, pass math, resource formats, and public behavior remain unchanged."
+  },
+  "source": {
+    "name": "FidelityFX SDK FSR Upscaler",
+    "version": "3.1.5",
+    "commit": "60f4ea81909200d8542eca14dccb2628b763a9a3",
+    "reference_behavior": "Source behavior is pinned for later parity experiments. E00 does not port or authorize any source shader algorithm."
+  },
+  "baseline": {
+    "sha": "5d6a65e5681e5e95590f3e9a11ce75e43354ca13",
+    "short_sha": "5d6a65e",
+    "branch": "feat-match-fsr3",
+    "verification": {
+      "command": "npm test",
+      "result": "passed",
+      "tests_passed": 54,
+      "tests_failed": 0
+    }
+  },
+  "dependencies": [],
+  "target_artifact": {
+    "name": "Deterministic baseline-equivalence evidence",
+    "description": "Frame-exact baseline captures, complete validation logs, and fresh frame-tagged GPU timing distributions produced by one active resolver without changing baseline image behavior.",
+    "success_signal": "Five-reload capture sets pass the numerical equivalence protocol, every deterministic scenario and debug gate passes, and four ABBA repetitions establish an acceptable timing noise floor at every required ratio."
+  },
+  "known_regression_risks": [
+    "Harness orchestration changes frame order, projection jitter ownership, velocity generation, or history reset timing.",
+    "Wall-clock, OrbitControls, resize handlers, random values, asynchronous readback order, or upstream effects make supposedly identical runs non-deterministic.",
+    "Capture compares different dimensions, transfer domains, alpha handling, presentation transforms, frames, or debug views.",
+    "Timing collection returns stale, missing, duplicated, or untagged samples or changes the measured GPU graph.",
+    "Variant registration instantiates two resolvers, compiles inactive candidates into the measured graph, or leaves stale timing labels.",
+    "Automated reset fails to clear temporal, exposure-adaptation, scenario-event, PRNG, jitter, and pending-readback state.",
+    "Q5 through Q8 fixture integration changes production shader algorithms instead of supplying deterministic upstream inputs.",
+    "A browser or adapter capability difference is mislabeled as algorithm evidence without the required platform-divergence record."
+  ],
+  "per_pass_and_compute_timing_budget": {
+    "scope": "Every existing GPU pass label and the compute sum at ratios 1, 1.5, 2, and 3.",
+    "median_relative_delta_limit": "max(3%, 2 * N_median)",
+    "p95_relative_delta_limit": "max(5%, 2 * N_p95)",
+    "per_pass_rule": "For each pass label, compare the mean of the two A run statistics with the mean of the two B run statistics inside each ABBA repetition. A pass supports an individual performance claim only when its own N_median and N_p95 meet the declared noise limits; otherwise retain its samples in compute sum, mark the pass ineligible, and require a later pass-specific microbenchmark before making a claim.",
+    "compute_sum_rule": "Apply the same median and p95 limits independently to the sum of all resolver compute-pass samples in at least three of four repetitions.",
+    "new_gpu_work": "No additional production GPU pass or dispatch is permitted in E00. Instrumentation query resolve and readback work is excluded from compute sum but reported separately.",
+    "noise_floor_acceptance": {
+      "N_median_max": 0.015,
+      "N_p95_max": 0.025,
+      "unit": "fractional relative delta",
+      "failure": "E00 is blocked if any required ratio's compute-sum noise floor exceeds either maximum after one clean rerun. A per-pass failure does not block aggregate E00 acceptance, but it forbids an individual claim for that pass until a later microbenchmark establishes a usable floor."
+    }
+  },
+  "required_platform_divergence_evidence": {
+    "platform_reason": "Identify the exact browser, WebGPU, backend, adapter, driver, feature, limit, validation rule, or timestamp-query behavior preventing parity and include reproducible logs.",
+    "affected_scenarios": "List every affected platform, scenario ID, ratio, frame, debug view, and ROI; state which unaffected controls still pass.",
+    "visual_impact": "Provide blinded baseline/candidate captures and numerical max-absolute, RMSE, alpha, dimension, and artifact-rubric results for each affected ROI.",
+    "median_p95_impact": "Provide raw fresh samples, missing counts, per-pass and compute-sum median/p95 deltas, ABBA repetition results, and the independently derived noise floor.",
+    "maintenance_cost": "Record additional code paths, capability checks, tests, artifact fixtures, cross-platform validation obligations, production-bundle cost, and expected future upkeep."
+  },
+  "scope": {
+    "allowed_write_paths": [
+      "bench/src/types/benchmark.d.ts",
+      "bench/src/benchmark/config.ts",
+      "bench/src/benchmark/variants.ts",
+      "bench/src/benchmark/BenchmarkResolver.ts",
+      "bench/src/BenchPipeline.ts",
+      "src/internal/ComputePass.ts",
+      "src/shaders/shaders.test.ts",
+      "bench/src/benchmark/clock.ts",
+      "bench/src/benchmark/scenarios.ts",
+      "bench/src/BenchScene.ts",
+      "bench/src/main.ts",
+      "src/internal/GpuTimer.ts",
+      "bench/src/benchmark/collector.ts",
+      "bench/src/benchmark/api.ts",
+      "bench/src/benchmark/environment.ts",
+      "scripts/benchmark-contract.mjs",
+      "scripts/benchmark-contract.test.mjs",
+      "scripts/run-benchmark.mjs",
+      "bench/results/README.md",
+      "bench/results/.gitignore",
+      "package.json"
+    ],
+    "forbidden_changes": [
+      "Any write to a path not exactly listed in allowed_write_paths.",
+      "Any parity shader algorithm, filter, sampling kernel, accumulation, rectification, lock, exposure, reactive, depth, RCAS, EASU, color-domain, or presentation-order change.",
+      "Any public API or public default change.",
+      "Any production resource format, binding layout, bind-group order, pass graph, output-domain, or dispatch behavior change except passing unchanged baseline behavior through the benchmark resolver adapter.",
+      "Any dependency addition or package-manager lockfile change.",
+      "Any GPU-dependent CI test or CI workflow change.",
+      "Any replacement of raw WGSL or the existing three WebGPU bridge with TSL.",
+      "Any edit to the parity plan, this manifest, or bench/PARITY-PROGRESS.md by an implementer.",
+      "Any commit, branch, worktree, stash, or destructive Git operation."
+    ],
+    "implementation_serialization": {
+      "rule": "All implementation agents whose immutable allowed_write_paths overlap by one or more exact paths execute serially.",
+      "handoff": "The controller verifies the prior writer is complete or stopped and records its changed paths before assigning the next overlapping writer.",
+      "parallel_exception": "Parallel participants must be independent and read-only, with no shared mutable artifact, integration state, or write permission."
+    }
+  },
+  "commands": {
+    "static": [
+      "npm run lint",
+      "npm run typecheck",
+      "npm test",
+      "npm run build"
+    ],
+    "real_device": [
+      "npm run dev -- --host 127.0.0.1",
+      "npm run bench:capture -- --experiment E00 --variant baseline --comparison baseline --ratios 1,1.5,2,3",
+      "npm run bench:run -- --experiment E00 --variant baseline --comparison baseline --ratios 1,1.5,2,3 --blocks 4 --warmup 240 --samples 600"
+    ],
+    "required_log_channels": [
+      "Log.entryAdded",
+      "Runtime.consoleAPICalled",
+      "Runtime.exceptionThrown"
+    ]
+  },
+  "scenarios": {
+    "output": {
+      "width": 1920,
+      "height": 1080,
+      "device_pixel_ratio": 1,
+      "timestep_seconds": 0.016666666666666666,
+      "msaa": false
+    },
+    "ratios": [
+      1,
+      1.5,
+      2,
+      3
+    ],
+    "formula_conventions": {
+      "frame": "n is the zero-based integer frame index.",
+      "time": "t = n / 60 seconds; no wall-clock value is read.",
+      "look_at": "Camera orientation is the right-handed three.js lookAt quaternion for the stated position, target, and up vector [0,1,0], recomputed from absolute values each frame.",
+      "projection": "Perspective fields are vertical field of view in degrees, aspect width/height, near, and far. Projection jitter is applied later by the sole active upscaler and is not part of these unjittered camera formulas.",
+      "baseline_scene_formula": {
+        "knots": "For knot i in {0,1,2}: position=(-6+6*i,2.2,-4), rotationEulerXYZ=(0.35*t+i,0.5*t,0).",
+        "spheres": "For sphere i in {0,1,2,3}, a=0.9*t+i*pi/2 and position=(5.5*cos(a),1.1+0.4*sin(2*t+i),5.5*sin(a)); rotation is fixed identity.",
+        "floor_fence_bulb": "Floor, 60 pickets, and bulb retain the fixed transforms created by BenchScene: floor rotationX=-pi/2; picket i position=(-12+0.4*i,1.2,3.5); bulb position=(0,5.5,-2).",
+        "lighting": "Directional light color 0xfff2df, intensity 3.2, position (8,14,6); hemisphere sky 0x9fb4d4, ground 0x2a2620, intensity 0.9.",
+        "exposure": "settings.exposure=1.0 and autoExposure=true unless the scenario states otherwise."
+      },
+      "baseline_camera": {
+        "position": [
+          9,
+          6,
+          12
+        ],
+        "target": [
+          0,
+          1.6,
+          0
+        ],
+        "up": [
+          0,
+          1,
+          0
+        ],
+        "projection": {
+          "type": "perspective",
+          "vertical_fov_degrees": 50,
+          "aspect": 1.7777777777777777,
+          "near": 0.1,
+          "far": 200
+        }
+      },
+      "room_scene_formula": {
+        "camera_target": [
+          0,
+          3,
+          -5
+        ],
+        "geometry": "Fixed example-06/09/10 room: floor 60x60 at rotationX=-pi/2; walls at (-8,5,-4), (8,5,-4), and (0,5,-12); box i in {0..4} at (-5+2.5*i,1+0.25*i,-6+3*(i mod 2)); sphere at (2,1.6,-2).",
+        "lighting": "Studio lighting from examples/shared/props plus ambient color 0x404860 at intensity 0.4; all transforms and intensities remain fixed.",
+        "projection": {
+          "type": "perspective",
+          "vertical_fov_degrees": 55,
+          "aspect": 1.7777777777777777,
+          "near": 0.1,
+          "far": 200
+        }
+      },
+      "installed_three_effect_sequences": {
+        "version": "0.185.1",
+        "frame_mapping": "After the readiness barrier, shape-check renderer._nodes.nodeFrame, then set frameId=0, renderId=0, time=0, deltaTime=0, lastTime=performance.now(), updateMap=new WeakMap(), updateBeforeMap=new WeakMap(), and updateAfterMap=new WeakMap(). Replacing all three maps is required because NodeFrame stores prior frame/render IDs per node; reusing frame IDs without fresh maps can suppress updates. Permit exactly one renderer animation-loop tick per recorded scenario frame and no other NodeFrame.update() call; Animation.update calls NodeFrame.update() before the user callback, so the exact effect frame ID for recorded scenario frame n is f(n)=n+1. The harness must verify these mutable fields against node_modules/three/src/renderers/common/Renderer.js, node_modules/three/src/renderers/common/Animation.js, and node_modules/three/src/nodes/core/NodeFrame.js before using this pinned private bridge.",
+        "readiness_barrier": [
+          "Await renderer.init(), verify backend.device is a live GPUDevice, and record adapter/features before graph construction.",
+          "Construct the exact selected subrun graph and deterministic DenoiseNode noise texture, then execute unrecorded readiness renders with recording disabled until every expected input/effect/upscaler texture has a backend GPUTexture, NodeManager._buildQueue.length is 0, NodeManager._buildInProgress is false, and all selected shader pipelines have completed compilation.",
+          "Await device.queue.onSubmittedWorkDone() and require zero Log.entryAdded WGSL/WebGPU errors, Runtime.exceptionThrown events, uncaught console errors, and device-loss events.",
+          "Retain the compiled graph and allocated resources. Reset upscaler history and all scenario counters. Set every selected SSRNode._noiseIndex.value to 0 after shape-checking that private uniform. Q8 additionally calls setSize(1,1) on TemporalReprojectNode and RecurrentDenoiseNode so recorded n=0 synchronously takes each source-defined needsRestart seed/clear path and cannot read readiness history.",
+          "Reset NodeFrame counters and replace all three NodeFrame update maps with the pinned bridge described by frame_mapping. No selected effect or upscaler render occurs between that reset and recorded n=0. The readiness frames are never assigned scenario frame numbers and none of their history survives into recorded output.",
+          "Recorded n=0 is the first post-reset effect/upscaler execution and is captured when required; it is never replaced by an unrecorded accumulation frame."
+        ],
+        "gtao": {
+          "source": "node_modules/three/examples/jsm/tsl/display/GTAONode.js at installed three 0.185.1",
+          "sequence": "Q6 uses useTemporalFiltering=false, therefore temporalDirection(n)=0 exactly. If enabled in a future manifest, temporalDirection(n)=[60,300,180,240,120,0][f(n) mod 6]/360.",
+          "noise": "The static 5x5 repeat-wrapped magic-square texture is generated with the Siamese algorithm in GTAONode.generateMagicSquare(5): start i=2,j=4; place integers 1..25 with the source wrap/collision rules; texel k with magic value m uses angle=2*pi*m/25 and RGBA8=(uint8((0.5+0.5*cos(angle))*255),uint8((0.5+0.5*sin(angle))*255),127,255). No PRNG or per-frame noise index is used."
+        },
+        "ssgi": {
+          "source": "node_modules/three/examples/jsm/tsl/display/SSGINode.js at installed three 0.185.1; rand is node_modules/three/src/nodes/math/MathNode.js",
+          "frame_sequence": "With useTemporalFiltering=true, temporalDirection(n)=[60,300,180,240,120,0][f(n) mod 6]/360 and temporalOffset(n)=[0,0.5,0.25,0.75][f(n) mod 4].",
+          "pixel_noise": "For integer screen pixel p=(px,py), spatialOffset(p)=0.25*((py-px) bitAnd 3), interleavedGradientNoise(p)=fract(52.9829189*fract(0.06711056*px+0.00583715*py)), and noiseJitterIdx(n)=0.02*temporalDirection(n). Define rand(q)=fract(sin(mod(12.9898*q.x+78.233*q.y,pi))*43758.5453). initialRayStep(n,p,uv)=fract(spatialOffset(p)+temporalOffset(n))+rand(2*(uv+(noiseJitterIdx(n),noiseJitterIdx(n)))-1).",
+          "slice_rotation": "For slice i in [0,sliceCount), rotationAngle(n,p,i)=(i+interleavedGradientNoise(p)+temporalDirection(n))*pi/sliceCount. Q6/Q7 use the node defaults unless the scenario states counts; Q8 fixes sliceCount=2 and stepCount=8."
+        },
+        "ssr": {
+          "source": "node_modules/three/examples/jsm/tsl/display/SSRNode.js and node_modules/three/examples/jsm/tsl/utils/RNoise.js at installed three 0.185.1",
+          "sequence": "Q6-Q8 construct SSR with stochastic=false. Readiness advances SSRNode._noiseIndex independently of NodeFrame, so the barrier explicitly shape-checks and resets that private uniform to 0. Recorded updateBefore then computes noiseIndex(n)=(n+1) mod 2147483647. The non-stochastic shader does not sample bindAnalyticNoise, so no frame-varying SSR noise affects output. Mirror ray direction, march, and box-blur taps are deterministic functions of current G-buffer values."
+        },
+        "denoise_node": {
+          "source": "node_modules/three/examples/jsm/tsl/display/DenoiseNode.js and node_modules/three/examples/jsm/math/SimplexNoise.js at installed three 0.185.1",
+          "default_limitation": "DenoiseNode.generateDefaultNoise() constructs SimplexNoise() with Math.random, so the installed default texture is not reload-deterministic and may not be used for E00 evidence.",
+          "deterministic_override": "Before compilation, assign the existing DenoiseNode.noiseNode property to a 64x64 RepeatWrapping RGBA8 texture generated by SimplexNoise({random}) with xorshift32 seed 0x0d3e015e. xorshift32 applies x^=x<<13, x^=x>>>17, x^=x<<5 with uint32 masking and returns x/4294967296. SimplexNoise sets p[j]=floor(random()*256) for j=0..255 and perm[j]=p[j bitAnd 255] for j=0..511. For i,j in 0..63, RGBA channels are uint8((noise(i,j),noise(i+64,j),noise(i,j+64),noise(i+64,j+64))*0.5*255+0.5*255) exactly as the source's per-channel (noise*0.5+0.5)*255 conversion.",
+          "rotation": "DenoiseNode.index remains its source default 0 for Q6-Q8. The installed expression indexes noiseTexel with index.mod(4)*2*pi; at index 0 this selects red without scaling its value. At pixel uv, sample the deterministic repeat-wrapped texture at noiseUv=(uv.x,1-uv.y)*(resolution/64), let r be sampled red, and use rotation vector (sin(r),cos(r)); the 16 source sample vectors use angle_i=2*pi*2*i/16 and radius_i=i/15."
+        },
+        "recurrent_denoise": {
+          "source": "node_modules/three/examples/jsm/tsl/display/RecurrentDenoiseNode.js and node_modules/three/examples/jsm/tsl/utils/RNoise.js at installed three 0.185.1",
+          "frame_sequence": "RecurrentDenoiseNode.updateBefore assigns noiseIndex(n)=f(n)=n+1. Let k=n+1+83, tileSize=32, screenPixel=floor(uv*resolution), offset=floor(fract((0.7548776662*k,0.5698402910*k))*32), and coords=(screenPixel+offset) mod 32.",
+          "analytic_noise": "Let P=1.32471795724474602596 and z=coords.x/P+coords.y/(P^2)+83. The four noise channels are fract(z*P*(1/P)), fract(z*(2*P)*(1/P^2)), fract(z*(3*P)*0.4198754210), and fract(z*(4*P)*(1/P^3)). Rotation angle=2*pi*noise.r and matrix=((cos,-sin),(sin,cos)).",
+          "kernel": "For tap i in 0..7, theta=(i+0.5)*2.399827721492203 and radius=sqrt((i+0.5)/8); baseOffset=(cos(theta),sin(theta))*radius before the source's deterministic adaptive skew and edge-stopping terms."
+        },
+        "temporal_reproject": {
+          "source": "node_modules/three/examples/jsm/tsl/display/TemporalReprojectNode.js at installed three 0.185.1",
+          "sequence": "TemporalReprojectNode has no random sampling index. Its recorded n=0 needsRestart path seeds internal history from current beauty, then subsequent frames are deterministic functions of current inputs, previous history/depth/normal, velocity, and camera matrices."
+        }
+      },
+      "roi_coordinates": "ROIs are normalized [x,y,width,height] in top-left canvas coordinates and are resolved to integer pixels by floor(x*width), floor(y*height), ceil(widthFraction*width), ceil(heightFraction*height)."
+    },
+    "required": [
+      {
+        "id": "Q0",
+        "name": "input-debug-validation",
+        "purpose": "Validate color, depth, motion, disocclusion, accumulation age, locks, exposure, shading change, and reactivity inputs and debug outputs.",
+        "initial_camera": {
+          "position": [
+            9,
+            6,
+            12
+          ],
+          "target": [
+            0,
+            1.6,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "projection": {
+            "type": "perspective",
+            "vertical_fov_degrees": 50,
+            "aspect": 1.7777777777777777,
+            "near": 0.1,
+            "far": 200
+          }
+        },
+        "frame_range": {
+          "start": 0,
+          "end_inclusive": 143,
+          "duration_seconds": 2.4
+        },
+        "camera_formula": "position=(9,6,12), target=(0,1.6,0), up=(0,1,0) for every n.",
+        "object_formula": "Use formula_conventions.baseline_scene_formula exactly.",
+        "light_exposure_formula": "Use baseline lighting; exposure=1.0 and autoExposure=true for every n.",
+        "events": "Reset once before n=0; no cut, resize, or mid-run reset.",
+        "randomness": {
+          "seed_uint32": 0,
+          "prng": "none",
+          "policy": "No PRNG calls are permitted."
+        },
+        "active_inputs_effects": [
+          "bench color",
+          "float depth",
+          "jitter-free velocity",
+          "auto exposure",
+          "locks",
+          "shading-change detector"
+        ],
+        "captures": {
+          "frames": [
+            "0",
+            "1",
+            "2",
+            "23",
+            "P-1",
+            "P",
+            "2*P-1",
+            "119"
+          ],
+          "debug_views": [
+            "final",
+            "motion-vectors",
+            "disocclusion",
+            "accumulation-age",
+            "locks",
+            "exposure",
+            "shading-change",
+            "reactivity"
+          ],
+          "ratios": [
+            1,
+            1.5,
+            2,
+            3
+          ],
+          "rois": {
+            "full": [
+              0,
+              0,
+              1,
+              1
+            ],
+            "floor_grid": [
+              0.05,
+              0.55,
+              0.9,
+              0.45
+            ],
+            "fence_and_spheres": [
+              0.05,
+              0.28,
+              0.9,
+              0.42
+            ]
+          }
+        }
+      },
+      {
+        "id": "Q1",
+        "name": "static-convergence",
+        "purpose": "Establish deterministic accumulation and settled baseline output.",
+        "initial_camera": {
+          "position": [
+            9,
+            6,
+            12
+          ],
+          "target": [
+            0,
+            1.6,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "projection": {
+            "type": "perspective",
+            "vertical_fov_degrees": 50,
+            "aspect": 1.7777777777777777,
+            "near": 0.1,
+            "far": 200
+          }
+        },
+        "frame_range": {
+          "start": 0,
+          "end_inclusive": 239,
+          "duration_seconds": 4
+        },
+        "camera_formula": "position=(9,6,12), target=(0,1.6,0), up=(0,1,0) for every n.",
+        "object_formula": "All object transforms are frozen to formula_conventions.baseline_scene_formula evaluated at t=0.",
+        "light_exposure_formula": "Use baseline lighting; exposure=1.0 and autoExposure=true for every n.",
+        "events": "Reset once before n=0; no cut, resize, or mid-run reset.",
+        "randomness": {
+          "seed_uint32": 0,
+          "prng": "none",
+          "policy": "No PRNG calls are permitted."
+        },
+        "active_inputs_effects": [
+          "bench color",
+          "float depth",
+          "zero object and camera velocity except jitter compensation",
+          "auto exposure",
+          "locks",
+          "shading-change detector"
+        ],
+        "captures": {
+          "frames": [
+            "0",
+            "1",
+            "2",
+            "4",
+            "8",
+            "16",
+            "23",
+            "P-1",
+            "P",
+            "2*P-1",
+            "119",
+            "239"
+          ],
+          "debug_views": [
+            "final",
+            "accumulation-age",
+            "locks",
+            "exposure",
+            "shading-change"
+          ],
+          "ratios": [
+            1,
+            1.5,
+            2,
+            3
+          ],
+          "rois": {
+            "full": [
+              0,
+              0,
+              1,
+              1
+            ],
+            "thin_features": [
+              0.08,
+              0.3,
+              0.84,
+              0.55
+            ]
+          }
+        }
+      },
+      {
+        "id": "Q2",
+        "name": "slow-aliasing-dolly",
+        "purpose": "Replay an absolute slow dolly across aliasing-torture geometry.",
+        "initial_camera": {
+          "position": [
+            9,
+            6,
+            12
+          ],
+          "target": [
+            0,
+            1.6,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "projection": {
+            "type": "perspective",
+            "vertical_fov_degrees": 50,
+            "aspect": 1.7777777777777777,
+            "near": 0.1,
+            "far": 200
+          }
+        },
+        "frame_range": {
+          "start": 0,
+          "end_inclusive": 239,
+          "duration_seconds": 4
+        },
+        "camera_formula": "u=n/239; position=(9-3*u,6,12-4*u), target=(0,1.6,0), up=(0,1,0).",
+        "object_formula": "All object transforms are frozen to formula_conventions.baseline_scene_formula evaluated at t=0.",
+        "light_exposure_formula": "Use baseline lighting; exposure=1.0 and autoExposure=true for every n.",
+        "events": "Reset once before n=0; no cut, resize, or mid-run reset.",
+        "randomness": {
+          "seed_uint32": 0,
+          "prng": "none",
+          "policy": "No PRNG calls are permitted."
+        },
+        "active_inputs_effects": [
+          "bench color",
+          "float depth",
+          "camera velocity",
+          "auto exposure",
+          "locks"
+        ],
+        "captures": {
+          "frames": [
+            "0",
+            "1",
+            "2",
+            "23",
+            "P-1",
+            "P",
+            "2*P-1",
+            "59",
+            "119",
+            "179",
+            "239"
+          ],
+          "debug_views": [
+            "final",
+            "motion-vectors",
+            "disocclusion",
+            "accumulation-age",
+            "locks"
+          ],
+          "ratios": [
+            1,
+            1.5,
+            2,
+            3
+          ],
+          "rois": {
+            "floor_grid": [
+              0,
+              0.48,
+              1,
+              0.52
+            ],
+            "fence": [
+              0.05,
+              0.35,
+              0.9,
+              0.32
+            ]
+          }
+        }
+      },
+      {
+        "id": "Q3",
+        "name": "object-motion-disocclusion",
+        "purpose": "Replay independent object motion and silhouette disocclusion.",
+        "initial_camera": {
+          "position": [
+            9,
+            6,
+            12
+          ],
+          "target": [
+            0,
+            1.6,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "projection": {
+            "type": "perspective",
+            "vertical_fov_degrees": 50,
+            "aspect": 1.7777777777777777,
+            "near": 0.1,
+            "far": 200
+          }
+        },
+        "frame_range": {
+          "start": 0,
+          "end_inclusive": 239,
+          "duration_seconds": 4
+        },
+        "camera_formula": "position=(9,6,12), target=(0,1.6,0), up=(0,1,0) for every n.",
+        "object_formula": "Use formula_conventions.baseline_scene_formula exactly; sphere and knot transforms are assigned from absolute t each frame.",
+        "light_exposure_formula": "Use baseline lighting; exposure=1.0 and autoExposure=true for every n.",
+        "events": "Reset once before n=0; no cut, resize, or mid-run reset.",
+        "randomness": {
+          "seed_uint32": 0,
+          "prng": "none",
+          "policy": "No PRNG calls are permitted."
+        },
+        "active_inputs_effects": [
+          "bench color",
+          "float depth",
+          "independent object velocity",
+          "auto exposure",
+          "locks"
+        ],
+        "captures": {
+          "frames": [
+            "0",
+            "1",
+            "2",
+            "23",
+            "P-1",
+            "P",
+            "2*P-1",
+            "59",
+            "119",
+            "179",
+            "239"
+          ],
+          "debug_views": [
+            "final",
+            "motion-vectors",
+            "disocclusion",
+            "accumulation-age"
+          ],
+          "ratios": [
+            1,
+            1.5,
+            2,
+            3
+          ],
+          "rois": {
+            "full": [
+              0,
+              0,
+              1,
+              1
+            ],
+            "moving_spheres": [
+              0.12,
+              0.2,
+              0.76,
+              0.58
+            ],
+            "fence_silhouette": [
+              0.05,
+              0.35,
+              0.9,
+              0.3
+            ]
+          }
+        }
+      },
+      {
+        "id": "Q4",
+        "name": "camera-motion-hold",
+        "purpose": "Replay slow yaw, fast translation, rotation, and a final hold.",
+        "initial_camera": {
+          "position": [
+            9,
+            6,
+            12
+          ],
+          "target": [
+            0,
+            1.6,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "projection": {
+            "type": "perspective",
+            "vertical_fov_degrees": 50,
+            "aspect": 1.7777777777777777,
+            "near": 0.1,
+            "far": 200
+          }
+        },
+        "frame_range": {
+          "start": 0,
+          "end_inclusive": 479,
+          "duration_seconds": 8
+        },
+        "camera_formula": "Let T=(0,1.6,0), R=15, h=4.4, theta0=atan2(12,9). For 0<=n<=119, theta=theta0+0.25*n/119 and position=T+(R*cos(theta),h,R*sin(theta)). Let C119 be that n=119 position. For 120<=n<=239, u=(n-120)/119 and position=C119+u*(-8,0,-6). Let C239 be that n=239 position. For 240<=n<=359, theta=atan2(C239.z-T.z,C239.x-T.x)+0.9*(n-240)/119, radius=sqrt((C239.x-T.x)^2+(C239.z-T.z)^2), and position=T+(radius*cos(theta),C239.y-T.y,radius*sin(theta)). For 360<=n<=479 hold the n=359 position. Target=T and up=(0,1,0) for all n.",
+        "object_formula": "All object transforms are frozen to formula_conventions.baseline_scene_formula evaluated at t=0.",
+        "light_exposure_formula": "Use baseline lighting; exposure=1.0 and autoExposure=true for every n.",
+        "events": "Motion segment boundaries are n=120, n=240, and n=360; no cut, resize, or reset after the initial reset before n=0.",
+        "randomness": {
+          "seed_uint32": 0,
+          "prng": "none",
+          "policy": "No PRNG calls are permitted."
+        },
+        "active_inputs_effects": [
+          "bench color",
+          "float depth",
+          "camera velocity",
+          "auto exposure",
+          "locks",
+          "shading-change detector"
+        ],
+        "captures": {
+          "frames": [
+            "0",
+            "23",
+            "P-1",
+            "P",
+            "2*P-1",
+            "118",
+            "119",
+            "120",
+            "121",
+            "238",
+            "239",
+            "240",
+            "241",
+            "358",
+            "359",
+            "360",
+            "361",
+            "383",
+            "479"
+          ],
+          "debug_views": [
+            "final",
+            "motion-vectors",
+            "disocclusion",
+            "accumulation-age",
+            "shading-change"
+          ],
+          "ratios": [
+            1,
+            1.5,
+            2,
+            3
+          ],
+          "rois": {
+            "full": [
+              0,
+              0,
+              1,
+              1
+            ],
+            "thin_geometry": [
+              0.05,
+              0.25,
+              0.9,
+              0.55
+            ]
+          }
+        }
+      },
+      {
+        "id": "Q5",
+        "name": "seeded-transparency-reactivity",
+        "purpose": "Replay transparent surfaces and seeded particles with aligned reactive inputs.",
+        "initial_camera": {
+          "position": [
+            9,
+            6,
+            12
+          ],
+          "target": [
+            0,
+            1.6,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "projection": {
+            "type": "perspective",
+            "vertical_fov_degrees": 50,
+            "aspect": 1.7777777777777777,
+            "near": 0.1,
+            "far": 200
+          }
+        },
+        "frame_range": {
+          "start": 0,
+          "end_inclusive": 239,
+          "duration_seconds": 4
+        },
+        "camera_formula": "position=(9,6,12), target=(0,1.6,0), up=(0,1,0) for every n.",
+        "object_formula": "Freeze baseline objects at t=0. For particle i in {0..127}, consume four initialization values ux,uy,uz,up from the seeded PRNG and assign phase=2*pi*up, base=(-5+10*ux,0.7+4*uy,-5+10*uz); at frame n assign position=(base.x+0.35*sin(0.7*t+phase),base.y+0.6*((0.35*t+up) mod 1),base.z+0.35*cos(0.7*t+phase)). Particle transform is recomputed absolutely and does not advance the PRNG.",
+        "light_exposure_formula": "Use baseline lighting; exposure=1.0 and autoExposure=true for every n.",
+        "events": "Reset once before n=0; reset re-seeds and regenerates all particle constants before replay. No cut or resize.",
+        "randomness": {
+          "seed_uint32": 1592594996,
+          "seed_hex": "0x5eed1234",
+          "prng": "xorshift32: x ^= x<<13; x ^= x>>>17; x ^= x<<5 with uint32 masking after each operation; output=x/4294967296",
+          "policy": "Exactly four outputs per particle are consumed in ascending particle index during reset. Rendering consumes no random values."
+        },
+        "active_inputs_effects": [
+          "bench opaque color",
+          "transparent particle final color",
+          "manual particle coverage reactive mask",
+          "float depth",
+          "jitter-free velocity",
+          "auto exposure"
+        ],
+        "captures": {
+          "frames": [
+            "0",
+            "1",
+            "2",
+            "23",
+            "P-1",
+            "P",
+            "2*P-1",
+            "59",
+            "119",
+            "179",
+            "239"
+          ],
+          "debug_views": [
+            "final",
+            "motion-vectors",
+            "accumulation-age",
+            "locks",
+            "reactivity"
+          ],
+          "ratios": [
+            1,
+            1.5,
+            2,
+            3
+          ],
+          "rois": {
+            "full": [
+              0,
+              0,
+              1,
+              1
+            ],
+            "particle_volume": [
+              0.18,
+              0.1,
+              0.64,
+              0.72
+            ],
+            "opaque_edges": [
+              0.05,
+              0.35,
+              0.9,
+              0.45
+            ]
+          }
+        }
+      },
+      {
+        "id": "Q6",
+        "name": "isolated-screenspace-effects",
+        "purpose": "Exercise isolated GTAO, SSR, and SSGI inputs.",
+        "initial_camera": {
+          "position": [
+            0,
+            4,
+            10
+          ],
+          "target": [
+            0,
+            3,
+            -5
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "projection": {
+            "type": "perspective",
+            "vertical_fov_degrees": 55,
+            "aspect": 1.7777777777777777,
+            "near": 0.1,
+            "far": 200
+          }
+        },
+        "frame_range": {
+          "start": 0,
+          "end_inclusive": 239,
+          "duration_seconds": 4
+        },
+        "camera_formula": "position=(0,4,10), target=(0,3,-5), up=(0,1,0) for every n.",
+        "object_formula": "Use formula_conventions.room_scene_formula fixed geometry; no object transforms change.",
+        "light_exposure_formula": "Use room_scene_formula lighting; exposure=1.0 and autoExposure=true for every n.",
+        "events": "Run three independent reset-before-n=0 subruns in order GTAO, SSR, SSGI. Each subrun reloads the page and creates one resolver.",
+        "readiness_barrier": "Apply formula_conventions.installed_three_effect_sequences.readiness_barrier independently to each GTAO, SSR, and SSGI subrun. The exact barrier must complete before n=0; readiness renders are unrecorded, then upscaler history and NodeFrame are reset. GTAO, SSR without multibounce, SSGI, and DenoiseNode own no temporal history, so no readiness accumulation remains.",
+        "effect_sampling_sequence": "GTAO uses installed_three_effect_sequences.gtao with temporalDirection(n)=0. SSR uses installed_three_effect_sequences.ssr with stochastic=false, so its incremented noise index is dead shader state. SSGI uses installed_three_effect_sequences.ssgi with f(n)=n+1. SSR and SSGI spatial denoisers use installed_three_effect_sequences.denoise_node with the seeded noiseNode override and fixed index=0.",
+        "randomness": {
+          "seed_uint32": 222167390,
+          "seed_hex": "0x0d3e015e",
+          "prng": "xorshift32 only for the deterministic DenoiseNode SimplexNoise texture; GTAO magic-square and SSGI shader noise use their exact source formulas.",
+          "policy": "Generate the DenoiseNode texture once before compilation, then make no CPU PRNG calls. Record f(n)=n+1, SSGI temporalDirection/temporalOffset, GTAO temporalDirection=0, SSR stochastic=false, and DenoiseNode index=0 for every capture."
+        },
+        "active_inputs_effects": [
+          "Subrun gtao: beauty * GTAO(depth, normal)",
+          "Subrun ssr: beauty + spatially denoised SSR(beauty, depth, normal, packed metalness and roughness)",
+          "Subrun ssgi: beauty * AO + diffuse * spatially denoised SSGI GI",
+          "float depth",
+          "jitter-free velocity",
+          "normal MRT",
+          "effect-specific packed material or diffuse MRT",
+          "RCAS denoise=true"
+        ],
+        "captures": {
+          "frames": [
+            "0",
+            "1",
+            "2",
+            "23",
+            "P-1",
+            "P",
+            "2*P-1",
+            "59",
+            "119",
+            "239"
+          ],
+          "debug_views": [
+            "final",
+            "motion-vectors",
+            "disocclusion",
+            "accumulation-age"
+          ],
+          "ratios": [
+            1,
+            1.5,
+            2,
+            3
+          ],
+          "rois": {
+            "full": [
+              0,
+              0,
+              1,
+              1
+            ],
+            "floor_reflection": [
+              0.05,
+              0.5,
+              0.9,
+              0.5
+            ],
+            "wall_contact_and_bounce": [
+              0.08,
+              0.08,
+              0.84,
+              0.6
+            ]
+          }
+        }
+      },
+      {
+        "id": "Q7",
+        "name": "in-graph-screenspace-composition",
+        "purpose": "Exercise in-graph SSGI and SSR composition with one jitter owner.",
+        "initial_camera": {
+          "position": [
+            0,
+            4,
+            10.5
+          ],
+          "target": [
+            0,
+            3,
+            -5
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "projection": {
+            "type": "perspective",
+            "vertical_fov_degrees": 55,
+            "aspect": 1.7777777777777777,
+            "near": 0.1,
+            "far": 200
+          }
+        },
+        "frame_range": {
+          "start": 0,
+          "end_inclusive": 239,
+          "duration_seconds": 4
+        },
+        "camera_formula": "position=(7*sin(0.15*t),4,9+1.5*cos(0.15*t)), target=(0,3,-5), up=(0,1,0).",
+        "object_formula": "Use formula_conventions.room_scene_formula fixed geometry; no object transforms change.",
+        "light_exposure_formula": "Use room_scene_formula lighting; exposure=1.0 and autoExposure=true for every n.",
+        "events": "Reset once before n=0; no cut or resize. The complete graph is rebuilt only before n=0.",
+        "readiness_barrier": "Apply formula_conventions.installed_three_effect_sequences.readiness_barrier to the complete in-graph SSGI+SSR subrun. The renderer/device, selected pipelines, graph queue, effect textures, G-buffer resources, and upscaler resources must be ready before n=0. Readiness renders are unrecorded; SSGI, non-stochastic SSR, and DenoiseNode are stateless, then upscaler history and NodeFrame are reset so recorded n=0 is the first accumulated frame.",
+        "effect_sampling_sequence": "SSGI uses installed_three_effect_sequences.ssgi with f(n)=n+1. SSR uses installed_three_effect_sequences.ssr with stochastic=false and no sampled analytic noise. Both spatial DenoiseNode instances use installed_three_effect_sequences.denoise_node with seed 0x0d3e015e and fixed index=0. The upscaler is the only projection-jitter owner.",
+        "randomness": {
+          "seed_uint32": 222167390,
+          "seed_hex": "0x0d3e015e",
+          "prng": "xorshift32 only for deterministic DenoiseNode SimplexNoise textures; SSGI shader noise follows its pinned analytical formulas.",
+          "policy": "Generate identical deterministic denoise textures before compilation and make no later CPU PRNG calls. Record f(n)=n+1, SSGI direction/offset, SSR stochastic=false, and each DenoiseNode index=0."
+        },
+        "active_inputs_effects": [
+          "in-graph beauty",
+          "SSGI AO and spatially denoised GI",
+          "spatially denoised SSR",
+          "float depth",
+          "jitter-free velocity",
+          "packed normal plus roughness MRT",
+          "packed diffuse plus metalness MRT",
+          "RCAS denoise=true",
+          "upscaler jitter=true and sole owner"
+        ],
+        "captures": {
+          "frames": [
+            "0",
+            "1",
+            "2",
+            "23",
+            "P-1",
+            "P",
+            "2*P-1",
+            "59",
+            "119",
+            "179",
+            "239"
+          ],
+          "debug_views": [
+            "final",
+            "motion-vectors",
+            "disocclusion",
+            "accumulation-age"
+          ],
+          "ratios": [
+            1,
+            1.5,
+            2,
+            3
+          ],
+          "rois": {
+            "full": [
+              0,
+              0,
+              1,
+              1
+            ],
+            "glossy_floor": [
+              0.05,
+              0.48,
+              0.9,
+              0.52
+            ],
+            "colored_walls": [
+              0.05,
+              0.05,
+              0.9,
+              0.62
+            ]
+          }
+        }
+      },
+      {
+        "id": "Q8",
+        "name": "recurrent-denoiser-characterization",
+        "purpose": "Record the existing recurrent-denoiser conflict without changing it.",
+        "initial_camera": {
+          "position": [
+            0,
+            4,
+            10.5
+          ],
+          "target": [
+            0,
+            3,
+            -5
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "projection": {
+            "type": "perspective",
+            "vertical_fov_degrees": 55,
+            "aspect": 1.7777777777777777,
+            "near": 0.1,
+            "far": 200
+          }
+        },
+        "frame_range": {
+          "start": 0,
+          "end_inclusive": 239,
+          "duration_seconds": 4
+        },
+        "camera_formula": "position=(7*sin(0.15*t),4,9+1.5*cos(0.15*t)), target=(0,3,-5), up=(0,1,0).",
+        "object_formula": "Use formula_conventions.room_scene_formula fixed geometry; no object transforms change.",
+        "light_exposure_formula": "Use room_scene_formula lighting; exposure=1.0 and autoExposure=true for every n.",
+        "events": "Run three independent reset-before-n=0 subruns in order builtin, spatial, recurrent. Each subrun reloads, rebuilds the graph, and resets all effect and upscaler history.",
+        "readiness_barrier": "Apply formula_conventions.installed_three_effect_sequences.readiness_barrier independently to builtin, spatial, and recurrent subruns; it must complete before n=0. After readiness and before NodeFrame reset, builtin only resets upscaler history; spatial resets upscaler history and forces RecurrentDenoiseNode.setSize(1,1); recurrent resets upscaler history and forces both TemporalReprojectNode.setSize(1,1) and RecurrentDenoiseNode.setSize(1,1). Thus recorded n=0 takes the installed source needsRestart seed/clear paths and no unrecorded temporal or denoise history survives.",
+        "effect_sampling_sequence": "All subruns use installed_three_effect_sequences.ssgi at sliceCount=2, stepCount=8, and f(n)=n+1. SSR is non-stochastic per installed_three_effect_sequences.ssr and its DenoiseNode uses the fixed seeded texture/index contract. Spatial and recurrent denoisers use installed_three_effect_sequences.recurrent_denoise with noiseIndex(n)=n+1; recurrent additionally uses installed_three_effect_sequences.temporal_reproject, which has no random index and seeds from current beauty on n=0.",
+        "randomness": {
+          "seed_uint32": 222167390,
+          "seed_hex": "0x0d3e015e",
+          "prng": "xorshift32 only for the deterministic SSR DenoiseNode SimplexNoise texture; SSGI and RecurrentDenoiseNode use their pinned shader formulas.",
+          "policy": "After deterministic texture creation, make no CPU PRNG calls. Record f(n)=n+1, SSGI direction/offset, RecurrentDenoiseNode noiseIndex and RNoise offset, SSR stochastic=false, and DenoiseNode index=0 for each frame."
+        },
+        "active_inputs_effects": [
+          "SSGI slices=2 and steps=8",
+          "Subrun builtin: raw SSGI GI with FSR owning temporal accumulation",
+          "Subrun spatial: recurrentDenoise mode=diffuse and accumulate=false",
+          "Subrun recurrent: temporalReproject plus recurrentDenoise mode=diffuse and accumulate=true",
+          "SSR=true",
+          "RCAS denoise=true",
+          "upscaler jitter=true"
+        ],
+        "captures": {
+          "frames": [
+            "0",
+            "1",
+            "2",
+            "4",
+            "8",
+            "16",
+            "23",
+            "P-1",
+            "P",
+            "2*P-1",
+            "59",
+            "119",
+            "239"
+          ],
+          "debug_views": [
+            "final",
+            "motion-vectors",
+            "accumulation-age"
+          ],
+          "ratios": [
+            1,
+            1.5,
+            2,
+            3
+          ],
+          "rois": {
+            "full": [
+              0,
+              0,
+              1,
+              1
+            ],
+            "flat_walls": [
+              0.08,
+              0.08,
+              0.84,
+              0.52
+            ],
+            "occlusion_edges": [
+              0.18,
+              0.24,
+              0.64,
+              0.54
+            ]
+          }
+        }
+      },
+      {
+        "id": "Q9",
+        "name": "exposure-transition",
+        "purpose": "Replay a light step at frame 60, a linear ramp over frames 120 through 179, and a reverse transition at frame 180.",
+        "initial_camera": {
+          "position": [
+            9,
+            6,
+            12
+          ],
+          "target": [
+            0,
+            1.6,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "projection": {
+            "type": "perspective",
+            "vertical_fov_degrees": 50,
+            "aspect": 1.7777777777777777,
+            "near": 0.1,
+            "far": 200
+          }
+        },
+        "frame_range": {
+          "start": 0,
+          "end_inclusive": 239,
+          "duration_seconds": 4
+        },
+        "camera_formula": "position=(9,6,12), target=(0,1.6,0), up=(0,1,0) for every n.",
+        "object_formula": "All object transforms are frozen to formula_conventions.baseline_scene_formula evaluated at t=0.",
+        "light_exposure_formula": "Directional color and position remain baseline. Directional intensity I(n)=3.2 for 0<=n<60; I(n)=8.0 for 60<=n<120; I(n)=8.0-6.0*(n-120)/59 for 120<=n<180; I(n)=3.2 for 180<=n<=239. Hemisphere intensity remains 0.9. settings.exposure=1.0 and autoExposure=true for every n; no external exposure texture is bound.",
+        "events": "Light step 3.2 to 8.0 at n=60; inclusive linear ramp 8.0 to 2.0 over n=120..179; reverse step 2.0 to 3.2 at n=180. Reset only before n=0.",
+        "randomness": {
+          "seed_uint32": 0,
+          "prng": "none",
+          "policy": "No PRNG calls are permitted."
+        },
+        "active_inputs_effects": [
+          "bench color",
+          "float depth",
+          "zero scene velocity except jitter compensation",
+          "auto exposure",
+          "shading-change detector",
+          "locks"
+        ],
+        "captures": {
+          "frames": [
+            "0",
+            "23",
+            "P-1",
+            "P",
+            "2*P-1",
+            "59",
+            "60",
+            "61",
+            "62",
+            "64",
+            "68",
+            "76",
+            "83",
+            "119",
+            "120",
+            "121",
+            "149",
+            "178",
+            "179",
+            "180",
+            "181",
+            "182",
+            "184",
+            "188",
+            "196",
+            "203",
+            "239"
+          ],
+          "debug_views": [
+            "final",
+            "accumulation-age",
+            "locks",
+            "exposure",
+            "shading-change"
+          ],
+          "ratios": [
+            1,
+            1.5,
+            2,
+            3
+          ],
+          "rois": {
+            "full": [
+              0,
+              0,
+              1,
+              1
+            ],
+            "lit_knots": [
+              0.18,
+              0.16,
+              0.64,
+              0.38
+            ],
+            "hdr_bulb": [
+              0.43,
+              0.08,
+              0.14,
+              0.2
+            ]
+          }
+        }
+      },
+      {
+        "id": "Q10",
+        "name": "reset-cut-resize",
+        "purpose": "Replay a camera cut and history reset at frame 60 and deterministic resize resets at frames 120 and 180.",
+        "initial_camera": {
+          "position": [
+            9,
+            6,
+            12
+          ],
+          "target": [
+            0,
+            1.6,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "projection": {
+            "type": "perspective",
+            "vertical_fov_degrees": 50,
+            "aspect": 1.7777777777777777,
+            "near": 0.1,
+            "far": 200
+          }
+        },
+        "frame_range": {
+          "start": 0,
+          "end_inclusive": 239,
+          "duration_seconds": 4
+        },
+        "camera_formula": "For 0<=n<60 position=(9,6,12); for 60<=n<=239 position=(-7,4,9). Target=(0,1.6,0) and up=(0,1,0) for every n. Projection is 50-degree perspective with near=0.1 and far=200; aspect equals the active output width/height after each resize.",
+        "object_formula": "Use formula_conventions.baseline_scene_formula exactly with absolute t=n/60; object animation does not restart at the mid-run history resets.",
+        "light_exposure_formula": "Use baseline lighting; exposure=1.0 and autoExposure=true for every n. Exposure adaptation history is cleared at each declared reset.",
+        "events": "Before n=0 configure 1920x1080 and reset. At the start of n=60 set camera position=(-7,4,9), recompute lookAt, then reset all upscaler histories and jitter to phase zero while the scenario frame remains 60. At the start of n=120 resize physical output to 1280x720 at DPR 1, rebuild size-dependent resources, and reset history/jitter. At the start of n=180 restore 1920x1080 at DPR 1, rebuild size-dependent resources, and reset history/jitter.",
+        "randomness": {
+          "seed_uint32": 0,
+          "prng": "none",
+          "policy": "No PRNG calls are permitted."
+        },
+        "active_inputs_effects": [
+          "bench color",
+          "float depth",
+          "camera and object velocity",
+          "auto exposure",
+          "locks",
+          "shading-change detector",
+          "size-dependent resource rebuild"
+        ],
+        "captures": {
+          "frames": [
+            "0",
+            "1",
+            "2",
+            "23",
+            "P-1",
+            "P",
+            "2*P-1",
+            "59",
+            "60",
+            "61",
+            "62",
+            "64",
+            "68",
+            "76",
+            "83",
+            "119",
+            "120",
+            "121",
+            "122",
+            "124",
+            "128",
+            "136",
+            "143",
+            "179",
+            "180",
+            "181",
+            "182",
+            "184",
+            "188",
+            "196",
+            "203",
+            "239"
+          ],
+          "debug_views": [
+            "final",
+            "motion-vectors",
+            "disocclusion",
+            "accumulation-age",
+            "locks",
+            "exposure",
+            "shading-change"
+          ],
+          "ratios": [
+            1,
+            1.5,
+            2,
+            3
+          ],
+          "rois": {
+            "full": [
+              0,
+              0,
+              1,
+              1
+            ],
+            "moving_silhouettes": [
+              0.08,
+              0.18,
+              0.84,
+              0.58
+            ]
+          }
+        }
+      }
+    ],
+    "required_debug_views": [
+      "final",
+      "motion-vectors",
+      "disocclusion",
+      "accumulation-age",
+      "locks",
+      "exposure",
+      "shading-change",
+      "reactivity"
+    ]
+  },
+  "capture_protocol": {
+    "jitter_period_symbol": "P",
+    "jitter_period_definition": "The configured jitter phase count reported by the active baseline resolver for the current render and display dimensions.",
+    "jitter_period_by_ratio": {
+      "1": 8,
+      "1.5": 18,
+      "2": 32,
+      "3": 72
+    },
+    "harness_acceptance_matrix": {
+      "purpose": "E00 proves deterministic input/debug capture, static convergence, and cut/reset/resize handling without pre-running every later experiment's visual matrix. Q2-Q9 remain required implemented scenarios and receive reduced GPU smoke coverage; their authoritative captures belong to the domain experiments that consume them.",
+      "review_sampling": "Run all 45 numerical reload comparisons for every selected tuple. Human review samples the blinded A-B reload-1 pair at the frames and views below. Each review record receives one grade after the reviewer inspects the full frame and every declared ROI listed in that record.",
+      "reviewer_count": 1,
+      "human_review_scenarios": {
+        "Q0": {
+          "frames": [
+            "P",
+            "2*P-1"
+          ],
+          "debug_views": [
+            "final",
+            "motion-vectors",
+            "disocclusion",
+            "accumulation-age",
+            "locks",
+            "exposure",
+            "shading-change",
+            "reactivity"
+          ]
+        },
+        "Q1": {
+          "frames": [
+            "119"
+          ],
+          "debug_views": [
+            "final",
+            "accumulation-age"
+          ]
+        },
+        "Q10": {
+          "frames": [
+            "60",
+            "120",
+            "180"
+          ],
+          "debug_views": [
+            "final",
+            "motion-vectors",
+            "disocclusion",
+            "accumulation-age"
+          ]
+        }
+      },
+      "scenarios": {
+        "Q0": {
+          "frames": [
+            "0",
+            "P",
+            "2*P-1"
+          ],
+          "debug_views": [
+            "final",
+            "motion-vectors",
+            "disocclusion",
+            "accumulation-age",
+            "locks",
+            "exposure",
+            "shading-change",
+            "reactivity"
+          ]
+        },
+        "Q1": {
+          "frames": [
+            "0",
+            "23",
+            "119"
+          ],
+          "debug_views": [
+            "final",
+            "accumulation-age"
+          ]
+        },
+        "Q10": {
+          "frames": [
+            "59",
+            "60",
+            "61",
+            "119",
+            "120",
+            "121",
+            "179",
+            "180",
+            "181"
+          ],
+          "debug_views": [
+            "final",
+            "motion-vectors",
+            "disocclusion",
+            "accumulation-age"
+          ]
+        }
+      }
+    },
+    "absolute_frame_expressions": [
+      "0",
+      "1",
+      "2",
+      "4",
+      "8",
+      "16",
+      "23",
+      "P-1",
+      "P",
+      "2*P-1",
+      "119"
+    ],
+    "event_relative_frames": {
+      "Q9_frame_60_light_step": [
+        -1,
+        0,
+        1,
+        2,
+        4,
+        8,
+        16,
+        23
+      ],
+      "Q9_frame_120_ramp_start": [
+        -1,
+        0,
+        1,
+        29,
+        58,
+        59
+      ],
+      "Q9_frame_180_reverse_transition": [
+        -1,
+        0,
+        1,
+        2,
+        4,
+        8,
+        16,
+        23
+      ],
+      "Q10_frame_60_camera_cut_and_reset": [
+        -1,
+        0,
+        1,
+        2,
+        4,
+        8,
+        16,
+        23
+      ],
+      "Q10_frame_120_resize": [
+        -1,
+        0,
+        1,
+        2,
+        4,
+        8,
+        16,
+        23
+      ],
+      "Q10_frame_180_restore_resize": [
+        -1,
+        0,
+        1,
+        2,
+        4,
+        8,
+        16,
+        23
+      ]
+    },
+    "rules": [
+      "Resolve every frame expression to an integer and record P and the resolved frame list in the artifact metadata.",
+      "Reset and reload baseline and comparison runs to the same initial state before replay.",
+      "Capture only the canvas at the scenario's active physical dimensions; hide GUI, stats, and browser chrome.",
+      "Use the identical baseline presentation path and browser capture settings for both blinded labels.",
+      "Record scenario, ratio, frame, debug view, blinded label, and ROI with every image."
+    ],
+    "numerical_equivalence": {
+      "independent_reload_capture_count_per_variant": 5,
+      "comparison_pairs": "Compare all 10 unordered pairs among the five baseline reloads to derive repeatability, all 10 unordered pairs among the five candidate reloads, and the 25 baseline-to-candidate pairs for each identical scenario, subrun, ratio, resolved frame, debug view, and ROI tuple.",
+      "pixel_domain": "Decode lossless PNG to straight RGBA8. Compare R, G, and B as normalized display-referred sRGB code values byte/255 before any linearization, color management, resizing, filtering, or alpha premultiplication.",
+      "max_absolute_rgb_tolerance": 0.00392156862745098,
+      "rmse_rgb_tolerance": 0.000980392156862745,
+      "dimension_rule": "Both images must exactly equal the scenario's active physical canvas width and height. Q10 expects 1920x1080 before frame 120, 1280x720 for frames 120 through 179, and 1920x1080 from frame 180.",
+      "alpha_rule": "Every decoded pixel in both images must have alpha byte 255. Alpha is an exact gate and is excluded from RGB max-absolute and RMSE only after this gate passes.",
+      "metric_formula": "For N pixels and three RGB channels, maxAbsolute=max(abs(a_c-b_c))/255 and RMSE=sqrt(sum((a_c-b_c)/255)^2/(3*N)). Calculate full-frame and each declared ROI independently.",
+      "failure_artifacts": "For every failed pair, retain both PNGs, an absolute-difference heatmap with a fixed 0..1/255 legend, metric JSON, scenario metadata, and the failed ROI."
+    },
+    "artifact_rubric": {
+      "0": "No visible difference at 1x or 4x nearest-neighbor inspection; numerical gates pass.",
+      "1": "Difference is detectable only at 4x inspection or in a difference heatmap; normal 1x viewing is unaffected.",
+      "2": "Difference is visible at 1x when the reviewer knows the ROI but is not distracting during motion.",
+      "3": "Difference is distracting at 1x or causes clear shimmer, ghosting, ringing, blur, exposure lag, mask shift, or reset residue.",
+      "4": "Invalid or severe output: black/NaN pixels, dimension/domain mismatch, full-screen flashing, device/validation failure, or unusable temporal instability."
+    },
+    "pass_fail_aggregation": {
+      "pair": "PASS only when dimensions and alpha pass and full-frame plus every ROI max-absolute and RMSE are within tolerance.",
+      "capture_tuple": "PASS only when all 45 required repeatability and cross-variant pairs pass; every tuple selected by harness_acceptance_matrix.human_review_scenarios must receive a reviewer grade of 0 or 1, and the median grade across the experiment must be 0.",
+      "scenario": "PASS only when every required subrun, ratio, resolved frame, debug view, and ROI capture tuple passes.",
+      "experiment": "The E00 visual equivalence gate passes only when every tuple in capture_protocol.harness_acceptance_matrix passes. Q2-Q9 must pass reduced GPU smoke coverage before E00 closes and receive authoritative visual coverage in their consuming domain experiments. One failed pair fails its tuple and scenario; reruns may replace the complete five-capture set once, never only the failed image."
+    }
+  },
+  "validation_gates": {
+    "static": [
+      "git diff --check reports no errors.",
+      "The changed-path set is a subset of scope.allowed_write_paths.",
+      "Lint, typecheck, all unit tests, and build pass.",
+      "Structural tests prove the registry cannot instantiate more than one active resolver.",
+      "Baseline shader strings remain byte-for-byte identical or are demonstrated behaviorally equivalent."
+    ],
+    "runtime": [
+      "Unknown or unsupported variants fail before rendering.",
+      "Exactly one resolver, one pass graph, and one projection-jitter owner are active per page load.",
+      "Candidate and baseline pipeline metadata identify shader key, settings, resource graph, supported ratios, WGSL overrides, and assembled chunks.",
+      "There are zero WGSL compilation errors, WebGPU validation errors, uncaught runtime exceptions, and device-loss events.",
+      "Every authoritative timing run has timestamp-query support and fresh frame-tagged samples.",
+      "No stale timing label survives a graph change and pending readbacks drain before finalization."
+    ],
+    "visual": [
+      "Every required capture pair passes capture_protocol.numerical_equivalence: exact dimensions and alpha=255, max absolute RGB <= 1/255, and RGB RMSE <= 0.25/255 in display-referred sRGB code-value space. Measured repeatability is recorded but cannot widen either fixed threshold.",
+      "Motion vectors remain smooth and jitter-free, disocclusion does not flash full screen, accumulation age converges, locks and exposure reset correctly, shading-change is stable on a still scene, and reactivity remains aligned.",
+      "No black output, NaN output, incorrect dimensions, double tone mapping, output-domain shift, stale history, or shifted mask is present."
+    ],
+    "timing": [
+      "Each run produces exactly 600 fresh measured samples after 240 warm-up frames.",
+      "All four ABBA repetitions complete at ratios 1, 1.5, 2, and 3.",
+      "At least three of four repetitions pass the equivalence threshold.",
+      "Baseline-versus-baseline median compute-sum delta is no greater than the larger of 3 percent or twice the measured baseline noise floor.",
+      "Baseline-versus-baseline p95 compute-sum delta is no greater than the larger of 5 percent or twice the measured baseline noise floor.",
+      "At every ratio, compute-sum N_median must be <=1.5 percent and N_p95 <=2.5 percent. Baseline equivalence then uses median max(3 percent,2*N_median) and p95 max(5 percent,2*N_p95), each passing at least three of four repetitions. One full cold-browser rerun is allowed; a second compute-sum noise-floor failure blocks E00. Per-pass noise eligibility is recorded separately and an ineligible pass cannot support an individual performance claim."
+    ],
+    "review": [
+      "A fresh read-only reviewer verifies manifest compliance, scope, one-variant isolation, reset behavior, sample freshness, and evidence completeness.",
+      "Critical and important findings are consolidated into no more than two fix rounds.",
+      "No parity experiment starts until E00 is adopted and documented."
+    ]
+  },
+  "timing_protocol": {
+    "required_feature": "timestamp-query",
+    "performance_claim_without_feature": "invalid",
+    "warmup_frames_per_run": 240,
+    "fresh_samples_per_run": 600,
+    "block_sequence": [
+      "A",
+      "B",
+      "B",
+      "A"
+    ],
+    "block_repetitions": 4,
+    "variant_mapping": {
+      "A": "local-baseline-5d6a65e",
+      "B": "local-baseline-through-e00-harness"
+    },
+    "noise_floor_derivation": {
+      "inputs": "For each ratio, pass label, compute sum, and statistic kind k in {median,p95}, each ABBA repetition r yields A1_r, B1_r, B2_r, A2_r from 600 fresh samples per run.",
+      "same_variant_relative_deltas": "dA_r=abs(A1_r-A2_r)/((A1_r+A2_r)/2) and dB_r=abs(B1_r-B2_r)/((B1_r+B2_r)/2).",
+      "quantile": "Sort the four dA values and independently the four dB values. q95 uses linear interpolation at zero-based index 0.95*(count-1). N_k=max(q95(dA),q95(dB)).",
+      "acceptable_noise_floor": "For compute sum at every ratio, N_median<=0.015 and N_p95<=0.025. Apply the same limits to per-pass claim eligibility when baseline median is at least 0.020 milliseconds; smaller passes are timer-resolution-limited. Any pass that exceeds either limit remains in compute sum but cannot support an individual performance claim until a pass-specific microbenchmark establishes a usable floor.",
+      "retry_policy": "If either compute-sum noise limit fails, discard the complete ratio run, cold-restart the browser once, and repeat all four ABBA repetitions. A second failure blocks E00 for that environment. Per-pass eligibility failures are recorded without triggering the aggregate E00 retry.",
+      "comparison_delta": "Within repetition r, meanA=(A1_r+A2_r)/2, meanB=(B1_r+B2_r)/2, and D_r=abs(meanA-meanB)/((meanA+meanB)/2). Median passes when D_r<=max(0.03,2*N_median); p95 passes when D_r<=max(0.05,2*N_p95). Each statistic must pass in at least three of four repetitions.",
+      "recording": "Record all A1/B1/B2/A2 statistics, dA, dB, sorted delta arrays, interpolated q95 values, N_median, N_p95, comparison limits, D values, pass counts, and retry state."
+    },
+    "isolation": "Navigate or reload between runs. Instantiate and execute one resolver only; split-screen and concurrent A/B execution are forbidden for timing.",
+    "statistics": [
+      "raw frame-tagged samples",
+      "missing-sample count",
+      "per-pass median",
+      "per-pass p95",
+      "compute-sum median",
+      "compute-sum p95",
+      "per-repetition A/B delta",
+      "baseline noise floor"
+    ],
+    "required_metadata": [
+      "experiment ID",
+      "manifest digest",
+      "local SHA",
+      "working-tree digest including tracked and untracked non-ignored files",
+      "browser and version",
+      "operating system",
+      "GPU adapter",
+      "backend",
+      "WebGPU features",
+      "three version",
+      "physical dimensions",
+      "device pixel ratio",
+      "render ratio",
+      "fixed timestep",
+      "variant ID",
+      "shader key",
+      "pipeline key",
+      "settings",
+      "resource graph"
+    ],
+    "invalid_run_conditions": [
+      "Missing timestamp-query support.",
+      "Any stale, duplicated, untagged, or missing measured sample.",
+      "Any validation, runtime, device-loss, output-domain, reset, resolver-isolation, or jitter-owner failure.",
+      "Any interactive input, wall-clock animation, resize handler, OrbitControls damping, or non-deterministic random input active in automated mode.",
+      "Baseline and comparison use different inputs, dimensions, ratios, presentation, capture settings, or browser process configuration."
+    ]
+  },
+  "expected_behavior": {
+    "output_domain": "Display-referred sRGB produced by the existing internal ACES plus sRGB transform and stored in the existing output texture.",
+    "presentation_transform": "Identity sampling of the already transformed output; renderer remains NoToneMapping with LinearSRGBColorSpace and must not apply another tone or transfer transform.",
+    "jitter_owner": "The active upscaler resolver is the sole projection-jitter owner in temporal mode; automated inputs are rendered after its begin-frame jitter is applied.",
+    "velocity_convention": "Jitter-free NDC velocity converted by motionScale (0.5, -0.5), with reprojection prevUV = uv - motion.",
+    "reset_behavior": "Reset returns the deterministic frame clock and jitter sequence to frame zero, clears every temporal history, accumulation-age, lock, exposure-adaptation, pending timing, and scenario-event state, then reproduces frame-zero output without stale data.",
+    "resource_graph": "The existing local render, reconstruct, accumulate, luminance/exposure, RCAS or blit, debug, output, and history resources remain unchanged. The harness adds orchestration and metadata only and instantiates one graph.",
+    "binding_expectations": [
+      "Every existing compute pass keeps the shared FsrConstants uniform buffer at group 0 binding 0.",
+      "Existing bind-group entry order, storage formats, sample types, depth-only views, and output mip-level view remain unchanged.",
+      "WGSL pipeline constants may specialize declared override values, but E00 introduces no alternate shader algorithm or additional production binding.",
+      "Disabled or unselected variants leave no alternate algorithm body, unused binding, pass, texture, or active resolver in the measured graph."
+    ]
+  },
+  "required_evidence": [
+    "Manifest ID and cryptographic digest.",
+    "Baseline and candidate IDs, source commit, local SHA, branch, and exact changed paths.",
+    "Command lines, exit codes, test totals, and execution timestamps.",
+    "Environment, adapter, WebGPU feature, dimensions, ratio, settings, shader key, pipeline key, and resource-graph metadata.",
+    "WGSL compilation, WebGPU validation, console, exception, and device-loss logs.",
+    "Resolved capture frames including P, scenario IDs, debug views, blinded labels, ROIs, and artifact-rubric observations.",
+    "Five-reload baseline and candidate capture sets, all fixed-threshold max-absolute/RMSE results, dimensions, alpha checks, rubric grades, and measured repeatability; repeatability cannot alter the manifest thresholds.",
+    "Fresh frame-tagged raw timestamp samples, missing count, per-pass and compute-sum median/p95, all ABBA repetition results, and measured noise floor.",
+    "Assertions for one active resolver, one jitter owner, output domain, reset state, resource graph, and binding stability.",
+    "Fresh reviewer findings, fix-round count, unresolved concerns, and controller decision rationale.",
+    "For platform-divergence: exact platform reason, affected platforms/scenarios/ratios/frames/debug views/ROIs, blinded visual and numerical impact, raw per-pass and compute-sum median/p95 impact, measured noise floor, and maintenance cost."
+  ],
+  "rollback_conditions": [
+    "Any write outside scope.allowed_write_paths or any parity shader algorithm change.",
+    "Any WGSL compilation error, WebGPU validation error, uncaught runtime exception, or device loss.",
+    "Black or NaN output, incorrect dimensions, non-255 alpha, double tone mapping, output-domain mismatch, max absolute RGB above 1/255, or RGB RMSE above 0.25/255.",
+    "More than one active resolver or projection-jitter owner, or velocity generated from a jittered projection.",
+    "Full-screen disocclusion flashing, accumulation age that never converges, stale locks or history after reset, shifted reactive masks, or reset that retains prior timing or temporal state.",
+    "Missing, stale, duplicated, or untagged timing samples; undrained readbacks; or timing without timestamp-query.",
+    "Failure to complete exact sample counts and four ABBA repetitions at every required ratio.",
+    "More than two consolidated fix rounds without a new controller-authored manifest."
+  ],
+  "result_contract": {
+    "allowed_decisions": [
+      "adopt",
+      "iterate",
+      "retain-local",
+      "platform-divergence",
+      "blocked"
+    ],
+    "decision_owner": "controller",
+    "decision_requirements": {
+      "adopt": "All static, runtime, visual, timing, evidence, and review gates pass.",
+      "iterate": "Evidence supports a bounded redesigned harness candidate that requires a new immutable manifest revision.",
+      "retain-local": "The harness candidate is validly measured but cannot preserve baseline correctness, determinism, quality, or acceptable overhead.",
+      "platform-divergence": "A documented browser or WebGPU platform constraint prevents the source-aligned harness behavior and measured evidence supports a bounded local alternative.",
+      "blocked": "A required dependency, capability, environment, or evidence gate remains unavailable after the allowed retry and fix policy."
+    }
+  },
+  "report_contract": {
+    "allowed_statuses": [
+      "PASS",
+      "FAIL",
+      "BLOCKED",
+      "SCOPE_BLOCKED",
+      "USER_DECISION_REQUIRED"
+    ],
+    "required_fields": [
+      "status",
+      "changed_files",
+      "commands",
+      "artifacts",
+      "gates",
+      "concerns"
+    ],
+    "scope_rule": "If any additional write path or forbidden change appears necessary, stop before modifying it and return SCOPE_BLOCKED.",
+    "pass_rule": "PASS means only that the assigned implementation scope and all available assigned gates passed; it does not authorize adoption."
+  }
+}

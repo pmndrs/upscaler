@@ -108,9 +108,9 @@ export interface UpscalerNodeOptions {
  *    that composites into a low-res target *outside* the post render still wants
  *    the raw {@link Upscaler}; see `examples/06-screenspace-gi`.)
  *
- * Present the result untouched — set `renderer.toneMapping = NoToneMapping` and
- * `renderer.outputColorSpace = LinearSRGBColorSpace` (the examples' bootRenderer
- * does this) so the PostProcessing output transform is identity.
+ * The result remains linear/HDR. When it is the final output node, three's
+ * render pipeline applies the renderer's configured tone mapping and output
+ * color-space transform; it can also feed later linear post-processing.
  */
 export class UpscalerNode extends TempNode {
     readonly isFSR3Node = true;

@@ -442,21 +442,20 @@ Do not copy or design around TAAU's current lock behavior until its second-outpu
 
 #### Local
 
-The default temporal output runs RCAS. Each RCAS tap is inverse-tonemapped, de-exposed, transformed through fixed ACES plus sRGB, and then sharpened in that display-referred space before the pass writes `rgba8unorm`. See `../src/shaders/rcas.ts:4-30`, `../src/shaders/rcas.ts:36-61`, and `../src/shaders/common.ts:100-120`.
-
-The public texture is therefore display-ready under the repository's current presentation contract. See `../src/Upscaler.ts:237-247`.
+The default temporal output runs RCAS. Each tap is inverse-tonemapped, de-exposed, and
+sharpened in the caller's linear/HDR domain before the pass writes `rgba16float`.
+Presentation is deliberately outside the upscaler.
 
 **Pros**
 
-- Simple direct presentation.
-- Bench paths can share one known transform.
+- Composable linear/HDR output.
+- Caller-controlled tone mapping, output color space, and later post-processing.
 - Built-in sharpening and optional RCAS denoise.
 
 **Cons**
 
-- Not a general linear/HDR graph output.
-- Prevents later HDR post-processing, alternate tone mapping, wide-gamut output, or caller-controlled exposure after the resolve.
-- Makes direct resolver comparisons unfair unless three's output receives the same transform and sharpening policy.
+- Direct presentation requires the integration to configure its renderer/output transform.
+- Fair resolver comparisons must apply the same presentation transform after each result.
 
 #### three
 

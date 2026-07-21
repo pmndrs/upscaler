@@ -10,8 +10,9 @@ Every pass is a WGSL compute module assembled from shared chunks (`common.ts` + 
 - **Color and exposure domains** — the local temporal pipeline multiplies input by the
   selected local conditioning exposure (auto, fixed, or external), then accumulates in
   _invertible-tonemap space_ (`c / (1 + max(c))`). Before RCAS it inverse-tonemaps, divides
-  by the current local exposure, and applies ACES + sRGB through callbacks. FSR Upscaler
-  3.1.5 instead keeps three concepts separate: the host's input `preExposure`,
+  by the current local exposure, and returns to the caller's linear/HDR domain. Tone
+  mapping and output encoding are integration concerns outside the upscaler. FSR Upscaler
+  3.1.5 also keeps three exposure concepts separate: the host's input `preExposure`,
   `DeltaPreExposure()` for moving reprojected history into the current host pre-exposure
   domain, and internal/app `Exposure()` for conditioning. It removes only `Exposure()`
   before storage/output, so the result remains in the same color and host pre-exposure
@@ -27,8 +28,8 @@ tap placement, and deringing.
 The WebGPU port uses native WGSL division and `inverseSqrt`, plus per-tap `textureLoad`
 calls, instead of AMD's approximation helpers and packed gathers. Those are implementation
 and profiling differences, not known algorithm gaps. The local path also assumes an
-exact-sized input resource and applies the library's display conversion through its load
-callback. **Next action — Keep / Benchmark:** keep EASU as the documented FSR1 fallback;
+exact-sized input resource and leaves the input color domain unchanged. **Next action —
+Keep / Benchmark:** keep EASU as the documented FSR1 fallback;
 benchmark the math/load variants before changing them, and generalize viewport or output
 handling only when an integration requires it.
 
@@ -72,6 +73,54 @@ FSR Upscaler 3.1.5 dispatches:
 `prepare inputs` → `luma SPD` → `shading-change SPD` → `shading change` →
 `prepare reactivity` → `luma instability` → `accumulate` → optional `RCAS`
 
+### Authored benchmark candidates — not measured or adopted
+
+The remaining audit solutions now exist as three cumulative, internally selected compiled
+graphs. They are registered in the benchmark but have deliberately not been run. Their
+presence is not evidence of a quality or performance improvement, and none changes the
+default production path:
+
+1. `source-filter-bundle-v1`
+   - source-style radial approximate Lanczos2 with adaptive kernel bias for the current
+     frame;
+   - full 4×4 bicubic Lanczos history reconstruction and deringing;
+   - FSR1-style approximate reciprocal/reciprocal-square-root EASU math while retaining the
+     source 12-load topology as the WebGPU comparison against the exact production shader;
+   - WebGPU-safe reconstructed-depth scatter through `atomic<u32>` storage buffers and an
+     explicit pass boundary, followed by viewport/depth-scaled disocclusion;
+   - previous/current conditioning plus host pre-exposure state, with history corrected
+     into the current domain before filtering. Internal conditioning is removed at output;
+     host pre-exposure remains in caller-domain linear/HDR color.
+2. `source-structural-bundle-v1`
+   - cumulatively includes the filter/reconstruction graph;
+   - explicit lower-level motion/depth conventions specialized to three.js defaults;
+   - farthest depth, current luma, motion divergence, and configurable source reactive
+     generation (component max or vector length, threshold, scale, binary policy);
+   - max-dilated application reactivity in the aggressive reset/shading channel;
+   - T&C plus motion divergence in a distinct softer rectification channel;
+   - render-resolution accumulation/reset state and atomic transient new-lock preparation.
+3. `source-spd-resolver-bundle-v1`
+   - cumulatively includes both earlier graphs;
+   - a single-dispatch luma mip chain and a separate signed-difference shading-change mip
+     chain, plus a three-mip shading resolve;
+   - persistent four-frame render-resolution luma history/instability;
+   - coordinated source-style accumulation, dynamic rectification, ridge locks, and state
+     packing. History alpha is lock lifetime here, not the production resolver's sample
+     age, so these paths are intentionally separate.
+
+The mip candidates use direct higher-level reductions from the prepared source instead of
+AMD's device-wide atomic SPD counter. This is a legal WebGPU single-dispatch solution with
+the required mip signals, but it duplicates source reads at coarse levels; benchmark data
+must determine whether that trade is acceptable. Reconstructed depth and new-lock scatter
+use storage-buffer atomics because portable WebGPU does not expose the floating-point
+storage-texture atomics used by native implementations.
+
+`DispatchInputs.preExposureTexture` and
+`DispatchInputs.transparencyAndComposition` are the only new source-compatible dispatch
+inputs. Both are optional; the production fallback ignores them. All reactive generation
+and resolve stages remain in caller-domain color with no internal ACES, transfer function,
+or other presentation transform.
+
 ### Core recommendation
 
 Do not replace the local resolver wholesale or preserve divergences by default. Build a
@@ -88,74 +137,43 @@ are in [Parity evaluation plan](#parity-evaluation-plan).
 
 #### RCAS bounds and denoise (`rcas.ts`)
 
-- **Current status:** Diverges. The lower-limiter omission and denoise mismatch are likely
-  incomplete parity; native WGSL division and dispatch layout are separate implementation
-  differences.
-- **Local implementation:** Omits
-  `lowerLimiterMultiplier = saturate(eL / min(neighbor lumas))` from `hitMin`. Denoise uses
-  green only, excludes the center from its denoise range, and defaults off. Lobe math uses
-  native WGSL division, and dispatch is one pixel per invocation in 8×8 workgroups.
+- **Current status:** Numeric parity adopted; implementation strategy still differs.
+- **Local implementation:** Applies
+  `lowerLimiterMultiplier = saturate(eL / min(neighbor lumas))`, uses
+  `L = 0.5R + G + 0.5B`, and includes the center in the denoise range. Denoise remains a
+  runtime policy and currently defaults off. Lobe math uses native WGSL division, and
+  dispatch is one pixel per invocation in 8×8 workgroups.
 - **FSR 3.1.5 behavior:** Applies the green-weighted lower limiter. Denoise uses
   `L = 0.5R + G + 0.5B`, includes the center in the denoise min/max, and is enabled by the
   temporal RCAS pass. Center RGB remains excluded from `mn4`, `mx4`, and `hitMax`. The
   source uses high-precision reciprocals for the lobe bounds, an approximate-medium
   reciprocal for final normalization, and quad-remapped 16×16 coverage.
-- **Why it differs / evidence confidence — Unclear:** No platform requirement has been
-  identified for the missing lower limiter or different denoise math/default. Local
-  division matches the source's high-precision intent for the lobe bounds; final
-  normalization and dispatch layout could affect GPU cost, but no local measurement
-  currently demonstrates an advantage.
+- **Why it differs / evidence confidence — Measured:** E01 found the source limiter and
+  denoise math effectively tied in total compute and visually safe. The user adopted both
+  on 2026-07-17. Native final normalization and local dispatch remain unmeasured
+  implementation choices.
 
-**Keep the local path**
-
-- **Pros:** Preserves the current output and opt-in denoise policy. Native WGSL division is
-  straightforward and retains high-precision lobe-bound behavior.
-- **Cons:** Default sharpening and isolated-luma attenuation do not match the source.
-  Native final normalization and the local dispatch may cost more or less depending on the
-  GPU; that has not been measured.
-
-**Adopt FSR parity**
-
-- **Pros:** Restores the source limiter, denoise response, and temporal default. Reduces an
-  obvious math divergence before evaluating larger temporal changes.
-- **Cons:** The approximate-medium final normalization and quad remapping may behave
-  differently across WebGPU implementations. Matching those implementation details
-  without timing evidence could change cost without a quality benefit.
-
-**Next action:** **Target parity.** Restore the lower limiter, source denoise luma/range,
-and temporal denoise default. Separately benchmark native versus approximate-medium final
-normalization and 8×8 per-pixel dispatch versus quad-remapped coverage.
+**Decision:** **Adopted.** The production shader now uses the source lower limiter and
+denoise luma/range. Re-evaluate the temporal denoise default after the linear/HDR-domain
+conversion on representative noisy content. Separately benchmark native versus
+approximate-medium final normalization and 8×8 per-pixel dispatch versus quad-remapped
+coverage only if RCAS performance becomes material.
 
 #### RCAS color domain
 
-- **Current status:** Diverges materially in color space.
+- **Current status:** Source-aligned output/color domain.
 - **Local implementation:** Inverse-tonemaps, divides by the current local exposure, and
-  applies ACES + sRGB per tap before RCAS.
+  filters in the caller's linear/HDR domain. It applies no presentation transform.
 - **FSR 3.1.5 behavior:** Filters color conditioned by `Exposure()`, reverses
   `Exposure()`, and applies no presentation transform. Host `preExposure` remains, so
   linear HDR input remains linear HDR output.
-- **Why it differs / evidence confidence — Unclear:** Folding presentation into the
-  compute output produces a directly presentable texture, but no evidence establishes
-  that this was an intended departure from the original direct port or that it improves
-  performance.
+- **Why it differs / evidence confidence — Resolved:** The fixed per-tap ACES+sRGB transform
+  was an integration-layer policy inside the upscaler and had no source or platform
+  justification. The user required its removal on 2026-07-17.
 
-**Keep the local path**
-
-- **Pros:** Produces the library's current directly presentable output without requiring a
-  separate caller-managed presentation stage.
-- **Cons:** RCAS operates on presentation-transformed neighborhoods, limiting HDR,
-  alternate tone mapping, gamut choices, and later linear post-processing.
-
-**Adopt FSR parity**
-
-- **Pros:** Keeps RCAS and output in the caller's linear color/pre-exposure domain. Improves
-  composability and makes the temporal color pipeline source-aligned.
-- **Cons:** Requires presentation to happen elsewhere. A careless migration could
-  duplicate or omit the final display transform.
-
-**Next action:** **Target parity.** Add a linear/HDR resolver output and route it through
-the same existing final presentation transform for comparison. Keep directly presentable
-output only as an explicit integration mode if it remains useful.
+**Decision:** **Adopted.** RCAS and the `rgba16float` output stay in the caller's
+linear/HDR domain. Benchmarks and examples apply their chosen renderer presentation only
+when drawing to the screen; library users may instead continue linear post-processing.
 
 #### Reconstruction and disocclusion (`reconstruct.ts`)
 
@@ -594,31 +612,18 @@ required.
 
 #### Output (`rcas.ts`, `blit.ts`)
 
-- **Current status:** Adapted port with a material output-domain divergence.
-- **Local implementation:** Fixes output to ACES + sRGB in `rgba8unorm`.
+- **Current status:** Source-aligned output ownership.
+- **Local implementation:** Writes caller-domain color to `rgba16float` with no tone
+  mapping, gamut conversion, or transfer function.
 - **FSR 3.1.5 behavior:** Removes internal/app `Exposure()` while preserving host
   `preExposure`, returning the caller's input color/pre-exposure domain and leaving
   presentation to integration.
-- **Why it differs / evidence confidence — Likely:** A fixed display transform creates a
-  directly presentable three texture. This is a plausible integration convenience, not a
-  measured optimization or evidence that source-domain output was intentionally rejected.
+- **Why it differs / evidence confidence — Resolved:** The former fixed ACES+sRGB output
+  was misplaced presentation policy. It was removed by user decision on 2026-07-17.
 
-**Keep the local path**
-
-- **Pros:** Simple direct presentation and consistent current demo output.
-- **Cons:** Prevents alternate tone mapping, gamut/transfer choices, HDR output, and later
-  linear post-processing.
-
-**Adopt FSR parity**
-
-- **Pros:** Preserves caller color semantics and supports composition before one final
-  presentation transform.
-- **Cons:** Requires integrations to own or select the final transform and may require a
-  higher-precision output resource.
-
-**Next action:** **Target parity selectively.** Add a linear/HDR output variant and compare
-it through exactly the same final presentation transform as the local output; retain fixed
-display output only as an explicit convenience mode.
+**Decision:** **Adopted.** The library always exposes linear/HDR output. Integrations own
+the final transform; the examples choose three's ACES filmic tone mapping and sRGB output
+only as an example presentation policy.
 
 #### Raw WGSL and three.js integration
 
@@ -698,8 +703,8 @@ runtime flags, while structural changes need separate resource graphs and pipeli
 5. **Temporal stability graph.** Add luma SPD, shading-change SPD, and luma instability.
 6. **Coordinated resolver variant.** Evaluate accumulation, rectification, locks, and state
    packing as one compatible model.
-7. **Output domain.** Route a linear/HDR variant through the same final presentation
-   transform for a fair visual comparison.
+7. **Output domain — adopted.** Keep the upscaler linear/HDR and apply presentation only
+   in the consuming renderer or post-processing graph.
 
 #### Measurement protocol
 
@@ -759,16 +764,16 @@ maps it to an auto-exposure target, clamps that target, and eases toward it. Fix
 than passed through the auto-target clamp. This local conditioning `exposure` should not be
 conflated with FSR's caller-provided host `preExposure`. `accumulate.ts` applies the local
 factor before the invertible tonemap; `rcas.ts` or `blit.ts` later divides by the current
-factor before the local display transform.
+factor before linear/HDR output.
 
 This conditions the local accumulation range, but it does not guarantee unchanged final
 brightness. In particular, stored history is not corrected when exposure changes, so
 adaptation can cause pumping or trails. Toggle `settings.autoExposure`
 (`FLAG_AUTO_EXPOSURE`); with it off, `settings.exposure` follows the same local path.
 Passing `dispatch({ exposureTexture })` overrides both values with the texture's red
-channel, but still feeds this local conditioning/history/display path. It is not a way to
+channel, but still feeds this local conditioning/history path. It is not a way to
 declare AMD-style host `preExposure`; using it as one will divide that factor back out
-during local output and will not provide `DeltaPreExposure()` history correction.
+during output and will not provide `DeltaPreExposure()` history correction.
 `DebugView.Exposure` visualizes clamped exposed luma, not the selected exposure scalar.
 
 ### Custom shading-change heuristic
