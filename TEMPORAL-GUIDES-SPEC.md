@@ -219,10 +219,19 @@ when the consumer lab has accepted.
 
 - **M0 — contract review (this document).** Send to the SSGI/SVGF side;
   resolve D1–D5 and the open questions (§9) before code.
-- **M1 — internal seam.** Split `_encodeTemporal` into `_encodeGuides` /
-  `_encodeLate` private halves composed on one encoder; no public API change.
-  Gate: bench A/B production vs `005de6d` shows Δ within noise (<3%); all
-  debug views unchanged.
+- **M1 — internal seam. DONE (`3603a14`, 2026-07-21).** Split
+  `_encodeTemporal` into `_encodeGuides` / `_encodeLate` private halves
+  composed on one encoder; no public API change. Gates met (evidence:
+  `bench/results/raw/GUIDES-M1/`): worktree-vs-worktree smoke A/B vs
+  `005de6d` — compute-sum −2.7%, within the <3% noise policy; Q0 captures
+  (3 frames × final + motion-vectors/disocclusion/accumulation-age)
+  byte-identical except frame-119 `final`, where the *pre-M1 run's own two
+  arms already disagree (harness nondeterminism at deep accumulation,
+  0.098% px, max 23/255) while the M1 run's arms agree. Bench caveat
+  learned: runs launched from a scratchpad worktree read ~3× slower
+  absolute (GPU stays in a low power state; likely cold-vite frame
+  delivery) — uniform across passes, so A/B *within* that environment is
+  valid, but never compare worktree absolutes against repo-run records.
 - **M2 — publish the bundle.** Three-visible allocation flip, the
   `TemporalGuides` accessor, `dispatchGuides`/`dispatchUpscale` public split,
   `path: 'guides'`. New example (`11-temporal-guides`) rendering each guide —
