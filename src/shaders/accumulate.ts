@@ -3,8 +3,9 @@ import { assembleShader } from './wgsl';
 
 /**
  * Reproject & accumulate — the core temporal upscaling pass (FSR2/3's
- * "accumulate" stage, simplified: luminance-stability locks and the
- * shading-change detector are Phase 3 work; see shaders README).
+ * "accumulate" stage, with luminance-stability locks, reactive-mask handling,
+ * and the shading-change response wired in; per-stage fidelity notes live in
+ * the shaders README).
  *
  * Per display pixel:
  * 1. Upsample the current jittered frame with a jitter-aware separable

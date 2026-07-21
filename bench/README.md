@@ -19,7 +19,7 @@ Suggested tour:
 
 1. Start on **FSR3 temporal / Performance (2×)** with auto-orbit on — the scene renders 1/4 the pixels of native. Pause the orbit and watch thin lines converge.
 2. Flip to **Bilinear** at the same quality to see what the temporal pass is reconstructing.
-3. Try **Ultra Performance (3×)** — 1/9 the pixels; edges hold up, fine texture detail softens (this is where FSR3's locks, Phase 3, would help).
+3. Try **Ultra Performance (3×)** — 1/9 the pixels; watch the luminance-stability locks hold thin features that would otherwise dim (**Debug ▸ Locks** shows where they form).
 4. Set quality to **Native AA (1.0×)** on the temporal path — that's pure TAA mode, the fair comparison against `Native`'s shimmer.
 5. Open **Debug ▸ Motion vectors / Disocclusion** while the spheres orbit to sanity-check the inputs.
 

@@ -1,7 +1,16 @@
 # FSR 3.1.5 Parity Decisions
 
-This is the concise decision record for parity experiments. Raw evidence remains
-under `bench/results/raw/`; `PARITY-PROGRESS.md` retains detailed program state.
+This is the concise decision record for the (concluded) parity experiment program.
+Raw evidence remains under `bench/results/raw/`; the post-parity adoptions that came
+out of these decisions are recorded with evidence in [NEXT-STEPS.md](NEXT-STEPS.md).
+
+Program facts: pinned FidelityFX SDK source `60f4ea81909200d8542eca14dccb2628b763a9a3`
+(FSR Upscaler 3.1.5); local baseline commit `5d6a65e` on `feat-match-fsr3`. The E00
+benchmark harness is adopted as a first-pass engineering tool: repeatable changes
+≥5% are actionable, <3% is treated as noise, 3–5% is uncertain, and visual
+regressions reject a candidate regardless of speed. (Publication-grade fine-margin
+acceptance was deferred — long ABBA sequences showed monotonic timing drift on the
+test machine that prevents claims near 1.5–2.5% noise limits.)
 
 | Experiment | Candidate | Measured result | Recommendation | User decision | Action |
 | --- | --- | --- | --- | --- | --- |
@@ -11,7 +20,7 @@ under `bench/results/raw/`; `PARITY-PROGRESS.md` retains detailed program state.
 | E03 | Remove internal ACES/sRGB presentation | All output paths now write caller-domain `rgba16float`; temporal, spatial, bilinear, and depth-debug paths compiled and rendered on WebGPU. | Adopt unconditionally: FSR must not own tone mapping or output encoding. | Must remove — 2026-07-17. | Integrated. Bench/examples apply renderer presentation after the upscaler. |
 | E05–E07, E15 | `source-filter-bundle-v1` | GPU-validated + measured 2026-07-18 (after 2 compile fixes): **+35–36% total compute** vs production at ratio 2 (accumulate +47%; exposure/RCAS tied; noise floor ≤1.7%). Q0/Q1/Q3 captures artifact-free; steady-state diff vs production grows to RMSE ~10/255. | Do not adopt wholesale — the source reconstruction/history filtering costs ~⅓ more compute with no demonstrated visual win on the bench scenes. Cherry-pick pieces (exposure-domain correction, AMD depth-separation constant) individually. | Pending. | Candidate GPU-verified and benchmarked; production unchanged. |
 | E04, E08–E10 | `source-structural-bundle-v1` | GPU-validated + measured 2026-07-18: **+6.2–6.9% over the filter bundle** (prepareInputs +30%, depthClip +22%, accumulate/RCAS tied; noise floor ≤2%). Output near-identical to filter bundle (its prepared accumulation/newLocks outputs are currently unconsumed). | Cheap increment, but mostly inert until a consumer exists; evaluate only together with the resolver or after wiring its prepared state into an accumulate path. | Pending. | Candidate GPU-verified and benchmarked; production unchanged. |
-| E11–E14 | `source-spd-resolver-bundle-v1` | GPU-validated + measured 2026-07-18 (after 3 compile/validation fixes + a `/0.5`→`/20.0` velocity-normalization correction): **+75–78% total compute** vs production (accumulate +38%; RCAS **−47%**, see note). Q0/Q1/Q3 artifact-free, no disocclusion trails; steady-state diff vs production RMSE ~4.6/255 — closer than the filter bundle's ~10/255. | Too expensive to adopt as-is. Two leads worth extracting: (1) why its history makes RCAS 47% cheaper (production history may contain value ranges that are ALU-hostile); (2) its coarse-mip shading detector is the Phase-5 SPD design, now GPU-proven. | Pending. | Candidate GPU-verified and benchmarked; production unchanged. |
+| E11–E14 | `source-spd-resolver-bundle-v1` | GPU-validated + measured 2026-07-18 (after 3 compile/validation fixes + a `/0.5`→`/20.0` velocity-normalization correction): **+75–78% total compute** vs production (accumulate +38%; RCAS **−47%**, see note). Q0/Q1/Q3 artifact-free, no disocclusion trails; steady-state diff vs production RMSE ~4.6/255 — closer than the filter bundle's ~10/255. | Too expensive to adopt as-is. Two leads worth extracting: (1) why its history makes RCAS 47% cheaper (production history may contain value ranges that are ALU-hostile); (2) its coarse-mip shading detector is the long-planned SPD design, now GPU-proven (since landed in re-derived fused form — NEXT-STEPS item 4). | Pending. | Candidate GPU-verified and benchmarked; production unchanged. |
 
 ## E01 evidence
 

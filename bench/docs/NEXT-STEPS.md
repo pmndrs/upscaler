@@ -1,10 +1,10 @@
-# Post-parity work plan (2026-07-21)
+# Post-parity adoption record (2026-07-21) — all items landed
 
-Outcome of the parity program: no candidate bundle adopted (see
+Outcome of the parity program: no candidate bundle adopted wholesale (see
 [PARITY-DECISIONS.md](PARITY-DECISIONS.md) and the consumer-facing
-[/PARITY.md](../../PARITY.md)). Four items survived as adoption-worthy.
-**Items 1–3 landed on 2026-07-21** (same-day session; evidence below). Item 4
-remains open as its own dedicated session.
+[/PARITY.md](../../PARITY.md)). Four items survived as adoption-worthy, and
+**all four landed on 2026-07-21** — this document is the evidence record for
+each. Nothing from the parity program remains open.
 
 Every item follows the same gate: `npm test && npm run typecheck && npm run lint`,
 then an A/B timing + capture run
@@ -56,9 +56,10 @@ resolver ran with the flag off (plain loads).
   resets confined to trails; finals shift RMSE ≤ 1.1/255; reconstruct pass time
   unchanged (0.035 ms at ratio 2).
 
-## 4. Phase-5 SPD session: coarse-mip shading-change detector — DONE
+## 4. Multi-scale shading-change detector — DONE
 
-The roadmap item landed as `src/shaders/shadingChange.ts`: one fused half-resolution
+The long-standing roadmap item (the source's SPD coarse-mip detector concept)
+landed as `src/shaders/shadingChange.ts`: one fused half-resolution
 dispatch (an 8×8 workgroup covers a 16×16 render tile, so the 4×4/8×8 reductions are
 workgroup-local) that maintains a 1-frame luma history, compares jitter-aligned
 block-mean luma per scale with base + contrast-scaled noise floors, neutralizes

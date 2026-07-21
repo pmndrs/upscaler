@@ -494,8 +494,8 @@ and replace them only inside the coordinated parity resolver tested on
 
 #### Shading change
 
-- **Current status:** Multi-scale detector adopted (2026-07-21, NEXT-STEPS item 4 /
-  the Phase-5 roadmap item), in a fused form.
+- **Current status:** Multi-scale detector adopted (2026-07-21, NEXT-STEPS item 4),
+  in a fused form.
 - **Local implementation:** `shadingChange.ts` — one half-resolution dispatch whose
   8×8 workgroup covers a 16×16 render tile, so 4×4 and 8×8 block reductions are
   workgroup-local. Current and jitter-aligned reprojected previous luma are averaged

@@ -82,7 +82,7 @@ const BASELINE_FINGERPRINTS: Record<string, string> = {
     rcas: '51bd6d54',
     // Updated 2026-07-21: AMD viewport/depth-scaled disocclusion (NEXT-STEPS item 3).
     reconstruct: '19104db7',
-    // Added 2026-07-21: Phase-5 signed-difference pyramid detector (NEXT-STEPS item 4).
+    // Added 2026-07-21: multi-scale shading-change detector (NEXT-STEPS item 4).
     shadingChange: '41ed97fa',
     // Updated 2026-07-21: DeltaPreExposure history correction (NEXT-STEPS item 2).
     accumulate: 'a2a4ec79',

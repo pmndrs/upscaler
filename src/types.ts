@@ -30,9 +30,9 @@ export enum QualityMode {
  *   baseline every other mode is compared against (and, at ratio 1, the
  *   "native" passthrough mode).
  * - `spatial` — single-frame FSR1 (EASU + RCAS). No history, no motion
- *   vectors required. Phase 1 baseline.
+ *   vectors required.
  * - `temporal` — FSR2/3-style jittered temporal accumulation. Requires depth
- *   and motion vectors. Phase 2.
+ *   and motion vectors.
  */
 export type UpscalePath = 'bilinear' | 'spatial' | 'temporal';
 

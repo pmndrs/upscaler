@@ -3,7 +3,7 @@ import { assembleShader } from './wgsl';
 
 /**
  * Reconstruct pass — fuses FSR2/3's "reconstruct & dilate" and "depth clip"
- * stages into one render-resolution dispatch (a Phase-5 merge: depth clip only
+ * stages into one render-resolution dispatch (fused deliberately: depth clip only
  * ever read the current pixel's own dilated depth and motion, both of which
  * this pass already has in-register, plus the previous frame's dilated depth).
  *

@@ -135,24 +135,21 @@ Each frame the projection is offset by a sub-pixel **jitter** (Halton(2,3) seque
 
 The **spatial path** (`path: 'spatial'`) is a faithful FSR1 port: EASU's edge-direction-rotated, anisotropically-stretched 12-tap Lanczos kernel, then RCAS. No history, no motion vectors — also the fallback story for content that can't produce velocity.
 
-Full per-pass details and deviations from the FidelityFX reference: [`src/shaders/README.md`](./src/shaders/README.md).
+Full per-pass details and deviations from the FidelityFX reference: [`src/shaders/README.md`](./src/shaders/README.md). For the measured story of how this implementation relates to real FSR 3.1.5 — what matches, what was re-derived into cheaper forms, and the benchmark evidence — see [`PARITY.md`](./PARITY.md).
 
 ### Integration approach
 
 Three doesn't expose its WebGPU internals publicly, so the upscaler grabs `renderer.backend.device` and the `GPUTexture` handles behind render-target attachments (`internal/threeWebGPU.ts` documents exactly which internals we touch and throws loudly if a three upgrade changes them). Compute passes are encoded on our own `GPUCommandEncoder` and submitted between three's scene render and the presentation draw — queue order guarantees correctness with zero synchronization code. The final image lands in a three `StorageTexture` so presenting it is ordinary three code.
 
-## Phases
+## Status
 
-| Phase | Scope                                                                                                                                                                                    | Status |
-| ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
-| **0** | Package scaffold, raw-WebGPU pass infra on three's device, bench app, unit tests                                                                                                         | ✅     |
-| **1** | Spatial baseline: faithful FSR1 EASU + RCAS ports                                                                                                                                        | ✅     |
-| **2** | Temporal pipeline: Halton jitter, unjittered velocity, dilation, depth-clip disocclusion, Lanczos2 accumulate w/ YCoCg variance clipping, per-pass GPU timings                           | ✅     |
-| **3** | Fidelity: luminance-stability **locks**, luminance-average auto-exposure (+ external exposure input), shading-change detection, reactive mask input for transparents/particles           | ✅     |
-| **4** | API & ecosystem: reactive-mask authoring helpers, imperative `UpscalePass` + composable TSL nodes (`upscale` / `upscaleScene` / `upscaleSpatial`), RCAS denoise toggle (MSAA input intentionally excluded — FSR's temporal path _is_ the anti-aliaser) | ✅     |
-| **5** | Performance: merged dilate+clip pass ✅; remaining — `textureGather` tap packing, f16 (`shader-f16`), bind-group caching, a true SPD luminance mip chain (steadier shading-change), half-res luma analysis | 🚧     |
+The pipeline is **feature-complete and GPU-verified**: spatial (FSR1) and temporal paths, luminance-stability locks, auto-exposure (+ external and host pre-exposure inputs), multi-scale shading-change detection, reactive masks (explicit + auto-generated), RCAS with opt-in denoise, imperative `UpscalePass`, and the composable TSL nodes (`upscale` / `upscaleScene` / `upscaleSpatial`). A benchmarking program A/B-compared this implementation against source-style FSR 3.1.5 pass graphs on-GPU; the adopted results and remaining divergences — with measurements — are written up in [`PARITY.md`](./PARITY.md).
 
-Frame generation (the other half of "FSR3") needs swapchain-level frame pacing that browsers don't expose; if we ever want it, the realistic shape is interpolating between presented frames ourselves — out of scope here.
+Deliberately **not** planned:
+
+- **Frame generation** (the other half of "FSR3") — needs swapchain-level frame pacing browsers don't expose.
+- **MSAA input** — FSR's temporal path _is_ the anti-aliaser; a multisampled input is redundant and can't bind to the compute passes.
+- **Perf-only micro-optimizations** (`textureGather` tap packing, f16 arithmetic, bind-group caching) — each adds correctness risk to a core path with no image-quality gain; deferred until performance is an actual bottleneck on real content.
 
 ## Package layout
 

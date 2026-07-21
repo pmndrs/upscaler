@@ -6,9 +6,10 @@ import { assembleShader } from './wgsl';
  * stage, in the pragmatic form the rest of this port needs).
  *
  * FSR2 downsamples the input into a full luminance mip chain with a single
- * atomic SPD dispatch and reads the coarsest mip for exposure. We don't yet
- * consume the intermediate mips (the shading-change detector — Phase 3 — will),
- * so this pass computes only the value that is actually used today: a single
+ * atomic SPD dispatch and reads the coarsest mip for exposure. Nothing here
+ * consumes the intermediate mips (the shading-change detector does its own
+ * fused workgroup-local reduction in shadingChange.ts), so this pass computes
+ * only the value that is actually used: a single
  * scene-average luminance, reduced in one workgroup, mapped to an exposure and
  * eased over time for eye-adaptation.
  *

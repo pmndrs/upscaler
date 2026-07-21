@@ -17,7 +17,8 @@ import { assembleShader } from './wgsl';
  * are replaced by exact `1/x` / `inverseSqrt` (negligible cost on modern
  * GPUs, and WGSL has no direct float bit-cast idiom for them), and taps are
  * `textureLoad`s instead of packed `textureGather`s — an acceptable trade
- * for a test bench (noted in the package README as a Phase 5 optimization).
+ * (gather packing is a deliberately deferred perf-only optimization; see the
+ * package README's status section).
  *
  * Per the FSR1 spec, EASU expects perceptual input. The upscaler does not
  * choose or bake a presentation transform; callers that use the spatial path

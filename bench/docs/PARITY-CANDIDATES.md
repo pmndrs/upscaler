@@ -14,6 +14,12 @@ The production fallback is unchanged and remains the default. No bundle is adopt
 all three cost more compute than production (+36%, +43%, +76% cumulative) without a
 demonstrated visual win on the deterministic scenarios.
 
+**Program conclusion (2026-07-21):** four individual behaviors identified through
+these bundles were extracted and landed in production in re-derived, cheaper forms —
+conditioned-space RCAS, host pre-exposure correction, AMD's disocclusion threshold,
+and the multi-scale shading-change detector. Evidence: [NEXT-STEPS.md](NEXT-STEPS.md).
+The bundles themselves stay registered as bench variants for future re-testing.
+
 ## What is already production behavior
 
 These changes are adopted; they are not part of the unmeasured candidate decision:

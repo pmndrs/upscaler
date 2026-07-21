@@ -2,8 +2,8 @@ import { WGSL_COLOR, WGSL_CONSTANTS } from './common';
 import { assembleShader } from './wgsl';
 
 /**
- * Shading-change detection — FSR3's signed luma-difference pyramid (the
- * "coarse mip" detector from the source resolver, Phase 5), fused into one
+ * Shading-change detection — the concept of FSR3's signed luma-difference
+ * pyramid (the source resolver's "coarse mip" detector), fused into one
  * render-resolution dispatch.
  *
  * The pass averages current luma and last frame's reprojected luma over
