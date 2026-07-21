@@ -10,6 +10,7 @@ const RESOURCE_GRAPH = [
     'scene-color-depth-velocity',
     'exposure',
     'reconstruct',
+    'shading-change-pyramid',
     'accumulate-history-locks',
     'rcas-or-blit',
     'debug-or-output',
@@ -158,7 +159,7 @@ function metadata(id: BenchmarkVariantId): BenchmarkVariantMetadata {
                 : {},
             timingPassLabels: sourceBundle
                 ? sourceTimingLabels
-                : ['exposure', 'reconstruct', 'accumulate', 'rcas'],
+                : ['exposure', 'reconstruct', 'shadingChange', 'accumulate', 'rcas'],
         },
     };
 }

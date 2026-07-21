@@ -48,6 +48,7 @@ import {
     RCAS_TONEMAP_SPACE_SHADER,
 } from './rcas';
 import { RECONSTRUCT_SHADER } from './reconstruct';
+import { SHADING_CHANGE_SHADER } from './shadingChange';
 import { assembleShader } from './wgsl';
 
 const ALL_SHADERS: Record<string, string> = {
@@ -55,6 +56,7 @@ const ALL_SHADERS: Record<string, string> = {
     easu: EASU_SHADER,
     rcas: RCAS_SHADER,
     reconstruct: RECONSTRUCT_SHADER,
+    shadingChange: SHADING_CHANGE_SHADER,
     accumulate: ACCUMULATE_SHADER,
     luminancePyramid: LUMINANCE_PYRAMID_SHADER,
     generateReactive: GENERATE_REACTIVE_SHADER,
@@ -66,7 +68,8 @@ const BASELINE_BINDING_COUNTS: Record<string, number> = {
     easu: 3,
     rcas: 4,
     reconstruct: 7,
-    accumulate: 12,
+    shadingChange: 9,
+    accumulate: 13,
     luminancePyramid: 7,
     generateReactive: 4,
     debug: 10,
@@ -79,8 +82,10 @@ const BASELINE_FINGERPRINTS: Record<string, string> = {
     rcas: '51bd6d54',
     // Updated 2026-07-21: AMD viewport/depth-scaled disocclusion (NEXT-STEPS item 3).
     reconstruct: '19104db7',
+    // Added 2026-07-21: Phase-5 signed-difference pyramid detector (NEXT-STEPS item 4).
+    shadingChange: '41ed97fa',
     // Updated 2026-07-21: DeltaPreExposure history correction (NEXT-STEPS item 2).
-    accumulate: 'df540efa',
+    accumulate: 'a2a4ec79',
     luminancePyramid: 'e4b7a644',
     generateReactive: '6ed4b549',
     debug: 'e30ebd6c',

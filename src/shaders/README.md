@@ -494,32 +494,29 @@ and replace them only inside the coordinated parity resolver tested on
 
 #### Shading change
 
-- **Current status:** Custom replacement.
-- **Local implementation:** Compares reprojected history luma with a current 3×3
-  neighborhood mean and variance.
-- **FSR 3.1.5 behavior:** Builds a dedicated signed-difference SPD from corrected
-  current/previous luma and evaluates multiple mips.
-- **Why it differs / evidence confidence — Likely:** The local heuristic avoids a pyramid,
-  its resources, and extra history inputs. That architectural saving is visible, but its
-  GPU benefit and quality tradeoff have not been measured.
-
-**Keep the local path**
-
-- **Pros:** Avoids the dedicated SPD resources/work and is already observable through a
-  debug view.
-- **Cons:** Lacks scale separation and can confuse high-frequency motion or aliasing with a
-  real shading change.
-
-**Adopt FSR parity**
-
-- **Pros:** Provides source multi-scale detection and corrected history/current luma
-  comparison.
-- **Cons:** Adds a dedicated pyramid and dependencies. It may cost more GPU time; the
-  amount is unknown.
-
-**Next action:** **Benchmark.** Add the signed-difference SPD as a structural variant and
-compare false positives, response to controlled lighting changes, per-pass distributions,
-and upscaler compute-pass sum. Do not reuse nonexistent local exposure mips.
+- **Current status:** Multi-scale detector adopted (2026-07-21, NEXT-STEPS item 4 /
+  the Phase-5 roadmap item), in a fused form.
+- **Local implementation:** `shadingChange.ts` — one half-resolution dispatch whose
+  8×8 workgroup covers a 16×16 render tile, so 4×4 and 8×8 block reductions are
+  workgroup-local. Current and jitter-aligned reprojected previous luma are averaged
+  per block and the *means* are compared per scale, gated by a base + contrast-scaled
+  (coefficient-of-variation) noise floor; disoccluded texels are neutralized. The
+  strongest gated scale is the response consumed by accumulate's `SHADING_AGE` path.
+  The pass also maintains the 1-frame luma history it compares against.
+- **FSR 3.1.5 behavior:** Builds a signed-difference SPD from corrected
+  current/previous luma over multiple mips, in two passes with dedicated mip
+  resources.
+- **Evidence — Measured (five GPU tuning iterations, 2026-07-21):** The source-style
+  mean-of-per-texel-signed-ratios was implemented first and floored at ~0.10 mean
+  response on a still jittered scene (the ratio metric weights the darker side of any
+  alias residue — a coherent bias signed averaging cannot cancel); block-mean ratios
+  with adaptive floors and coarse-scales-only resolve grade cleanly: still scene at
+  the old detector's baseline, camera-orbit false positives *below* the old 3×3
+  heuristic (Q4 worst 3.6 vs 4.9), light steps fire as clean single-frame spikes
+  (137/255 vs the old 84 with a 20-frame decay tail), and a host pre-exposure step
+  stays quiet. Finals differ ≤ 1.6/255 RMSE. Cost: 0.044 ms at ratio 2 (the
+  candidate's two-pass form measured 0.231 ms), zero when
+  `settings.detectShadingChanges` is off — the pass is simply not dispatched.
 
 #### Luma instability
 
@@ -774,17 +771,18 @@ declare AMD-style host `preExposure`; using it as one will divide that factor ba
 during output and will not provide `DeltaPreExposure()` history correction.
 `DebugView.Exposure` visualizes clamped exposed luma, not the selected exposure scalar.
 
-### Custom shading-change heuristic
+### Shading-change detector
 
-The local heuristic compares reprojected history luma with the current 3×3 neighborhood
-mean, normalized by neighborhood variance. When it responds, non-locked history is aged by
-`SHADING_AGE`; locked pixels suppress this aging. This can identify some lighting/material
-changes, but it can also respond to high-frequency motion or aliasing. It is not FSR
-3.1.5's signed-difference SPD and multiple-mip analysis.
+`shadingChange.ts` compares block-mean luma (4×4 and 8×8 render blocks) against the
+previous frame's jitter-aligned reprojected luma; where a scale's mean moved beyond its
+noise floor, non-locked history is aged by `SHADING_AGE` in `accumulate.ts`; locked
+pixels suppress this aging (locks must never break on shading change — see CLAUDE.md).
+Ghosting after a lighting change → lower the `SHADING_FLOOR_*` constants (top of
+`shadingChange.ts`); flat steadily-lit surfaces shimmering → raise them, or raise
+`SHADING_FLOOR_CV` if the noise sits on textured regions.
 
 Toggle `settings.detectShadingChanges` (`FLAG_SHADING_CHANGE`) and inspect
-`DebugView.ShadingChange`. `SHADING_LO`, `SHADING_HI`, and `SHADING_AGE` are heuristic
-tuning controls, not source constants or guarantees.
+`DebugView.ShadingChange`. When off, the pass is not dispatched at all.
 
 ### Reactive masks
 

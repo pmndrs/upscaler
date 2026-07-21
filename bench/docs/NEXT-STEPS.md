@@ -56,25 +56,35 @@ resolver ran with the flag off (plain loads).
   resets confined to trails; finals shift RMSE ≤ 1.1/255; reconstruct pass time
   unchanged (0.035 ms at ratio 2).
 
-## 4. Phase-5 SPD session: coarse-mip shading-change detector — OPEN
+## 4. Phase-5 SPD session: coarse-mip shading-change detector — DONE
 
-The roadmap item in [/CLAUDE.md](../../CLAUDE.md) ("True SPD luminance mip chain +
-shading-change coarse mip"). Start from the GPU-proven candidate implementation —
-`SHADING_CHANGE_SPD` + 3-mip resolve in `src/shaders/candidateTemporal.ts` — not from
-scratch. Extract the detector alone; do **not** bring the surrounding resolver (+76%
-measured).
+The roadmap item landed as `src/shaders/shadingChange.ts`: one fused half-resolution
+dispatch (an 8×8 workgroup covers a 16×16 render tile, so the 4×4/8×8 reductions are
+workgroup-local) that maintains a 1-frame luma history, compares jitter-aligned
+block-mean luma per scale with base + contrast-scaled noise floors, neutralizes
+disoccluded texels, and feeds accumulate's `FLAG_SHADING_CHANGE` aging path (binding
+12). Locks kept their self-referential break — untouched, per the documented trap.
 
-- Known perf issues to fix on extraction (from the code audit): hoist the per-tap
-  1×1 `frameInfo` reloads out of the reduction loops; drop the write-only luma-pyramid
-  mips unless a consumer lands.
-- Wire its output into the existing `FLAG_SHADING_CHANGE` aging path in
-  `accumulate.ts`, replacing the 3×3-neighborhood mean; keep the lock-suppression
-  behavior exactly (locks must NOT break on shading change — regression documented in
-  CLAUDE.md).
-- Validate: `DebugView.ShadingChange` black on a still scene, lights up under an
-  animated light; high-frequency content under heavy motion should show fewer false
-  positives than production (this is the whole point — capture both).
-- Risk: highest of the four — dedicated session with GPU tuning time, per the roadmap.
+Five GPU tuning iterations were needed (all evidence in
+`bench/results/raw/E00/pre-spd-reference` + `post-spd-v*`):
+1. The candidate's mean-of-per-texel-signed-ratios floored at ~0.10 still-scene
+   response — the relative-difference metric weights the darker side of alias
+   residue, a coherent bias signed averaging cannot cancel.
+2. Jitter-delta-aligned bilinear reprojection helped but did not fix it.
+3. Ratio-of-block-means (average first) collapsed the floor.
+4. Disocclusion neutralization + coefficient-of-variation-scaled floors fixed
+   moving-silhouette false fires.
+5. Dropping the 2×2 scale (thin features flicker at that scale regardless) hit the
+   full acceptance matrix: still scene at the old detector's baseline (Q1 ≈ 2 vs
+   1.1), **fewer** false positives under camera motion on high-frequency content
+   (Q4 worst 3.6 vs old 4.9), light steps fire as clean single-frame spikes (Q9:
+   137/255 vs old 84 with a 20-frame decay tail), host pre-exposure steps quiet
+   (Q11), finals within 1.6/255 RMSE of the old detector.
+
+Cost: **0.044 ms** at ratio 2 (the candidate's two-pass form measured 0.231 ms;
+5× cheaper), zero when `settings.detectShadingChanges` is off. Slow ramps
+deliberately do not fire (the 1-frame comparison sees only the per-frame delta;
+blend + variance clip track ramps — verified no lag/ghosting on Q9 ramp finals).
 
 ## Explicitly not planned (measured against)
 

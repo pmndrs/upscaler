@@ -104,12 +104,10 @@ claims can be re-tested; a repeatable ≥5% result is treated as actionable, <3%
 
 ## Open items we do intend to converge
 
-Three of the four post-parity adoption items landed on 2026-07-21 (host
-pre-exposure correction, the AMD disocclusion constant, and the RCAS cost
-investigation — resolved as the conditioned-space load domain, −34% on the pass).
-One remains:
-
-- **A coarse-mip shading-change detector** (the source design, GPU-proven in the
-  resolver candidate) to replace the 3×3-neighborhood heuristic, which can
-  false-positive on high-frequency content under heavy motion. Scheduled as its own
-  session (`bench/docs/NEXT-STEPS.md`, item 4).
+All four post-parity adoption items landed on 2026-07-21: the RCAS cost
+investigation (resolved as the conditioned-space load domain, −34% on the pass),
+host pre-exposure correction, the AMD disocclusion constant, and the multi-scale
+shading-change detector (the source's coarse-mip design, re-derived as a single
+fused pass — 0.044 ms vs the source-style candidate's 0.231 ms, with measurably
+fewer false positives than the old 3×3 heuristic on high-frequency content under
+motion). Details and evidence: `bench/docs/NEXT-STEPS.md`.

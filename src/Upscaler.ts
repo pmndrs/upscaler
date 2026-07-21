@@ -57,6 +57,7 @@ import { GENERATE_REACTIVE_SHADER } from './shaders/generateReactive';
 import { LUMINANCE_PYRAMID_SHADER } from './shaders/luminancePyramid';
 import { RCAS_SHADER } from './shaders/rcas';
 import { RECONSTRUCT_SHADER } from './shaders/reconstruct';
+import { SHADING_CHANGE_SHADER } from './shaders/shadingChange';
 import {
     DebugView,
     QualityMode,
@@ -137,6 +138,7 @@ export class Upscaler {
     private _accumulatePass!: ComputePass;
     private _exposurePass!: ComputePass;
     private _generateReactivePass!: ComputePass;
+    private _shadingChangePass!: ComputePass;
     private _debugPass!: ComputePass;
     private _depthClipPass: ComputePass | null = null;
     private _prepareReactivityPass: ComputePass | null = null;
@@ -191,6 +193,10 @@ export class Upscaler {
     private _shadingChange: GPUTexture | null = null;
     private _lumaHistory: [GPUTexture, GPUTexture] | null = null;
     private _lumaInstability: GPUTexture | null = null;
+    // Production shading-change detector state (distinct from the candidate
+    // resolver's _lumaHistory/_shadingChange above).
+    private _shadingLumaHistory: [GPUTexture, GPUTexture] | null = null;
+    private _shadingSignal: GPUTexture | null = null;
 
     constructor(options: { renderer: WebGPURenderer });
     constructor(options: UpscalerInternalOptions) {
@@ -304,6 +310,7 @@ export class Upscaler {
                   }
                 : {},
         );
+        this._shadingChangePass = new ComputePass(device, 'shading-change', SHADING_CHANGE_SHADER);
         this._generateReactivePass = new ComputePass(
             device,
             'gen-reactive',
@@ -729,6 +736,39 @@ export class Upscaler {
         );
         reconstructPass.end();
 
+        //* Shading Change — signed luma-difference pyramid (skipped entirely
+        //* when the detector is off; accumulate then reads a zero dummy).
+        let shadingSignalView = this._reactiveDummy!.createView();
+        if (this.settings.detectShadingChanges) {
+            const shadingLumaIn = this._shadingLumaHistory![this._historyIndex];
+            const shadingLumaOut = this._shadingLumaHistory![1 - this._historyIndex];
+            const shadingBindGroup = this._shadingChangePass.createBindGroup([
+                { buffer: this._constants.buffer },
+                colorGPU.createView(),
+                shadingLumaIn.createView(),
+                this._dilatedMotion!.createView(),
+                exposureCur.createView(),
+                exposurePrev.createView(),
+                shadingLumaOut.createView(),
+                this._shadingSignal!.createView(),
+                this._masks!.createView(),
+            ]);
+            const shadingPass = encoder.beginComputePass({
+                label: 'upscale-shading-change',
+                timestampWrites: this._timer.passDescriptor('shadingChange'),
+            });
+            // Half-resolution grid: one thread per 2×2 render block (the pass
+            // covers a 16×16 render tile per workgroup — see shadingChange.ts).
+            this._shadingChangePass.dispatch(
+                shadingPass,
+                shadingBindGroup,
+                Math.max(1, Math.ceil(this._renderWidth / 2)),
+                Math.max(1, Math.ceil(this._renderHeight / 2)),
+            );
+            shadingPass.end();
+            shadingSignalView = this._shadingSignal!.createView();
+        }
+
         //* Accumulate — jittered upsample + history reprojection/rectification
         const accumulateBindGroup = this._accumulatePass.createBindGroup([
             { buffer: this._constants.buffer },
@@ -743,6 +783,7 @@ export class Upscaler {
             exposureCur.createView(),
             reactiveView,
             exposurePrev.createView(),
+            shadingSignalView,
         ]);
         const accumulatePass = encoder.beginComputePass({
             label: 'upscale-accumulate',
@@ -1313,6 +1354,17 @@ export class Upscaler {
                 this._candidateBundle ? 'rgba16float' : 'rgba8unorm',
             );
             this._reactiveGenerated = this._createTexture('reactive-gen', rw, rh, 'rgba8unorm');
+            //* Shading-change detector state (shadingChange.ts)
+            this._shadingLumaHistory = [
+                this._createTexture('shading-luma-0', rw, rh, 'r32float'),
+                this._createTexture('shading-luma-1', rw, rh, 'r32float'),
+            ];
+            this._shadingSignal = this._createTexture(
+                'shading-signal',
+                Math.max(1, Math.ceil(rw / 2)),
+                Math.max(1, Math.ceil(rh / 2)),
+                'r32float',
+            );
 
             if (this._candidateBundle) {
                 this._reconstructedDepth = this._device.createBuffer({
@@ -1435,5 +1487,11 @@ export class Upscaler {
         }
         this._lumaInstability?.destroy();
         this._lumaInstability = null;
+        if (this._shadingLumaHistory) {
+            this._shadingLumaHistory.forEach((texture) => texture.destroy());
+            this._shadingLumaHistory = null;
+        }
+        this._shadingSignal?.destroy();
+        this._shadingSignal = null;
     }
 }
