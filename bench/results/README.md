@@ -38,7 +38,7 @@ small diagnostic artifacts under a separately authorized manifest.
 
 The authored source-style bundles do not have result manifests yet. Their hypotheses,
 cumulative ordering, and required later evidence are documented in
-`bench/PARITY-CANDIDATES.md`; do not store interactive or smoke output as adoption
+`bench/docs/PARITY-CANDIDATES.md`; do not store interactive or smoke output as adoption
 evidence.
 
 Q6-Q8 construct reduced-resolution three.js effect graphs for GTAO, SSR, SSGI,

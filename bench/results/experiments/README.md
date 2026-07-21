@@ -87,7 +87,7 @@ The controller:
 7. Runs or assigns real-device validation and evidence collection.
 8. Assigns a fresh read-only task review.
 9. Consolidates critical and important findings into no more than two fix rounds.
-10. Makes the result decision and updates `bench/PARITY-PROGRESS.md`.
+10. Makes the result decision and updates `bench/docs/PARITY-PROGRESS.md`.
 11. Starts dependent work only from an adopted, documented integration state.
 
 The controller may narrow a task without changing its manifest. Any expansion requires a new manifest revision before work resumes.

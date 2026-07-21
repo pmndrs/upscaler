@@ -27,6 +27,15 @@ fidelity/tuning of the temporal path (accumulation, disocclusion thresholds, mot
 convention) is correct enough to render cleanly but **not tuned** — the "landmines still
 live" section remains the guide for visual regressions.
 
+**Parity program concluded (2026-07-21):** the three source-style FSR 3.1.5 candidate
+graphs were GPU-verified and A/B-benchmarked against production — **+36% / +6.5% /
++76% GPU compute with no visual win**; none adopted. Consumer-facing rationale in
+`PARITY.md` (root); evidence + decisions in `bench/docs/PARITY-*.md`; the four
+surviving adoption items (RCAS input-range fix, host pre-exposure, AMD disocclusion
+constant, Phase-5 SPD detector) are planned in `bench/docs/NEXT-STEPS.md`. Candidate
+A/B runs: `node scripts/run-benchmark.mjs --smoke --variant <A> --comparison <B>`
+(see `--help`).
+
 If you touch shaders/passes, re-verify on a real GPU. A dependency-free way to do it
 headlessly (no Playwright): launch Chrome with `--headless=new --enable-unsafe-webgpu
 --remote-debugging-port=N`, drive it over the DevTools Protocol (Node 22 has a native

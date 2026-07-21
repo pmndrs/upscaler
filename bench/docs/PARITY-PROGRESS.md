@@ -48,7 +48,7 @@ Each experiment allows at most two consolidated fix rounds after its initial imp
 ## Documentation Ownership
 
 - The controller owns this ledger, immutable manifests, state transitions, decisions, and cross-experiment dependencies.
-- Concise measured results, recommendations, user votes, and resulting actions are tracked in `bench/PARITY-DECISIONS.md`.
+- Concise measured results, recommendations, user votes, and resulting actions are tracked in `bench/docs/PARITY-DECISIONS.md`.
 - Implementers own only files explicitly listed in their manifest and may not edit manifests or this ledger.
 - Reviewers and research agents are read-only unless a separate exact allowlist says otherwise.
 - Implementation agents whose exact allowlists share any path are serialized. The controller must finish or stop the active writer before starting another overlapping writer.
@@ -88,7 +88,7 @@ Three cumulative internal candidates are now authored for later A/B work. This i
 implementation state only: no benchmark, browser GPU validation, visual review, timing
 claim, or adoption decision has been made.
 
-See `bench/PARITY-CANDIDATES.md` for the candidate hypotheses, cumulative dependencies,
+See `bench/docs/PARITY-CANDIDATES.md` for the candidate hypotheses, cumulative dependencies,
 fallbacks, and the performance-first test matrix required before any adoption decision.
 
 - `source-filter-bundle-v1` replaces current/history reconstruction, EASU implementation
