@@ -81,6 +81,17 @@ function q9(frame: number): BenchmarkFrameState {
     return { ...state(frame), directionalIntensity };
 }
 
+function q11(frame: number): BenchmarkFrameState {
+    // Host pre-exposure transition on an otherwise static scene: identity,
+    // 2.5× step at 60, hold, ramp back to 1 over 120–179. With DeltaPreExposure
+    // correction the shading-change view stays black through all of it and
+    // accumulation age never resets; output brightness simply tracks the drive.
+    let hostPreExposure = 1;
+    if (frame >= 60 && frame < 120) hostPreExposure = 2.5;
+    else if (frame >= 120 && frame < 180) hostPreExposure = 2.5 - (1.5 * (frame - 120)) / 59;
+    return { ...state(frame), hostPreExposure };
+}
+
 function q10(frame: number): BenchmarkFrameState {
     const afterCut = frame >= 60;
     return {
@@ -274,6 +285,25 @@ const SCENARIOS: Record<BenchmarkScenarioId, BenchmarkScenarioDefinition> = {
         subruns: [],
         unsupported: null,
         frame: q10,
+    },
+    Q11: {
+        id: 'Q11',
+        name: 'host-pre-exposure',
+        endFrame: 239,
+        captures: [
+            '0', '23', 'P-1', 'P', '59', '60', '61', '62', '64', '68', '76', '83',
+            '119', '120', '121', '135', '149', '164', '179', '180', '181', '184',
+            '196', '203', '239',
+        ],
+        debugViews: ['final', 'accumulation-age', 'locks', 'exposure', 'shading-change'],
+        rois: {
+            full: [0, 0, 1, 1],
+            lit_knots: [0.18, 0.16, 0.64, 0.38],
+            hdr_bulb: [0.43, 0.08, 0.14, 0.2],
+        },
+        subruns: [],
+        unsupported: null,
+        frame: q11,
     },
 };
 

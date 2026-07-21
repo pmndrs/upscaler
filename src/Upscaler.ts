@@ -685,6 +685,10 @@ export class Upscaler {
         const externalExposureView = inputs.exposureTexture
             ? getGPUTexture(this._renderer, inputs.exposureTexture).createView()
             : this._reactiveDummy!.createView();
+        // Host pre-exposure input — the zero dummy publishes as 1.0 (inert).
+        const hostPreExposureView = inputs.preExposureTexture
+            ? getGPUTexture(this._renderer, inputs.preExposureTexture).createView()
+            : this._reactiveDummy!.createView();
         const exposureBindGroup = this._exposurePass.createBindGroup([
             { buffer: this._constants.buffer },
             colorGPU.createView(),
@@ -692,6 +696,7 @@ export class Upscaler {
             exposurePrev.createView(),
             exposureCur.createView(),
             externalExposureView,
+            hostPreExposureView,
         ]);
         const exposurePass = encoder.beginComputePass({
             label: 'upscale-exposure',
@@ -737,6 +742,7 @@ export class Upscaler {
             locksOut.createView(),
             exposureCur.createView(),
             reactiveView,
+            exposurePrev.createView(),
         ]);
         const accumulatePass = encoder.beginComputePass({
             label: 'upscale-accumulate',

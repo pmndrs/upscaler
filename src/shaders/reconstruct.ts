@@ -35,27 +35,12 @@ export const RECONSTRUCT_SHADER = assembleShader(
 @group(0) @binding(5) var dilatedMotion : texture_storage_2d<rgba16float, write>;
 @group(0) @binding(6) var maskOutput : texture_storage_2d<rgba8unorm, write>;
 
-// Relative separation (fraction of current view depth) treated as a full
-// disocclusion. Depth differences below ~1.5% are considered the same surface,
-// absorbing depth-buffer quantization and dilation error.
-const DEPTH_SEPARATION_SCALE : f32 = 0.066;
-const DEPTH_SIMILARITY_FLOOR : f32 = 0.015;
-
-// Manual bilinear fetch — r32float is not filterable, but linear view-space
-// depth interpolates correctly by hand.
-fn samplePreviousDepth(uv : vec2f) -> f32 {
-    let pos = uv * C.renderSize - 0.5;
-    let base = floor(pos);
-    let frac = pos - base;
-    let maxCoord = vec2i(C.renderSize) - 1;
-    let p00 = clamp(vec2i(base), vec2i(0), maxCoord);
-    let p11 = clamp(vec2i(base) + 1, vec2i(0), maxCoord);
-    let d00 = textureLoad(previousDepth, p00, 0).r;
-    let d10 = textureLoad(previousDepth, vec2i(p11.x, p00.y), 0).r;
-    let d01 = textureLoad(previousDepth, vec2i(p00.x, p11.y), 0).r;
-    let d11 = textureLoad(previousDepth, p11, 0).r;
-    return mix(mix(d00, d10, frac.x), mix(d01, d11, frac.x), frac.y);
-}
+// AMD's separation tolerance (ffx_fsr2_depth_clip.h): the minimum view-depth
+// gap that reads as a different surface scales with viewport resolution and
+// scene depth, absorbing depth-buffer quantization without a scene-tuned guess.
+const DEPTH_SEPARATION_CONSTANT : f32 = 1.37e-5;
+// Bilinear taps lighter than this cannot vote (matches the reference).
+const DEPTH_TAP_WEIGHT_FLOOR : f32 = 6.1e-4;
 
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) gid : vec3u) {
@@ -89,18 +74,50 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
     textureStore(dilatedMotion, gid.xy, vec4f(uvDelta, 0.0, 0.0));
 
     //* Depth Clip — disocclusion from the just-dilated depth + motion.
+    // AMD's formulation (ffx_fsr2_depth_clip.h ComputeDepthClip, via the
+    // GPU-verified candidate port): each bilinear tap of last frame's dilated
+    // depth votes a confidence that its separation from the current depth is
+    // within the viewport/depth-scaled tolerance; disocclusion is the weighted
+    // complement, and only positive separations (current surface was occluded)
+    // count at all.
     let uv = (vec2f(gid.xy) + 0.5) * C.renderSizeInv;
     let prevUV = uv - uvDelta;
     if (any(prevUV < vec2f(0.0)) || any(prevUV > vec2f(1.0))) {
         textureStore(maskOutput, gid.xy, vec4f(1.0, 0.0, 0.0, 1.0));
         return;
     }
-    // History is invalid when the previous surface was meaningfully nearer than
-    // the current one (i.e. the current surface was occluded).
-    let prevDepth = samplePreviousDepth(prevUV);
-    let separation = max(0.0, curDepth - prevDepth);
-    let relative = max(0.0, separation / max(curDepth, 1.0e-4) - DEPTH_SIMILARITY_FLOOR);
-    let disocclusion = clamp(relative / DEPTH_SEPARATION_SCALE, 0.0, 1.0);
+    let samplePosition = prevUV * C.renderSize - 0.5;
+    let base = vec2i(floor(samplePosition));
+    let fraction = fract(samplePosition);
+    let offsets = array<vec2i, 4>(vec2i(0, 0), vec2i(1, 0), vec2i(0, 1), vec2i(1, 1));
+    let weights = vec4f(
+        (1.0 - fraction.x) * (1.0 - fraction.y),
+        fraction.x * (1.0 - fraction.y),
+        (1.0 - fraction.x) * fraction.y,
+        fraction.x * fraction.y
+    );
+    let halfViewportWidth = length(C.renderSize * 0.5);
+    var separationConfidence = 0.0;
+    var weightSum = 0.0;
+    var potentialDisocclusion = true;
+    for (var index = 0; index < 4; index++) {
+        let weight = weights[index];
+        if (weight <= DEPTH_TAP_WEIGHT_FLOOR) { continue; }
+        let p = clamp(base + offsets[index], vec2i(0), maxCoord);
+        let prevDepth = textureLoad(previousDepth, p, 0).r;
+        let difference = curDepth - prevDepth;
+        potentialDisocclusion = potentialDisocclusion && difference > 1.175e-38;
+        if (potentialDisocclusion) {
+            let required = DEPTH_SEPARATION_CONSTANT * halfViewportWidth * max(curDepth, prevDepth);
+            separationConfidence += clamp(required / max(difference, 1.0e-7), 0.0, 1.0) * weight;
+            weightSum += weight;
+        }
+    }
+    let disocclusion = select(
+        0.0,
+        clamp(1.0 - separationConfidence / max(weightSum, 1.0e-6), 0.0, 1.0),
+        potentialDisocclusion && weightSum > 0.0,
+    );
     textureStore(maskOutput, gid.xy, vec4f(disocclusion, 0.0, 0.0, 1.0));
 }
 `,

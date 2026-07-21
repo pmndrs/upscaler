@@ -5,6 +5,8 @@ declare type BenchmarkVariantId =
     | 'local-baseline-through-e00-harness'
     | 'rcas-fsr315-limiter'
     | 'rcas-fsr315-numeric'
+    | 'rcas-hoisted-exposure-v1'
+    | 'rcas-tonemap-space-v1'
     | 'source-filter-bundle-v1'
     | 'source-structural-bundle-v1'
     | 'source-spd-resolver-bundle-v1';
@@ -19,7 +21,8 @@ declare type BenchmarkScenarioId =
     | 'Q7'
     | 'Q8'
     | 'Q9'
-    | 'Q10';
+    | 'Q10'
+    | 'Q11';
 declare type BenchmarkDebugView =
     | 'final'
     | 'motion-vectors'
@@ -201,6 +204,8 @@ declare interface BenchmarkFrameState {
     resetHistory: boolean;
     resize: BenchmarkDimensions | null;
     particlesVisible: boolean;
+    /** App-baked exposure factor driven into the scene color + resolver (Q11). */
+    hostPreExposure?: number;
 }
 
 declare interface BenchmarkCaptureRequest {

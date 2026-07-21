@@ -1,7 +1,12 @@
 import type * as THREE from 'three/webgpu';
 
 import { Upscaler } from '@pmndrs/upscaler';
-import { RCAS_LEGACY_SHADER, RCAS_SHADER } from '../../../src/shaders/rcas';
+import {
+    RCAS_HOISTED_EXPOSURE_SHADER,
+    RCAS_LEGACY_SHADER,
+    RCAS_PER_TAP_SHADER,
+    RCAS_TONEMAP_SPACE_SHADER,
+} from '../../../src/shaders/rcas';
 
 interface BenchmarkTimerBridge {
     readonly enabled: boolean;
@@ -176,7 +181,9 @@ export function createBaselineResolver(
 }
 
 /**
- * Creates the isolated FSR 3.1.5 RCAS numeric candidate.
+ * Creates the isolated FSR 3.1.5 RCAS numeric candidate. Pinned to the
+ * per-tap shader (the production form when these identities were measured) so
+ * their timings stay frozen; current production is `rcas-tonemap-space-v1`.
  * @param renderer - Initialized three WebGPU renderer
  * @param metadata - Registry metadata for the candidate identity
  * @returns One candidate resolver instance
@@ -188,7 +195,27 @@ export function createRcasNumericParityResolver(
     return new BaselineBenchmarkResolver(
         renderer as THREE.WebGPURenderer,
         metadata,
-        RCAS_SHADER,
+        RCAS_PER_TAP_SHADER,
+    );
+}
+
+/**
+ * Creates an RCAS load-strategy experiment candidate (item 1 of
+ * bench/docs/NEXT-STEPS.md): production pipeline, only the RCAS shader varies.
+ * @param renderer - Initialized three WebGPU renderer
+ * @param metadata - Registry metadata carrying the experiment identity
+ * @returns One candidate resolver instance
+ */
+export function createRcasExperimentResolver(
+    renderer: unknown,
+    metadata: BenchmarkVariantMetadata,
+): BenchmarkResolver {
+    return new BaselineBenchmarkResolver(
+        renderer as THREE.WebGPURenderer,
+        metadata,
+        metadata.id === 'rcas-hoisted-exposure-v1'
+            ? RCAS_HOISTED_EXPOSURE_SHADER
+            : RCAS_TONEMAP_SPACE_SHADER,
     );
 }
 
@@ -205,7 +232,9 @@ export function createSourceBundleResolver(
     return new BaselineBenchmarkResolver(
         renderer as THREE.WebGPURenderer,
         metadata,
-        RCAS_SHADER,
+        // The bundles run RCAS without FLAG_INPUT_REINHARD, where the per-tap
+        // and conditioned forms are identical — keep the measured identity.
+        RCAS_PER_TAP_SHADER,
         metadata.id,
     );
 }

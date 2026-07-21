@@ -197,6 +197,8 @@ class BrowserBenchmarkApi implements UpscalerBenchmarkApi {
         const scenarioFrame = scenario.frame(Math.min(frame, scenario.endFrame));
         if (scenarioFrame.resize) this._context.resize(scenarioFrame.resize);
         this._applyFrameState(scenarioFrame);
+        if (scenarioFrame.hostPreExposure !== undefined)
+            pipeline.setHostPreExposure(scenarioFrame.hostPreExposure);
         if (scenarioFrame.resetHistory) pipeline.reset(bench.scene, camera, frame);
 
         await pipeline.prepareTiming();

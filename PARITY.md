@@ -40,6 +40,21 @@ Reproduce with:
 - **RCAS numeric math.** The production sharpener uses FSR 3.1.5's lower limiter and the
   corrected denoise luma/range math, adopted after A/B measurement showed parity was
   free (E01). Denoise is opt-in pending evidence on representative noisy content.
+  (One deliberate divergence in the *load domain*: the temporal path sharpens the
+  accumulated history's conditioned tonemap-space texels and inverts the conditioning
+  once on the result, instead of upstream's exposed-linear per-tap domain — measured
+  34% cheaper on the RCAS pass with capture-verified visually identical output,
+  including an HDR stress scenario.)
+- **Host pre-exposure (`DeltaPreExposure`).** The `preExposureTexture` dispatch input is
+  honored end-to-end: reprojected history is ratio-corrected across a host pre-exposure
+  change, auto-exposure meters host-invariantly, and the host factor is preserved in
+  the output — upstream's contract. Validated with a dedicated step+ramp scenario
+  (Q11): no history invalidation, no brightness pumping, and byte-identical output when
+  the input is absent.
+- **Viewport/depth-scaled disocclusion.** The disocclusion threshold uses AMD's
+  formulation (`ffx_fsr2_depth_clip.h`'s per-tap confidence with the
+  `1.37e-5 · halfViewportWidth · maxDepth` tolerance) instead of the earlier fixed
+  relative-threshold guess — kept inside our faster fused reconstruction pass.
 - **Color and exposure domains.** Like upstream, the upscaler applies no tone mapping or
   output encoding — input and output are the caller's linear/HDR domain, and internal
   conditioning exposure is divided back out before output. An earlier internal ACES/sRGB
@@ -89,15 +104,12 @@ claims can be re-tested; a repeatable ≥5% result is treated as actionable, <3%
 
 ## Open items we do intend to converge
 
-- **Host pre-exposure semantics** (`DispatchInputs.preExposureTexture`): correcting
-  reprojected history across changing host pre-exposure, as upstream's
-  `DeltaPreExposure()` does — a correctness fix for HDR apps, measured ~free in the
-  candidate graph.
-- **AMD's viewport/depth-scaled disocclusion constant** in place of the current fixed
-  threshold guess, kept inside the (faster) fused reconstruction pass.
+Three of the four post-parity adoption items landed on 2026-07-21 (host
+pre-exposure correction, the AMD disocclusion constant, and the RCAS cost
+investigation — resolved as the conditioned-space load domain, −34% on the pass).
+One remains:
+
 - **A coarse-mip shading-change detector** (the source design, GPU-proven in the
   resolver candidate) to replace the 3×3-neighborhood heuristic, which can
-  false-positive on high-frequency content under heavy motion.
-- **RCAS input-range investigation:** the source resolver's history made RCAS 47%
-  cheaper in measurement; if production accumulate emits ALU-hostile value ranges,
-  clamping them is a free performance win.
+  false-positive on high-frequency content under heavy motion. Scheduled as its own
+  session (`bench/docs/NEXT-STEPS.md`, item 4).

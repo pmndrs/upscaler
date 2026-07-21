@@ -1,5 +1,6 @@
 import {
     createBaselineResolver,
+    createRcasExperimentResolver,
     createRcasNumericParityResolver,
     createSourceBundleResolver,
 } from './BenchmarkResolver';
@@ -31,8 +32,10 @@ function metadata(id: BenchmarkVariantId): BenchmarkVariantMetadata {
     const structural =
         id === 'source-structural-bundle-v1' || id === 'source-spd-resolver-bundle-v1';
     const spdResolver = id === 'source-spd-resolver-bundle-v1';
+    const rcasExperiment =
+        id === 'rcas-hoisted-exposure-v1' || id === 'rcas-tonemap-space-v1';
     const rcasLimiterParity = id === 'rcas-fsr315-limiter';
-    const rcasNumericParity = rcasLimiterParity || id === 'rcas-fsr315-numeric';
+    const rcasNumericParity = rcasLimiterParity || id === 'rcas-fsr315-numeric' || rcasExperiment;
     const rcasDenoise = id === 'rcas-fsr315-numeric';
     const sourceResourceGraph = spdResolver
         ? [
@@ -97,6 +100,10 @@ function metadata(id: BenchmarkVariantId): BenchmarkVariantMetadata {
               ? 'Source structural inputs/reactivity bundle v1'
               : id === 'source-filter-bundle-v1'
                 ? 'Source reconstruction/filter bundle v1'
+                : id === 'rcas-hoisted-exposure-v1'
+                  ? 'RCAS with hoisted exposure load'
+                  : id === 'rcas-tonemap-space-v1'
+                    ? 'RCAS sharpening in tonemap space'
                 : rcasDenoise
             ? 'FSR 3.1.5 RCAS limiter + denoise'
             : rcasLimiterParity
@@ -117,7 +124,7 @@ function metadata(id: BenchmarkVariantId): BenchmarkVariantMetadata {
         },
         resourceGraph: sourceBundle ? sourceResourceGraph : RESOURCE_GRAPH,
         pipeline: {
-            shaderKey: sourceBundle
+            shaderKey: sourceBundle || rcasExperiment
                 ? id
                 : rcasNumericParity
                 ? rcasDenoise
@@ -171,6 +178,14 @@ DEFAULT_DEFINITIONS.push({
 DEFAULT_DEFINITIONS.push({
     metadata: metadata('rcas-fsr315-numeric'),
     create: createRcasNumericParityResolver,
+});
+DEFAULT_DEFINITIONS.push({
+    metadata: metadata('rcas-hoisted-exposure-v1'),
+    create: createRcasExperimentResolver,
+});
+DEFAULT_DEFINITIONS.push({
+    metadata: metadata('rcas-tonemap-space-v1'),
+    create: createRcasExperimentResolver,
 });
 for (const id of [
     'source-filter-bundle-v1',

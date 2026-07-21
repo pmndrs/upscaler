@@ -159,6 +159,22 @@ conversion on representative noisy content. Separately benchmark native versus
 approximate-medium final normalization and 8×8 per-pixel dispatch versus quad-remapped
 coverage only if RCAS performance becomes material.
 
+#### RCAS load domain (temporal path)
+
+- **Current status:** Deliberate divergence, measured (2026-07-21, NEXT-STEPS item 1).
+- **Local implementation:** Sharpens the accumulate history's conditioned tonemap-space
+  texels directly (bounded [0,1), the range the limiter math assumes) and inverts the
+  conditioning once on the result.
+- **FSR 3.1.5 behavior:** Sharpens in exposed linear space (applies `Exposure()` per
+  load, reverses it after).
+- **Why it differs / evidence — Measured:** The per-tap inversion form (five
+  `tonemapInvert` divisions + five 1×1 exposure loads per pixel) measured RCAS at
+  0.103 ms; the conditioned-space form measures 0.068 ms (**−34%**, repeatable, warm
+  ABBA blocks). Captures on Q0/Q1/Q3/Q9 including the HDR-bulb ROI show RMSE ≤ 1.8/255
+  full-frame and ≤ 9/255 max on the brightest content — visually indistinguishable, no
+  overshoot. The prior per-tap shader is kept as `RCAS_PER_TAP_SHADER` for the frozen
+  `rcas-fsr315-limiter` benchmark identity.
+
 #### RCAS color domain
 
 - **Current status:** Source-aligned output/color domain.
@@ -177,35 +193,23 @@ when drawing to the screen; library users may instead continue linear post-proce
 
 #### Reconstruction and disocclusion (`reconstruct.ts`)
 
-- **Current status:** Custom replacement.
-- **Local implementation:** Ping-pongs bilinearly sampled linear dilated depth and applies
-  fixed relative thresholds in one fused render-resolution pass.
-- **FSR 3.1.5 behavior:** Scatters nearest current depth into previous-frame positions with
-  atomics, then evaluates reconstructed samples with viewport- and depth-scaled thresholds.
-- **Why it differs / evidence confidence — Rationale unclear; structural effect
-  verified:** The local fusion demonstrably avoids one dispatch boundary, intermediate
-  resource traffic, and source scatter atomics. No evidence establishes that performance
-  motivated the original divergence or that the reduced work is faster on target devices.
-  It does not preserve scatter coverage semantics; those writes require synchronization
-  or atomics.
-
-**Keep the local path**
-
-- **Pros:** Avoids a dispatch and intermediate traffic. Avoids atomic scatter requirements
-  that may be costly or awkward on some WebGPU devices.
-- **Cons:** Cannot reconstruct previous-depth coverage around motion in the same way as the
-  source. Fixed thresholds may classify disocclusion differently by depth and resolution.
-
-**Adopt FSR parity**
-
-- **Pros:** Restores source coverage and threshold scaling, which may improve history
-  rejection around moving silhouettes and depth discontinuities.
-- **Cons:** Adds synchronized scatter work, resources, and a pass boundary. The actual GPU
-  cost and quality gain are unmeasured locally.
-
-**Next action:** **Benchmark.** Build a distinct synchronized reconstruction variant,
-capture disocclusion and accumulation-age results on controlled motion, and report its
-per-pass distributions and upscaler compute-pass sum against the fused pass.
+- **Current status:** Hybrid — fused pass structure kept (measured faster), AMD's
+  threshold formulation adopted (2026-07-21, NEXT-STEPS item 3).
+- **Local implementation:** One fused render-resolution pass: nearest-depth dilation,
+  then per-bilinear-tap disocclusion voting against last frame's dilated depth using
+  AMD's viewport/depth-scaled tolerance
+  (`1.37e-5 · halfViewportWidth · max(depth)` — `ffx_fsr2_depth_clip.h`
+  `ComputeDepthClip`, taken from the GPU-verified candidate port).
+- **FSR 3.1.5 behavior:** Scatters nearest current depth into previous-frame positions
+  with atomics, then evaluates reconstructed samples with the same viewport- and
+  depth-scaled thresholds in a separate pass.
+- **Evidence — Measured:** The atomic scatter + separate depth-clip pass was benchmarked
+  in the structural candidate: +30% prepareInputs and +22% depthClip with no visible
+  win on Q3 (see PARITY-DECISIONS). The fused pass with AMD's thresholds shows the
+  expected debug signature (thin stable silhouette outlines, near-black still scenes,
+  age resets confined to trails) and shifts finals by RMSE ≤ 1.1/255 versus the old
+  fixed-threshold guess. Reconstruct pass time unchanged (0.035 ms at ratio 2).
+  The remaining divergence from source is scatter coverage semantics only.
 
 #### Farthest depth and motion divergence
 
@@ -436,34 +440,28 @@ resolver variant, with debug visualization for every signal that scales the box.
 
 #### Exposure history
 
-- **Current status:** Diverges and has a domain-consistency gap.
-- **Local implementation:** Stores locally exposed, invertible-tonemapped history without
-  correcting reprojected history when auto, fixed, or external conditioning exposure
-  changes. `exposureTexture` is a conditioning override, not host `preExposure`.
-- **FSR 3.1.5 behavior:** Applies `DeltaPreExposure()` and `Exposure()` while moving history
-  into the current working domain, then removes only `Exposure()` before output and
-  preserves host `preExposure`.
-- **Why it differs / evidence confidence — Unclear:** The local representation lacks
-  previous/current exposure metadata. This is not a demonstrated optimization; it is a
-  domain mismatch that can compare current and history samples under different effective
-  exposures.
-
-**Keep the local path**
-
-- **Pros:** Requires no new exposure state and preserves the current API behavior.
-- **Cons:** Changing exposure can cause pumping or trails. Treating `exposureTexture` as
-  host pre-exposure also divides out a domain the caller may expect preserved.
-
-**Adopt FSR parity**
-
-- **Pros:** Makes history comparisons domain-consistent and supports a proper host
-  pre-exposure contract.
-- **Cons:** Requires explicit previous/current exposure state and careful migration of the
-  existing conditioning-exposure API.
-
-**Next action:** **Target parity.** First add deterministic tests/captures for step and
-ramped exposure changes. Then track the host pre-exposure ratio separately, correct
-reprojected history, and remove only internal/app conditioning exposure on output.
+- **Current status:** Host pre-exposure parity adopted (2026-07-21, NEXT-STEPS item 2);
+  conditioning-exposure drift remains uncorrected by design.
+- **Local implementation:** The pyramid publishes the app's `preExposureTexture` value
+  in the 1×1 exposure texel's `.b` (1.0 when absent) and meters auto-exposure
+  host-invariantly (divides host out of the measured average, as FSR2 divides
+  pre-exposure out of every input load). Accumulate reads the previous frame's texel and
+  ratio-corrects reprojected history in linear space across a host change — FSR3's
+  `DeltaPreExposure()`. Host pre-exposure stays in the output (caller domain);
+  conditioning exposure is still divided out.
+- **FSR 3.1.5 behavior:** Same contract: `DeltaPreExposure()` corrects history,
+  `Exposure()` is removed before output, host `preExposure` is preserved.
+- **Evidence — Measured (scenario Q11, host-pre-exposure step + ramp):** With the
+  correction, a 2.5× host step leaves the shading-change detector at baseline
+  (mean 1.19 vs quiet 1.44), never resets accumulation age (165.5 vs a 131.4 reset
+  without it), and output brightness tracks the drive in a single frame. Without a
+  `preExposureTexture` both texels publish 1.0 and captures are **byte-identical** to
+  the pre-change build — the correction is free for existing users.
+- **Still divergent:** Conditioning (auto/fixed/external) exposure changes are not
+  ratio-corrected; adaptation is eased slowly (`ADAPT_SPEED`) so the per-frame mismatch
+  stays below the shading detector's threshold. Correcting it would change output for
+  all auto-exposure users and needs its own captures — revisit only with evidence of
+  pumping on real content.
 
 #### Locks
 

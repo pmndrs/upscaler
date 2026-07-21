@@ -295,6 +295,12 @@ export function createBenchScene(): BenchScene {
         particles.visible = frame.particlesVisible;
         reactiveParticles.visible = frame.particlesVisible;
         sun.intensity = frame.directionalIntensity;
+        // The Q11 host pre-exposure multiplier lives in the MRT output node,
+        // which the background never passes through — scale it here so the
+        // whole frame is uniformly pre-exposed like a real app's render.
+        (scene.background as THREE.Color)
+            .setHex(0x10141a)
+            .multiplyScalar(frame.hostPreExposure ?? 1);
     }
 
     return { scene, roomScene, reactiveScene, update, applyFrame, resetDeterministicState };

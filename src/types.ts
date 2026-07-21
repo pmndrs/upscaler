@@ -164,11 +164,14 @@ export interface DispatchInputs {
      */
     exposureTexture?: Texture;
     /**
-     * Optional host pre-exposure texture (red texel, typically 1×1). Unlike
-     * {@link exposureTexture}, this factor is part of the caller's color
-     * domain and is therefore preserved at output. Source-style candidates
-     * track its previous/current ratio to correct reprojected history.
-     * Omission is equivalent to `1`.
+     * Optional host pre-exposure texture (red texel, typically 1×1): the
+     * exposure factor the app has already baked into this frame's input color.
+     * Unlike {@link exposureTexture}, this factor is part of the caller's
+     * color domain and is therefore preserved at output. The temporal path
+     * tracks its previous/current ratio and corrects reprojected history
+     * across a change (FSR3's `DeltaPreExposure`), so stepping or ramping the
+     * host exposure does not read as a full-screen shading change. Omission is
+     * equivalent to `1`.
      */
     preExposureTexture?: Texture;
     /** Drop all history this frame (camera cut, teleport, resize). */

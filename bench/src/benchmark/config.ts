@@ -5,11 +5,13 @@ const VARIANTS = [
     'local-baseline-through-e00-harness',
     'rcas-fsr315-limiter',
     'rcas-fsr315-numeric',
+    'rcas-hoisted-exposure-v1',
+    'rcas-tonemap-space-v1',
     'source-filter-bundle-v1',
     'source-structural-bundle-v1',
     'source-spd-resolver-bundle-v1',
 ] as const;
-const SCENARIOS = ['Q0', 'Q1', 'Q2', 'Q3', 'Q4', 'Q5', 'Q6', 'Q7', 'Q8', 'Q9', 'Q10'] as const;
+const SCENARIOS = ['Q0', 'Q1', 'Q2', 'Q3', 'Q4', 'Q5', 'Q6', 'Q7', 'Q8', 'Q9', 'Q10', 'Q11'] as const;
 
 function numberParam(params: URLSearchParams, name: string, fallback: number): number {
     const raw = params.get(name);

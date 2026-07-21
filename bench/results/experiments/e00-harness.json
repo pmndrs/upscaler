@@ -1367,6 +1367,120 @@
             ]
           }
         }
+      },
+      {
+        "id": "Q11",
+        "name": "host-pre-exposure",
+        "purpose": "Replay an app-baked host pre-exposure step at frame 60, a hold, and a linear ramp home over frames 120 through 179, with the same value fed as the preExposureTexture dispatch input; proves DeltaPreExposure history correction (no shading-change firing, no accumulation reset, output brightness tracks the drive).",
+        "initial_camera": {
+          "position": [
+            9,
+            6,
+            12
+          ],
+          "target": [
+            0,
+            1.6,
+            0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ],
+          "projection": {
+            "type": "perspective",
+            "vertical_fov_degrees": 50,
+            "aspect": 1.7777777777777777,
+            "near": 0.1,
+            "far": 200
+          }
+        },
+        "frame_range": {
+          "start": 0,
+          "end_inclusive": 239,
+          "duration_seconds": 4
+        },
+        "camera_formula": "position=(9,6,12), target=(0,1.6,0), up=(0,1,0) for every n.",
+        "object_formula": "All object transforms are frozen to formula_conventions.baseline_scene_formula evaluated at t=0.",
+        "light_exposure_formula": "Directional intensity fixed at 3.2 and hemisphere at 0.9 for every n. Host pre-exposure H(n)=1.0 for 0<=n<60; H(n)=2.5 for 60<=n<120; H(n)=2.5-1.5*(n-120)/59 for 120<=n<180; H(n)=1.0 for 180<=n<=239. The scene MRT color is multiplied by H(n) and the same value is bound as the preExposureTexture dispatch input. settings.exposure=1.0 and autoExposure=true for every n; no external exposure texture is bound.",
+        "events": "Host pre-exposure step 1.0 to 2.5 at n=60; inclusive linear ramp 2.5 to 1.0 over n=120..179; steady at 1.0 from n=180. Reset only before n=0.",
+        "randomness": {
+          "seed_uint32": 0,
+          "prng": "none",
+          "policy": "No PRNG calls are permitted."
+        },
+        "active_inputs_effects": [
+          "bench color scaled by host pre-exposure",
+          "float depth",
+          "zero scene velocity except jitter compensation",
+          "auto exposure",
+          "host preExposureTexture",
+          "shading-change detector",
+          "locks"
+        ],
+        "captures": {
+          "frames": [
+            "0",
+            "23",
+            "P-1",
+            "P",
+            "59",
+            "60",
+            "61",
+            "62",
+            "64",
+            "68",
+            "76",
+            "83",
+            "119",
+            "120",
+            "121",
+            "135",
+            "149",
+            "164",
+            "179",
+            "180",
+            "181",
+            "184",
+            "196",
+            "203",
+            "239"
+          ],
+          "debug_views": [
+            "final",
+            "accumulation-age",
+            "locks",
+            "exposure",
+            "shading-change"
+          ],
+          "ratios": [
+            1,
+            1.5,
+            2,
+            3
+          ],
+          "rois": {
+            "full": [
+              0,
+              0,
+              1,
+              1
+            ],
+            "lit_knots": [
+              0.18,
+              0.16,
+              0.64,
+              0.38
+            ],
+            "hdr_bulb": [
+              0.43,
+              0.08,
+              0.14,
+              0.2
+            ]
+          }
+        }
       }
     ],
     "required_debug_views": [

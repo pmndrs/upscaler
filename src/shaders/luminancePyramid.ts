@@ -28,6 +28,10 @@ import { assembleShader } from './wgsl';
  * - 4: exposure out (rgba16float storage, 1×1)
  * - 5: external exposure (app-supplied; r = exposure). Read only when
  *      FLAG_EXTERNAL_EXPOSURE is set — else a 1×1 dummy is bound and ignored.
+ * - 6: host pre-exposure (app-supplied; r = the pre-exposure baked into this
+ *      frame's input color). Published in the output's .b so accumulate can
+ *      ratio-correct history across a change (FSR3's DeltaPreExposure). A zero
+ *      dummy (no input) publishes 1.0, keeping the correction inert.
  */
 export const LUMINANCE_PYRAMID_SHADER = assembleShader(
     WGSL_CONSTANTS,
@@ -38,6 +42,7 @@ export const LUMINANCE_PYRAMID_SHADER = assembleShader(
 @group(0) @binding(3) var prevExposure : texture_2d<f32>;
 @group(0) @binding(4) var exposureOut : texture_storage_2d<rgba16float, write>;
 @group(0) @binding(5) var externalExposure : texture_2d<f32>;
+@group(0) @binding(6) var hostPreExposure : texture_2d<f32>;
 
 // 32×32 = 1024 bilinear taps across the whole frame — a coarse but stable
 // average for exposure (each tap already averages 4 texels).
@@ -67,7 +72,14 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
             logSum = logSum + log2(max(luma(c), 1.0e-4));
         }
     }
-    let avgLum = exp2(logSum / f32(EXPOSURE_TAPS * EXPOSURE_TAPS));
+    // Meter host-invariantly (FSR2 divides pre-exposure out of every input
+    // load): the app already metered what it baked in, so a host pre-exposure
+    // step must not send auto-exposure re-adapting — that multi-frame
+    // conditioning drift would desynchronize history from the current frame
+    // and read as a full-screen shading change.
+    let hostRaw = textureLoad(hostPreExposure, vec2i(0), 0).r;
+    let host = select(1.0, hostRaw, hostRaw > 0.0);
+    let avgLum = exp2(logSum / f32(EXPOSURE_TAPS * EXPOSURE_TAPS)) / host;
 
     let targetExposure = clamp(EXPOSURE_KEY / max(avgLum, 1.0e-4), EXPOSURE_MIN, EXPOSURE_MAX);
 
@@ -91,7 +103,9 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
     let ext = textureLoad(externalExposure, vec2i(0), 0).r;
     exposure = select(exposure, ext, hasFlag(FLAG_EXTERNAL_EXPOSURE));
 
-    textureStore(exposureOut, vec2i(0), vec4f(exposure, avgLum, 0.0, 0.0));
+    // Host pre-exposure rides along in .b: 0 (the dummy) means "not supplied"
+    // and publishes as 1.0 so the accumulate-side ratio correction is inert.
+    textureStore(exposureOut, vec2i(0), vec4f(exposure, avgLum, host, 0.0));
 }
 `,
 );

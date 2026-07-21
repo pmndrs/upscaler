@@ -30,9 +30,16 @@ live" section remains the guide for visual regressions.
 **Parity program concluded (2026-07-21):** the three source-style FSR 3.1.5 candidate
 graphs were GPU-verified and A/B-benchmarked against production — **+36% / +6.5% /
 +76% GPU compute with no visual win**; none adopted. Consumer-facing rationale in
-`PARITY.md` (root); evidence + decisions in `bench/docs/PARITY-*.md`; the four
-surviving adoption items (RCAS input-range fix, host pre-exposure, AMD disocclusion
-constant, Phase-5 SPD detector) are planned in `bench/docs/NEXT-STEPS.md`. Candidate
+`PARITY.md` (root); evidence + decisions in `bench/docs/PARITY-*.md`. **Post-parity
+items 1–3 landed the same day** (see `bench/docs/NEXT-STEPS.md` for evidence):
+(1) RCAS now sharpens in conditioned tonemap space, inverting once — **−34% RCAS,
+−5.7% total** with capture-identical output; the old form is frozen as
+`RCAS_PER_TAP_SHADER` under the `rcas-fsr315-limiter` bench identity. (2) Host
+pre-exposure (`preExposureTexture`) is honored end-to-end — DeltaPreExposure history
+correction + host-invariant auto-exposure metering, validated on the new **Q11**
+scenario, byte-identical when absent. (3) The reconstruct pass uses AMD's
+viewport/depth-scaled disocclusion (per-tap confidence voting) inside the fused
+single pass. Only NEXT-STEPS item 4 (Phase-5 SPD detector) remains. Candidate
 A/B runs: `node scripts/run-benchmark.mjs --smoke --variant <A> --comparison <B>`
 (see `--help`).
 
@@ -145,7 +152,7 @@ These were discovered by reading three's source; they're non-obvious and easy to
 - **Accumulation tuning.** Catmull-Rom history filter, YCoCg variance-clip gamma (`CLIP_GAMMA = 1.0`), disocclusion/clip weight falloffs, **and the luminance-lock constants (`LOCK_*`)** in `accumulate.ts` are sensible defaults, not tuned. Ghosting → tighten (lower `LOCK_CLAMP_RELAX`/`LOCK_HISTORY_BOOST`, raise the peak/contrast thresholds); instability/shimmer or thin features dimming → loosen. Use `DebugView.Locks` to see where locks form.
 - **Shading-change constants** (`accumulate.ts`: `SHADING_LO/HI/AGE`) are conservative defaults. If stable, steadily-lit surfaces shimmer or fail to converge, `SHADING_LO` is too low (it's aging history that didn't change) — raise it; if a genuine lighting change ghosts its old shading, lower it. `DebugView.ShadingChange` should be black on a still scene — check it before suspecting the accumulate blend. The detector reuses the 3×3 neighborhood mean, not a coarse pyramid mip, so it can false-positive on very high-frequency content under heavy motion; that's the Phase-5 SPD-mip refinement.
 - **Auto-exposure constants** (`luminancePyramid.ts`: `EXPOSURE_KEY`, `EXPOSURE_MIN/MAX`, `ADAPT_SPEED`) are defaults. Because exposure is divided back out before display, the *visible* effect is subtle (better accumulation stability, not a brightness change). If a scene pulses in brightness, `ADAPT_SPEED` is the suspect; if the image goes flat/washed on a very bright or dark scene, check the min/max clamp. `DebugView.Exposure` should read near mid-grey — verify there before suspecting the accumulate math.
-- **Depth separation threshold** in `reconstruct.ts` (`DEPTH_SEPARATION_SCALE`, `DEPTH_SIMILARITY_FLOOR`) is a guess. Too aggressive = history thrown away everywhere (no convergence); too slack = ghost trails behind moving objects.
+- ~~**Depth separation threshold** in `reconstruct.ts` is a guess~~ — **resolved 2026-07-21**: replaced by AMD's viewport/depth-scaled formulation (`1.37e-5 · halfViewportWidth · maxDepth`, per-bilinear-tap confidence voting from `ffx_fsr2_depth_clip.h`), GPU-validated on Q3 (thin stable outlines, still scenes quiet, age resets confined to trails). No scene-tuned constants remain in this pass.
 - **`timestamp-query`** may be absent; `GpuTimer` no-ops gracefully, but confirm the GPU-ms readout actually appears where supported.
 
 ---

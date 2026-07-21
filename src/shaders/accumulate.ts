@@ -30,7 +30,11 @@ import { assembleShader } from './wgsl';
  * - 6: history out (rgba16float storage, display size)
  * - 7: locks in, display size (rgba16float; r = lifetime, g = locked luma)
  * - 8: locks out (rgba16float storage, display size)
- * - 9: exposure, 1×1 (rgba16float; r = pre-exposure for this frame)
+ * - 9: exposure, 1×1 (rgba16float; r = conditioning pre-exposure for this
+ *      frame, b = host pre-exposure)
+ * - 10: reactive mask, render size (r = reactivity; 1×1 dummy when absent)
+ * - 11: previous frame's exposure, 1×1 (b = last frame's host pre-exposure,
+ *       for FSR3-style DeltaPreExposure history correction)
  */
 export const ACCUMULATE_SHADER = assembleShader(
     WGSL_CONSTANTS,
@@ -47,6 +51,7 @@ export const ACCUMULATE_SHADER = assembleShader(
 @group(0) @binding(8) var locksOut : texture_storage_2d<rgba16float, write>;
 @group(0) @binding(9) var exposureTex : texture_2d<f32>;
 @group(0) @binding(10) var reactiveMask : texture_2d<f32>;
+@group(0) @binding(11) var exposurePrevTex : texture_2d<f32>;
 
 const PI : f32 = 3.14159265358979;
 // How hard a fully-reactive pixel snaps to the current frame in the blend.
@@ -137,7 +142,9 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
     let motion = textureLoad(dilatedMotion, renderCoord, 0).xy;
     let disocclusion = textureLoad(masks, renderCoord, 0).r;
     // Pre-exposure for this frame (auto or manual) — divided back out at output.
-    let exposure = textureLoad(exposureTex, vec2i(0), 0).r;
+    // .b carries the app's host pre-exposure (1.0 when none is supplied).
+    let frameInfo = textureLoad(exposureTex, vec2i(0), 0);
+    let exposure = frameInfo.r;
     // Reactive mask: pixels the caller flags (particles, transparents) should
     // lean on the current frame instead of ghosting through history.
     var reactivity = 0.0;
@@ -198,7 +205,22 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
         return;
     }
 
-    let history = sampleHistoryCatmullRom(prevUV);
+    var history = sampleHistoryCatmullRom(prevUV);
+
+    //* Host Pre-Exposure Delta (FSR3's DeltaPreExposure)
+    // If the app changed the pre-exposure baked into its render since last
+    // frame, the reprojected history is in the old brightness domain and would
+    // read as a full-screen shading change — ratio-correct it in linear space.
+    // Without a preExposureTexture input both texels publish 1.0 and this is
+    // skipped, leaving the pass bit-identical. Conditioning exposure is
+    // deliberately not corrected here: it adapts smoothly by design.
+    let hostPrev = textureLoad(exposurePrevTex, vec2i(0), 0).b;
+    var hostRatio = 1.0;
+    if (hostPrev > 1.0e-4 && frameInfo.b > 1.0e-4) { hostRatio = frameInfo.b / hostPrev; }
+    if (abs(hostRatio - 1.0) > 1.0e-3) {
+        history = vec4f(tonemapInvertible(tonemapInvert(history.rgb) * hostRatio), history.a);
+    }
+
     var sampleCount = history.a * C.maxAccumulation;
 
     //* Neighborhood Statistics (YCoCg)

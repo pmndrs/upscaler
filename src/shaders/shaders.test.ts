@@ -41,7 +41,12 @@ import { DEBUG_SHADER } from './debug';
 import { EASU_SHADER } from './easu';
 import { GENERATE_REACTIVE_SHADER } from './generateReactive';
 import { LUMINANCE_PYRAMID_SHADER } from './luminancePyramid';
-import { RCAS_LEGACY_SHADER, RCAS_SHADER } from './rcas';
+import {
+    RCAS_HOISTED_EXPOSURE_SHADER,
+    RCAS_LEGACY_SHADER,
+    RCAS_SHADER,
+    RCAS_TONEMAP_SPACE_SHADER,
+} from './rcas';
 import { RECONSTRUCT_SHADER } from './reconstruct';
 import { assembleShader } from './wgsl';
 
@@ -61,8 +66,8 @@ const BASELINE_BINDING_COUNTS: Record<string, number> = {
     easu: 3,
     rcas: 4,
     reconstruct: 7,
-    accumulate: 11,
-    luminancePyramid: 6,
+    accumulate: 12,
+    luminancePyramid: 7,
     generateReactive: 4,
     debug: 10,
 };
@@ -70,10 +75,13 @@ const BASELINE_BINDING_COUNTS: Record<string, number> = {
 const BASELINE_FINGERPRINTS: Record<string, string> = {
     blit: '673108e1',
     easu: '11632358',
-    rcas: 'c803572b',
-    reconstruct: '1ced83aa',
-    accumulate: 'd0973222',
-    luminancePyramid: '7a806c41',
+    // Updated 2026-07-21: conditioned-space sharpening adopted (NEXT-STEPS item 1).
+    rcas: '51bd6d54',
+    // Updated 2026-07-21: AMD viewport/depth-scaled disocclusion (NEXT-STEPS item 3).
+    reconstruct: '19104db7',
+    // Updated 2026-07-21: DeltaPreExposure history correction (NEXT-STEPS item 2).
+    accumulate: 'df540efa',
+    luminancePyramid: 'e4b7a644',
     generateReactive: '6ed4b549',
     debug: 'e30ebd6c',
 };
@@ -311,6 +319,38 @@ describe('FSR 3.1.5 RCAS numeric parity', () => {
             'let hitMin = mn4 / (4.0 * mx4) * lowerLimiterMultiplier;',
         );
         expect(RCAS_LEGACY_SHADER).not.toContain('lowerLimiterMultiplier');
+    });
+});
+
+describe('RCAS load-strategy experiment shaders', () => {
+    // These are built by string transforms over the production shader — a
+    // silently missed replacement would produce WGSL that only fails on a real
+    // device. Assert every transform actually landed.
+    it('hoisted-exposure moves the exposure load out of the tap function', () => {
+        expect(RCAS_HOISTED_EXPOSURE_SHADER).toContain(
+            'fn rcasLoad(p : vec2i, rcpExposure : f32) -> vec3f {',
+        );
+        expect(RCAS_HOISTED_EXPOSURE_SHADER).toContain(
+            'rcpExposure = 1.0 / max(textureLoad(exposureTex, vec2i(0), 0).r, 1.0e-4);',
+        );
+        expect(RCAS_HOISTED_EXPOSURE_SHADER).toContain('rcasLoad(sp, rcpExposure)');
+        expect(RCAS_HOISTED_EXPOSURE_SHADER).toContain(
+            'rcasLoad(sp + vec2i(0, -1), rcpExposure)',
+        );
+        expect(RCAS_HOISTED_EXPOSURE_SHADER).not.toContain('tonemapInvert(c) / exposure');
+        // Same sharpening math as production.
+        expect(RCAS_HOISTED_EXPOSURE_SHADER).toContain('lowerLimiterMultiplier');
+    });
+
+    it('tonemap-space uses plain tap loads and inverts once on the result', () => {
+        expect(RCAS_TONEMAP_SPACE_SHADER).toContain(
+            'return textureLoad(inputColor, clamped, 0).rgb;\n}',
+        );
+        expect(RCAS_TONEMAP_SPACE_SHADER).not.toContain('tonemapInvert(c)');
+        expect(RCAS_TONEMAP_SPACE_SHADER).toContain(
+            'pix = tonemapInvert(max(pix, vec3f(0.0))) / exposure;',
+        );
+        expect(RCAS_TONEMAP_SPACE_SHADER).toContain('lowerLimiterMultiplier');
     });
 });
 

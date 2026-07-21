@@ -8,6 +8,7 @@ import {
     pass,
     roughness,
     texture,
+    uniform,
     vec4,
     velocity,
 } from 'three/tsl';
@@ -144,10 +145,15 @@ export class BenchPipeline {
     //* Scene Target
     private _renderTarget: THREE.RenderTarget | null = null;
     private _reactiveTarget: THREE.RenderTarget | null = null;
-    private readonly _mrtNode = mrt({ output, velocity });
+    private _mrtNode = mrt({ output, velocity });
     // Single-output MRT for non-temporal modes — its output count matches the
     // count:1 render target so color attachment 0 is actually written.
-    private readonly _mrtOutputOnly = mrt({ output });
+    private _mrtOutputOnly = mrt({ output });
+    //* Host pre-exposure drive (scenario Q11) — off by default so every other
+    //* scenario keeps its exact historical scene shader and dispatch inputs.
+    private readonly _hostPreExposure = uniform(1);
+    private _hostPreExposureValue: number | null = null;
+    private readonly _hostPreExposureTextures = new Map<number, THREE.DataTexture>();
     private _effectScenario: EffectScenario | null = null;
     private _effectPass: ReturnType<typeof pass> | null = null;
     private _effectSsrNodes: SsrPrivateNode[] = [];
@@ -734,6 +740,50 @@ export class BenchPipeline {
      * @param deltaTime - Fixed or interactive timestep
      * @param frameTag - Deterministic frame identity for fresh timing
      */
+    /**
+     * Opts this pipeline into host pre-exposure driving (scenario Q11): the
+     * scene MRT color is scaled by the driven value — emulating an app that
+     * bakes its own exposure into the render — and the same value is fed to
+     * the resolver as `preExposureTexture` every dispatch.
+     */
+    enableHostPreExposureDrive(): void {
+        this._mrtNode = mrt({ output: output.mul(this._hostPreExposure), velocity });
+        this._mrtOutputOnly = mrt({ output: output.mul(this._hostPreExposure) });
+        this._hostPreExposureValue = 1;
+    }
+
+    /**
+     * Sets the host pre-exposure for the next rendered frame. Requires
+     * {@link enableHostPreExposureDrive}.
+     * @param value - Positive exposure factor baked into the scene color
+     */
+    setHostPreExposure(value: number): void {
+        if (this._hostPreExposureValue === null)
+            throw new Error('Host pre-exposure drive is not enabled for this pipeline.');
+        this._hostPreExposure.value = value;
+        this._hostPreExposureValue = value;
+    }
+
+    // The 1×1 texture is created per distinct value: three only re-uploads
+    // texture data for textures its own render graph consumes, so mutating one
+    // texture's texels would never reach the GPU. initTexture() forces upload.
+    private _hostPreExposureTexture(value: number): THREE.DataTexture {
+        let tex = this._hostPreExposureTextures.get(value);
+        if (!tex) {
+            tex = new THREE.DataTexture(
+                new Float32Array([value, 0, 0, 1]),
+                1,
+                1,
+                THREE.RGBAFormat,
+                THREE.FloatType,
+            );
+            tex.needsUpdate = true;
+            this._renderer.initTexture(tex);
+            this._hostPreExposureTextures.set(value, tex);
+        }
+        return tex;
+    }
+
     dispatchResolver(
         camera: THREE.PerspectiveCamera,
         deltaTime: number,
@@ -759,6 +809,10 @@ export class BenchPipeline {
                 depth,
                 velocity: velocityTexture,
                 reactive,
+                preExposureTexture:
+                    this._hostPreExposureValue !== null
+                        ? this._hostPreExposureTexture(this._hostPreExposureValue)
+                        : undefined,
                 deltaTime,
                 frameTag,
             },
@@ -1012,6 +1066,8 @@ export class BenchPipeline {
         this._quadMaterial.dispose();
         this._effectMaterial.dispose();
         this._depthOnlyMaterial.dispose();
+        this._hostPreExposureTextures.forEach((tex) => tex.dispose());
+        this._hostPreExposureTextures.clear();
         this.resolver.dispose();
     }
 }
