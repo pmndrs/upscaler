@@ -637,8 +637,19 @@ export class Upscaler {
             return;
         }
 
-        const depthGPU = getGPUTexture(this._renderer, inputs.depth);
-        const velocityGPU = getGPUTexture(this._renderer, inputs.velocity);
+        // The frame's two stages (TEMPORAL-GUIDES-SPEC §3): geometry guides
+        // need only depth + velocity; everything after needs the beauty color.
+        // Composed on one encoder here so the monolithic dispatch keeps its
+        // single submit — the seam exists for the split-dispatch guides API.
+        this._encodeGuides(encoder, inputs);
+        this._encodeLate(encoder, colorGPU, inputs);
+    }
+
+    // Early stage — the reconstruct pass (fused dilate + depth clip). Produces
+    // the signal-agnostic geometry guides: dilated depth/motion, disocclusion.
+    private _encodeGuides(encoder: GPUCommandEncoder, inputs: DispatchInputs): void {
+        const depthGPU = getGPUTexture(this._renderer, inputs.depth!);
+        const velocityGPU = getGPUTexture(this._renderer, inputs.velocity!);
         this._checkMsaa(depthGPU, 'depth');
         this._checkMsaa(velocityGPU, 'velocity');
         // Stencil-less depth formats bind directly; combined formats need a
@@ -646,9 +657,41 @@ export class Upscaler {
         const depthView = depthGPU.createView(
             depthGPU.format.includes('stencil') ? { aspect: 'depth-only' } : undefined,
         );
-
         const depthCur = this._dilatedDepth![this._depthIndex];
         const depthPrev = this._dilatedDepth![1 - this._depthIndex];
+
+        //* Reconstruct — dilate (nearest-depth motion/depth over 3×3) + depth
+        //* clip (disocclusion vs last frame's dilated depth) fused into one pass.
+        const reconstructBindGroup = this._reconstructPass.createBindGroup([
+            { buffer: this._constants.buffer },
+            depthView,
+            velocityGPU.createView(),
+            depthPrev.createView(),
+            depthCur.createView(),
+            this._dilatedMotion!.createView(),
+            this._masks!.createView(),
+        ]);
+        const reconstructPass = encoder.beginComputePass({
+            label: 'upscale-reconstruct',
+            timestampWrites: this._timer.passDescriptor('reconstruct'),
+        });
+        this._reconstructPass.dispatch(
+            reconstructPass,
+            reconstructBindGroup,
+            this._renderWidth,
+            this._renderHeight,
+        );
+        reconstructPass.end();
+    }
+
+    // Late stage — everything that needs the final beauty color: reactive,
+    // exposure, shading change, accumulate, and the output pass.
+    private _encodeLate(
+        encoder: GPUCommandEncoder,
+        colorGPU: GPUTexture,
+        inputs: DispatchInputs,
+    ): void {
+        const depthCur = this._dilatedDepth![this._depthIndex];
         const historyIn = this._history![this._historyIndex];
         const historyOut = this._history![1 - this._historyIndex];
         const locksIn = this._locks![this._historyIndex];
@@ -712,29 +755,6 @@ export class Upscaler {
         // One workgroup performs the whole reduction (see luminancePyramid.ts).
         this._exposurePass.dispatch(exposurePass, exposureBindGroup, 8, 8);
         exposurePass.end();
-
-        //* Reconstruct — dilate (nearest-depth motion/depth over 3×3) + depth
-        //* clip (disocclusion vs last frame's dilated depth) fused into one pass.
-        const reconstructBindGroup = this._reconstructPass.createBindGroup([
-            { buffer: this._constants.buffer },
-            depthView,
-            velocityGPU.createView(),
-            depthPrev.createView(),
-            depthCur.createView(),
-            this._dilatedMotion!.createView(),
-            this._masks!.createView(),
-        ]);
-        const reconstructPass = encoder.beginComputePass({
-            label: 'upscale-reconstruct',
-            timestampWrites: this._timer.passDescriptor('reconstruct'),
-        });
-        this._reconstructPass.dispatch(
-            reconstructPass,
-            reconstructBindGroup,
-            this._renderWidth,
-            this._renderHeight,
-        );
-        reconstructPass.end();
 
         //* Shading Change — signed luma-difference pyramid (skipped entirely
         //* when the detector is off; accumulate then reads a zero dummy).
