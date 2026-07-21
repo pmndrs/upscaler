@@ -6,7 +6,9 @@ export {
     QualityMode,
     type UpscalerConfig,
     type DispatchInputs,
+    type GuideDispatchInputs,
     type RuntimeSettings,
+    type TemporalGuides,
     type UpscalePath,
 } from './types';
 export { halton, generateJitterSequence } from './math/halton';

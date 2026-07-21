@@ -176,7 +176,13 @@ export class GpuTimer {
                 this._samples.push({ frameTag, sequence, passes });
                 if (sequence <= this._latestCompletedSequence) return;
                 this._latestCompletedSequence = sequence;
-                this._results = new Map(passes.map((pass) => [pass.label, pass.milliseconds]));
+                // Merge (latest value per label) rather than replace: a split
+                // frame (dispatchGuides + dispatchUpscale) is two submits whose
+                // pass sets are disjoint — replacing would drop the early
+                // stage's timings from the interactive readout every frame.
+                const merged = new Map(this._results);
+                for (const pass of passes) merged.set(pass.label, pass.milliseconds);
+                this._results = merged;
             })
             .catch((error: unknown) => {
                 if (authoritative && epoch === this._epoch && !this._disposed)

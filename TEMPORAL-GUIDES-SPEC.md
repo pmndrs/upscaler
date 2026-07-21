@@ -232,11 +232,17 @@ when the consumer lab has accepted.
   absolute (GPU stays in a low power state; likely cold-vite frame
   delivery) — uniform across passes, so A/B *within* that environment is
   valid, but never compare worktree absolutes against repo-run records.
-- **M2 — publish the bundle.** Three-visible allocation flip, the
-  `TemporalGuides` accessor, `dispatchGuides`/`dispatchUpscale` public split,
-  `path: 'guides'`. New example (`11-temporal-guides`) rendering each guide —
-  doubles as the GPU acceptance harness. Gate: monolithic `dispatch()`
-  byte-identical output (capture diff vs `005de6d`).
+- **M2 — publish the bundle. DONE (2026-07-22).** Three-visible allocation
+  flip (`_createSharedTexture`: three `StorageTexture` + raw handle, one
+  allocation), the `guides` accessor, `dispatchGuides`/`dispatchUpscale`
+  public split, `path: 'guides'`, `@experimental` tags. New example
+  `12-temporal-guides` (11 was taken) renders final + three geometry guides
+  from the split frame — the GPU acceptance harness. Gates met: Q0 captures
+  byte-identical vs M1 (24/24, incl. frame 119 and all debug views); example
+  12 headless-verified (no validation errors, guides sampled as TSL nodes,
+  split-frame timings read out); guides-only path CDP-driven under a
+  validation error scope (clean across both ping-pong halves, API guards
+  throw, late products null). Evidence: `bench/results/raw/GUIDES-M1/capture-m2`.
 - **M3 — reactive merge** (§6). Gate: example 05 GPU re-verify; new
   `generateReactive` fingerprint; merged-mask capture test in the bench.
 - **M4 — TSL surface.** `temporalGuides(depth, velocity, camera)` node

@@ -1,7 +1,12 @@
 import {
+    FloatType,
     HalfFloatType,
     Matrix4,
+    NearestFilter,
     NoColorSpace,
+    RGBAFormat,
+    RedFormat,
+    UnsignedByteType,
     type OrthographicCamera,
     type PerspectiveCamera,
 } from 'three';
@@ -63,7 +68,9 @@ import {
     QualityMode,
     type UpscalerConfig,
     type DispatchInputs,
+    type GuideDispatchInputs,
     type RuntimeSettings,
+    type TemporalGuides,
     type UpscalePath,
 } from './types';
 
@@ -197,6 +204,40 @@ export class Upscaler {
     // resolver's _lumaHistory/_shadingChange above).
     private _shadingLumaHistory: [GPUTexture, GPUTexture] | null = null;
     private _shadingSignal: GPUTexture | null = null;
+
+    //* Published Guides (TEMPORAL-GUIDES-SPEC §4)
+    // The production working set is allocated as three StorageTextures so the
+    // guides bundle is consumable outside (TSL texture() nodes, raw bind
+    // groups); the raw fields above keep holding the GPU handles the encode
+    // paths bind. Candidate-bundle resources stay raw and unpublished.
+    private _guideTex: {
+        dilatedMotion: StorageTexture | null;
+        dilatedDepth: [StorageTexture, StorageTexture] | null;
+        masks: StorageTexture | null;
+        reactiveGenerated: StorageTexture | null;
+        shadingSignal: StorageTexture | null;
+        exposure: [StorageTexture, StorageTexture] | null;
+        locks: [StorageTexture, StorageTexture] | null;
+        history: [StorageTexture, StorageTexture] | null;
+    } = {
+        dilatedMotion: null,
+        dilatedDepth: null,
+        masks: null,
+        reactiveGenerated: null,
+        shadingSignal: null,
+        exposure: null,
+        locks: null,
+        history: null,
+    };
+    private _guides: TemporalGuides | null = null;
+    // Ping-pong halves most recently written, so the guides getters resolve
+    // "current" vs "previous" correctly both mid-frame (between the split
+    // dispatches) and after the frame-end index flips.
+    private _latestDepthWrite = 0;
+    private _latestHistoryWrite = 0;
+    // A split frame is in flight: dispatchGuides() ran, dispatchUpscale()
+    // hasn't. Guards against double-encoding the guides stage.
+    private _guidesPending = false;
 
     constructor(options: { renderer: WebGPURenderer });
     constructor(options: UpscalerInternalOptions) {
@@ -474,9 +515,34 @@ export class Upscaler {
      */
     get outputTexture(): Texture {
         if (!this._output) {
+            if (this._path === 'guides') {
+                throw new Error(
+                    "@pmndrs/upscaler: the 'guides' path produces no upscaled output — " +
+                        'consume the guides bundle instead (upscaler.guides).',
+                );
+            }
             throw new Error('@pmndrs/upscaler: configure() must run before outputTexture is used.');
         }
         return this._output;
+    }
+
+    /**
+     * The published temporal-guides bundle (dilated motion/depth,
+     * disocclusion, and the late data products) as ordinary three textures.
+     * Available on the `temporal` and `guides` paths after `configure()`.
+     * See {@link TemporalGuides} for each product's contract, and
+     * TEMPORAL-GUIDES-SPEC.md for the full picture.
+     * @experimental Contract frozen (spec M0) but pre-acceptance — may shift
+     * until the first external consumer integration lands.
+     */
+    get guides(): TemporalGuides {
+        if (!this._guides) {
+            throw new Error(
+                '@pmndrs/upscaler: guides are only available on the temporal or guides ' +
+                    'paths, after configure().',
+            );
+        }
+        return this._guides;
     }
 
     /** Per-pass GPU times (ms) when timestamp queries are supported. */
@@ -535,6 +601,17 @@ export class Upscaler {
      * @param inputs - Scene color (+ depth/velocity for the temporal path) and camera info
      */
     dispatch(inputs: DispatchInputs, camera: JitterableCamera): void {
+        if (this._path === 'guides') {
+            throw new Error(
+                "@pmndrs/upscaler: the 'guides' path has no upscale — drive it with dispatchGuides().",
+            );
+        }
+        if (this._guidesPending) {
+            throw new Error(
+                '@pmndrs/upscaler: a split frame is in flight — finish it with dispatchUpscale() ' +
+                    'instead of dispatch().',
+            );
+        }
         if (!this._output || !this._outputGPU) {
             throw new Error('@pmndrs/upscaler: configure() must run before dispatch().');
         }
@@ -569,6 +646,106 @@ export class Upscaler {
             this._historyIndex = 1 - this._historyIndex;
             this._depthIndex = 1 - this._depthIndex;
         }
+    }
+
+    /**
+     * Encodes and submits only the early geometry stage — the reconstruct
+     * pass producing the {@link TemporalGuides} products `dilatedMotion`,
+     * `dilatedDepth`, and `disocclusion` — so effects that run before the
+     * final beauty color exists can consume them.
+     *
+     * On the `temporal` path this starts a split frame: render/composite the
+     * final color afterwards, then finish with {@link dispatchUpscale}. On
+     * the `guides` path this is the whole frame. Queue ordering makes the
+     * outputs visible to any work submitted afterwards — no explicit sync.
+     * @experimental See {@link guides}.
+     * @param inputs - Depth + velocity (+ optional reset/deltaTime)
+     * @param camera - The scene camera (near/far and projection type)
+     */
+    dispatchGuides(inputs: GuideDispatchInputs, camera: JitterableCamera): void {
+        if (this._path !== 'temporal' && this._path !== 'guides') {
+            throw new Error(
+                `@pmndrs/upscaler: dispatchGuides() requires the temporal or guides path (got '${this._path}').`,
+            );
+        }
+        if (!this._dilatedMotion) {
+            throw new Error('@pmndrs/upscaler: configure() must run before dispatchGuides().');
+        }
+        if (this._guidesPending) {
+            throw new Error(
+                '@pmndrs/upscaler: dispatchGuides() already ran this frame — finish with dispatchUpscale().',
+            );
+        }
+        if (this._candidateBundle) {
+            throw new Error(
+                '@pmndrs/upscaler: candidate bundles support only the monolithic dispatch().',
+            );
+        }
+
+        this._writeConstants(inputs, camera);
+        this._constants.upload();
+
+        const encoder = this._device.createCommandEncoder({ label: 'upscale-guides' });
+        this._timer.beginFrame();
+        this._encodeGuides(encoder, inputs);
+        this._timer.resolve(encoder);
+        this._device.queue.submit([encoder.finish()]);
+        this._timer.readback();
+
+        if (this._path === 'guides') {
+            // The frame ends here — there is no late stage.
+            this._frameIndex++;
+            this._pendingReset = false;
+            this._depthIndex = 1 - this._depthIndex;
+        } else {
+            this._guidesPending = true;
+        }
+    }
+
+    /**
+     * Finishes a split frame: encodes and submits everything after the
+     * geometry stage (reactive, exposure, shading change, accumulate, and
+     * the RCAS/output pass). Requires {@link dispatchGuides} earlier in the
+     * same frame; equivalent to {@link dispatch} apart from the split.
+     * @experimental See {@link guides}.
+     * @param inputs - Scene color (+ optional reactive/exposure inputs)
+     * @param camera - The camera passed to {@link dispatchGuides}
+     */
+    dispatchUpscale(inputs: DispatchInputs, camera: JitterableCamera): void {
+        if (this._path !== 'temporal') {
+            throw new Error(
+                `@pmndrs/upscaler: dispatchUpscale() requires the temporal path (got '${this._path}').`,
+            );
+        }
+        if (!this._guidesPending) {
+            throw new Error(
+                '@pmndrs/upscaler: call dispatchGuides() first (or use the all-in-one dispatch()).',
+            );
+        }
+        if (!this._output || !this._outputGPU) {
+            throw new Error('@pmndrs/upscaler: configure() must run before dispatchUpscale().');
+        }
+
+        // Rewritten (not reused) so color-dependent flags — reactive, external
+        // exposure — reflect this call's inputs. Jitter and reset state are
+        // unchanged since the guides stage, so the shared UBO stays coherent.
+        this._writeConstants(inputs, camera);
+        this._constants.upload();
+
+        const colorGPU = getGPUTexture(this._renderer, inputs.color);
+        this._checkMsaa(colorGPU, 'color');
+        const encoder = this._device.createCommandEncoder({ label: 'upscale-late' });
+        this._timer.beginFrame();
+        this._encodeLate(encoder, colorGPU, inputs);
+        this._timer.resolve(encoder);
+        this._device.queue.submit([encoder.finish()]);
+        this._timer.readback();
+
+        this._guidesPending = false;
+        this._frameIndex++;
+        this._pendingReset = false;
+        this._historyIndex = 1 - this._historyIndex;
+        this._depthIndex = 1 - this._depthIndex;
     }
 
     /** Releases all GPU resources. */
@@ -641,15 +818,15 @@ export class Upscaler {
         // need only depth + velocity; everything after needs the beauty color.
         // Composed on one encoder here so the monolithic dispatch keeps its
         // single submit — the seam exists for the split-dispatch guides API.
-        this._encodeGuides(encoder, inputs);
+        this._encodeGuides(encoder, { depth: inputs.depth, velocity: inputs.velocity });
         this._encodeLate(encoder, colorGPU, inputs);
     }
 
     // Early stage — the reconstruct pass (fused dilate + depth clip). Produces
     // the signal-agnostic geometry guides: dilated depth/motion, disocclusion.
-    private _encodeGuides(encoder: GPUCommandEncoder, inputs: DispatchInputs): void {
-        const depthGPU = getGPUTexture(this._renderer, inputs.depth!);
-        const velocityGPU = getGPUTexture(this._renderer, inputs.velocity!);
+    private _encodeGuides(encoder: GPUCommandEncoder, inputs: GuideDispatchInputs): void {
+        const depthGPU = getGPUTexture(this._renderer, inputs.depth);
+        const velocityGPU = getGPUTexture(this._renderer, inputs.velocity);
         this._checkMsaa(depthGPU, 'depth');
         this._checkMsaa(velocityGPU, 'velocity');
         // Stencil-less depth formats bind directly; combined formats need a
@@ -659,6 +836,7 @@ export class Upscaler {
         );
         const depthCur = this._dilatedDepth![this._depthIndex];
         const depthPrev = this._dilatedDepth![1 - this._depthIndex];
+        this._latestDepthWrite = this._depthIndex;
 
         //* Reconstruct — dilate (nearest-depth motion/depth over 3×3) + depth
         //* clip (disocclusion vs last frame's dilated depth) fused into one pass.
@@ -693,6 +871,7 @@ export class Upscaler {
     ): void {
         const depthCur = this._dilatedDepth![this._depthIndex];
         const historyIn = this._history![this._historyIndex];
+        this._latestHistoryWrite = 1 - this._historyIndex;
         const historyOut = this._history![1 - this._historyIndex];
         const locksIn = this._locks![this._historyIndex];
         const locksOut = this._locks![1 - this._historyIndex];
@@ -1256,7 +1435,12 @@ export class Upscaler {
         return flags;
     }
 
-    private _writeConstants(inputs: DispatchInputs, camera: JitterableCamera): void {
+    // Accepts either dispatch shape — the guides stage has no color, and every
+    // field this reads is shared between the two input types.
+    private _writeConstants(
+        inputs: Omit<DispatchInputs, 'color'>,
+        camera: JitterableCamera,
+    ): void {
         const c = this._constants;
         c.setRenderSize(this._renderWidth, this._renderHeight);
         c.setDisplaySize(this._displayWidth, this._displayHeight);
@@ -1313,78 +1497,131 @@ export class Upscaler {
         });
     }
 
+    // Allocates a working texture through three (same mechanism as the output)
+    // so it is publishable in the guides bundle: the three StorageTexture is
+    // what consumers sample, the raw handle is what our passes bind.
+    private _createSharedTexture(
+        label: string,
+        w: number,
+        h: number,
+        format: 'r32float' | 'rgba8unorm' | 'rgba16float',
+    ): { tex: StorageTexture; gpu: GPUTexture } {
+        const tex = new StorageTexture(w, h);
+        tex.name = `upscale-${label}`;
+        tex.colorSpace = NoColorSpace;
+        // Storage views must cover exactly one mip level (see _output).
+        tex.generateMipmaps = false;
+        switch (format) {
+            case 'r32float':
+                tex.format = RedFormat;
+                tex.type = FloatType;
+                // r32float is non-filterable — consumers must sample nearest.
+                tex.minFilter = NearestFilter;
+                tex.magFilter = NearestFilter;
+                break;
+            case 'rgba8unorm':
+                tex.format = RGBAFormat;
+                tex.type = UnsignedByteType;
+                break;
+            case 'rgba16float':
+                tex.format = RGBAFormat;
+                tex.type = HalfFloatType;
+                break;
+        }
+        this._renderer.initTexture(tex);
+        return { tex, gpu: getGPUTexture(this._renderer, tex) };
+    }
+
     private _allocateTextures(): void {
         this._destroyTextures();
         const rw = this._renderWidth;
         const rh = this._renderHeight;
         const dw = this._displayWidth;
         const dh = this._displayHeight;
+        const guidesOnly = this._path === 'guides';
 
-        // The output is a three StorageTexture so the caller can sample it
-        // like any other texture; initTexture forces GPU-side creation so
-        // the storage view exists before the first dispatch.
-        this._output = new StorageTexture(dw, dh);
-        this._output.name = 'upscale-output';
-        this._output.colorSpace = NoColorSpace;
-        this._output.type = HalfFloatType;
-        // Texture.generateMipmaps defaults to true, which would make three
-        // allocate a mip chain — storage views must cover exactly one level.
-        this._output.generateMipmaps = false;
-        this._renderer.initTexture(this._output);
-        this._outputGPU = getGPUTexture(this._renderer, this._output);
+        if (!guidesOnly) {
+            // The output is a three StorageTexture so the caller can sample it
+            // like any other texture; initTexture forces GPU-side creation so
+            // the storage view exists before the first dispatch.
+            this._output = new StorageTexture(dw, dh);
+            this._output.name = 'upscale-output';
+            this._output.colorSpace = NoColorSpace;
+            this._output.type = HalfFloatType;
+            // Texture.generateMipmaps defaults to true, which would make three
+            // allocate a mip chain — storage views must cover exactly one level.
+            this._output.generateMipmaps = false;
+            this._renderer.initTexture(this._output);
+            this._outputGPU = getGPUTexture(this._renderer, this._output);
 
-        // Exposure is a 1×1 value read by every output path (blit/rcas), so it
-        // is allocated for all pipelines even though only the temporal path
-        // computes it — the other paths bind [0] and leave its content unused.
-        this._exposure = [
-            this._createTexture('exposure-0', 1, 1, 'rgba16float'),
-            this._createTexture('exposure-1', 1, 1, 'rgba16float'),
-        ];
-        // Sampled-only (no storage) so a non-storage format is fine; zero-init
-        // gives a "nothing reactive" default when the caller passes no mask.
-        this._reactiveDummy = this._device.createTexture({
-            label: 'upscale-reactive-dummy',
-            size: { width: 1, height: 1 },
-            format: 'r8unorm',
-            usage: GPUTextureUsage.TEXTURE_BINDING,
-        });
+            // Exposure is a 1×1 value read by every output path (blit/rcas), so
+            // it is allocated for all upscaling paths even though only the
+            // temporal path computes it — the others bind [0] unused.
+            const exposure0 = this._createSharedTexture('exposure-0', 1, 1, 'rgba16float');
+            const exposure1 = this._createSharedTexture('exposure-1', 1, 1, 'rgba16float');
+            this._guideTex.exposure = [exposure0.tex, exposure1.tex];
+            this._exposure = [exposure0.gpu, exposure1.gpu];
+            // Sampled-only (no storage) so a non-storage format is fine; zero-init
+            // gives a "nothing reactive" default when the caller passes no mask.
+            this._reactiveDummy = this._device.createTexture({
+                label: 'upscale-reactive-dummy',
+                size: { width: 1, height: 1 },
+                format: 'r8unorm',
+                usage: GPUTextureUsage.TEXTURE_BINDING,
+            });
+        }
 
         if (this._path === 'spatial') {
             this._easuOutput = this._createTexture('easu-output', dw, dh, 'rgba16float');
         }
 
-        if (this._path === 'temporal') {
-            this._history = [
-                this._createTexture('history-0', dw, dh, 'rgba16float'),
-                this._createTexture('history-1', dw, dh, 'rgba16float'),
-            ];
-            this._locks = [
-                this._createTexture('locks-0', dw, dh, 'rgba16float'),
-                this._createTexture('locks-1', dw, dh, 'rgba16float'),
-            ];
-            this._dilatedDepth = [
-                this._createTexture('dilated-depth-0', rw, rh, 'r32float'),
-                this._createTexture('dilated-depth-1', rw, rh, 'r32float'),
-            ];
-            this._dilatedMotion = this._createTexture('dilated-motion', rw, rh, 'rgba16float');
-            this._masks = this._createTexture(
+        //* Geometry guide set — the temporal front-end, also the whole of the
+        //* guides path.
+        if (this._path === 'temporal' || guidesOnly) {
+            const depth0 = this._createSharedTexture('dilated-depth-0', rw, rh, 'r32float');
+            const depth1 = this._createSharedTexture('dilated-depth-1', rw, rh, 'r32float');
+            this._guideTex.dilatedDepth = [depth0.tex, depth1.tex];
+            this._dilatedDepth = [depth0.gpu, depth1.gpu];
+            const motion = this._createSharedTexture('dilated-motion', rw, rh, 'rgba16float');
+            this._guideTex.dilatedMotion = motion.tex;
+            this._dilatedMotion = motion.gpu;
+            const masks = this._createSharedTexture(
                 'masks',
                 rw,
                 rh,
                 this._candidateBundle ? 'rgba16float' : 'rgba8unorm',
             );
-            this._reactiveGenerated = this._createTexture('reactive-gen', rw, rh, 'rgba8unorm');
+            this._guideTex.masks = masks.tex;
+            this._masks = masks.gpu;
+            this._latestDepthWrite = this._depthIndex;
+        }
+
+        if (this._path === 'temporal') {
+            const history0 = this._createSharedTexture('history-0', dw, dh, 'rgba16float');
+            const history1 = this._createSharedTexture('history-1', dw, dh, 'rgba16float');
+            this._guideTex.history = [history0.tex, history1.tex];
+            this._history = [history0.gpu, history1.gpu];
+            const locks0 = this._createSharedTexture('locks-0', dw, dh, 'rgba16float');
+            const locks1 = this._createSharedTexture('locks-1', dw, dh, 'rgba16float');
+            this._guideTex.locks = [locks0.tex, locks1.tex];
+            this._locks = [locks0.gpu, locks1.gpu];
+            const reactiveGen = this._createSharedTexture('reactive-gen', rw, rh, 'rgba8unorm');
+            this._guideTex.reactiveGenerated = reactiveGen.tex;
+            this._reactiveGenerated = reactiveGen.gpu;
+            this._latestHistoryWrite = this._historyIndex;
             //* Shading-change detector state (shadingChange.ts)
             this._shadingLumaHistory = [
                 this._createTexture('shading-luma-0', rw, rh, 'r32float'),
                 this._createTexture('shading-luma-1', rw, rh, 'r32float'),
             ];
-            this._shadingSignal = this._createTexture(
+            const shadingSignal = this._createSharedTexture(
                 'shading-signal',
                 Math.max(1, Math.ceil(rw / 2)),
                 Math.max(1, Math.ceil(rh / 2)),
                 'r32float',
             );
+            this._guideTex.shadingSignal = shadingSignal.tex;
+            this._shadingSignal = shadingSignal.gpu;
 
             if (this._candidateBundle) {
                 this._reconstructedDepth = this._device.createBuffer({
@@ -1451,6 +1688,47 @@ export class Upscaler {
                 );
             }
         }
+
+        this._guides =
+            this._path === 'temporal' || guidesOnly ? this._buildGuides() : null;
+    }
+
+    // The bundle resolves through getters so ping-ponged products always point
+    // at the most recently written half — consumers re-read per frame.
+    private _buildGuides(): TemporalGuides {
+        // Object-literal getters rebind `this` to the bundle — the alias is the
+        // idiomatic way to reach the upscaler's live state from them.
+        // eslint-disable-next-line @typescript-eslint/no-this-alias
+        const upscaler = this;
+        return {
+            get dilatedMotion() {
+                return upscaler._guideTex.dilatedMotion!;
+            },
+            get dilatedDepth() {
+                return upscaler._guideTex.dilatedDepth![upscaler._latestDepthWrite];
+            },
+            get previousDepth() {
+                return upscaler._guideTex.dilatedDepth![1 - upscaler._latestDepthWrite];
+            },
+            get disocclusion() {
+                return upscaler._guideTex.masks!;
+            },
+            get reactive() {
+                return upscaler._guideTex.reactiveGenerated;
+            },
+            get shadingChange() {
+                return upscaler._guideTex.shadingSignal;
+            },
+            get exposure() {
+                return upscaler._guideTex.exposure?.[upscaler._latestHistoryWrite] ?? null;
+            },
+            get lockStatus() {
+                return upscaler._guideTex.locks?.[upscaler._latestHistoryWrite] ?? null;
+            },
+            get history() {
+                return upscaler._guideTex.history?.[upscaler._latestHistoryWrite] ?? null;
+            },
+        };
     }
 
     private _destroyTextures(): void {
@@ -1459,30 +1737,39 @@ export class Upscaler {
         this._outputGPU = null;
         this._easuOutput?.destroy();
         this._easuOutput = null;
-        if (this._history) {
-            this._history.forEach((t) => t.destroy());
-            this._history = null;
-        }
-        if (this._locks) {
-            this._locks.forEach((t) => t.destroy());
-            this._locks = null;
-        }
-        if (this._dilatedDepth) {
-            this._dilatedDepth.forEach((t) => t.destroy());
-            this._dilatedDepth = null;
-        }
-        this._dilatedMotion?.destroy();
+        // Published (three-owned) textures: dispose() destroys the backing
+        // GPUTexture — never also .destroy() their raw handles.
+        const guideTex = this._guideTex;
+        guideTex.dilatedMotion?.dispose();
+        guideTex.masks?.dispose();
+        guideTex.reactiveGenerated?.dispose();
+        guideTex.shadingSignal?.dispose();
+        guideTex.dilatedDepth?.forEach((t) => t.dispose());
+        guideTex.exposure?.forEach((t) => t.dispose());
+        guideTex.locks?.forEach((t) => t.dispose());
+        guideTex.history?.forEach((t) => t.dispose());
+        this._guideTex = {
+            dilatedMotion: null,
+            dilatedDepth: null,
+            masks: null,
+            reactiveGenerated: null,
+            shadingSignal: null,
+            exposure: null,
+            locks: null,
+            history: null,
+        };
+        this._guides = null;
+        this._guidesPending = false;
+        this._history = null;
+        this._locks = null;
+        this._dilatedDepth = null;
         this._dilatedMotion = null;
-        this._masks?.destroy();
         this._masks = null;
-        if (this._exposure) {
-            this._exposure.forEach((t) => t.destroy());
-            this._exposure = null;
-        }
+        this._exposure = null;
+        this._reactiveGenerated = null;
+        this._shadingSignal = null;
         this._reactiveDummy?.destroy();
         this._reactiveDummy = null;
-        this._reactiveGenerated?.destroy();
-        this._reactiveGenerated = null;
         this._reconstructedDepth?.destroy();
         this._reconstructedDepth = null;
         this._inputSignals?.destroy();
@@ -1511,7 +1798,5 @@ export class Upscaler {
             this._shadingLumaHistory.forEach((texture) => texture.destroy());
             this._shadingLumaHistory = null;
         }
-        this._shadingSignal?.destroy();
-        this._shadingSignal = null;
     }
 }

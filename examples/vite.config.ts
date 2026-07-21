@@ -35,6 +35,7 @@ export default defineConfig({
                 kitchensink: resolve(root, '09-kitchen-sink/index.html'),
                 ssgidenoise: resolve(root, '10-ssgi-denoise/index.html'),
                 nodereactive: resolve(root, '11-node-reactive/index.html'),
+                temporalguides: resolve(root, '12-temporal-guides/index.html'),
             },
         },
     },

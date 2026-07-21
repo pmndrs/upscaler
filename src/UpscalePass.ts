@@ -87,6 +87,12 @@ export class UpscalePass {
 
     /** (Re)builds the pipeline + render target for a size/path/quality. */
     configure(config: UpscalePassConfig): void {
+        if (config.path === 'guides') {
+            throw new Error(
+                "@pmndrs/upscaler: UpscalePass presents an upscaled image — the 'guides' path " +
+                    'produces none. Drive Upscaler directly (configure + dispatchGuides).',
+            );
+        }
         this._path = config.path ?? 'temporal';
         const ratio = config.ratio ?? getQualityModeRatio(config.quality ?? QualityMode.Quality);
 

@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>12 · Temporal Guides</title>
+        <style>
+            html,
+            body {
+                margin: 0;
+                height: 100%;
+                overflow: hidden;
+                background: #0b0d10;
+            }
+            canvas {
+                display: block;
+            }
+            #badge {
+                position: fixed;
+                left: 12px;
+                top: 12px;
+                padding: 8px 11px;
+                background: rgba(8, 10, 14, 0.8);
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                border-radius: 8px;
+                color: #cfd8e3;
+                font: 11px/1.5 ui-monospace, Menlo, monospace;
+                white-space: pre;
+                pointer-events: none;
+            }
+            #badge b {
+                color: #7dd3fc;
+            }
+            .label {
+                position: fixed;
+                padding: 3px 8px;
+                background: rgba(8, 10, 14, 0.7);
+                border-radius: 6px;
+                color: #cfd8e3;
+                font: 11px/1.4 ui-monospace, Menlo, monospace;
+                pointer-events: none;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="badge"></div>
+        <div class="label" style="left: 12px; top: calc(50% - 32px)">disocclusion</div>
+        <div class="label" style="left: calc(50% + 12px); top: calc(50% - 32px)">dilated depth (eye-z)</div>
+        <div class="label" style="left: 12px; bottom: 8px">final upscale</div>
+        <div class="label" style="left: calc(50% + 12px); bottom: 8px">dilated motion (uv delta)</div>
+        <script type="module" src="./main.ts"></script>
+    </body>
+</html>

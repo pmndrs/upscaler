@@ -141,9 +141,21 @@ Full per-pass details and deviations from the FidelityFX reference: [`src/shader
 
 Three doesn't expose its WebGPU internals publicly, so the upscaler grabs `renderer.backend.device` and the `GPUTexture` handles behind render-target attachments (`internal/threeWebGPU.ts` documents exactly which internals we touch and throws loudly if a three upgrade changes them). Compute passes are encoded on our own `GPUCommandEncoder` and submitted between three's scene render and the presentation draw — queue order guarantees correctness with zero synchronization code. The final image lands in a three `StorageTexture` so presenting it is ordinary three code.
 
+### Temporal guides (experimental)
+
+Dilated motion, dilated depth, and disocclusion are **frame properties, not upscaler properties** — every temporal effect upstream (SSGI/SSR temporal reprojection, denoisers, any TAA-class pass) needs them and usually re-derives worse versions privately. The upscaler publishes its internal working set as the **temporal guides** bundle (`upscaler.guides`, ordinary three textures), and the frame can be driven split so the geometry guides exist *before* the final color does:
+
+```ts
+upscaler.dispatchGuides({ depth, velocity }, camera); // right after the G-buffer
+// … effects sample upscaler.guides.dilatedMotion / .disocclusion / .dilatedDepth …
+upscaler.dispatchUpscale({ color, deltaTime }, camera); // finish the frame
+```
+
+An app that never upscales can run `path: 'guides'` for the geometry products alone. Per-product contracts (format, space, resolution, latency) are documented on the `TemporalGuides` type and in [`TEMPORAL-GUIDES-SPEC.md`](./TEMPORAL-GUIDES-SPEC.md); `examples/12-temporal-guides` is the live reference. Marked experimental until the first external consumer integration lands.
+
 ## Status
 
-The pipeline is **feature-complete and GPU-verified**: spatial (FSR1) and temporal paths, luminance-stability locks, auto-exposure (+ external and host pre-exposure inputs), multi-scale shading-change detection, reactive masks (explicit + auto-generated), RCAS with opt-in denoise, imperative `UpscalePass`, and the composable TSL nodes (`upscale` / `upscaleScene` / `upscaleSpatial`). A benchmarking program A/B-compared this implementation against source-style FSR 3.1.5 pass graphs on-GPU; the adopted results and remaining divergences — with measurements — are written up in [`PARITY.md`](./PARITY.md).
+The pipeline is **feature-complete and GPU-verified**: spatial (FSR1) and temporal paths, luminance-stability locks, auto-exposure (+ external and host pre-exposure inputs), multi-scale shading-change detection, reactive masks (explicit + auto-generated), RCAS with opt-in denoise, imperative `UpscalePass`, and the composable TSL nodes (`upscale` / `upscaleScene` / `upscaleSpatial`). The experimental **temporal guides** surface (above) is in active development on its own track. A benchmarking program A/B-compared this implementation against source-style FSR 3.1.5 pass graphs on-GPU; the adopted results and remaining divergences — with measurements — are written up in [`PARITY.md`](./PARITY.md).
 
 Deliberately **not** planned:
 

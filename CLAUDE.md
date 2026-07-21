@@ -68,6 +68,15 @@ When something breaks after an edit, expect failures in this order of likelihood
 
 Don't trust "it builds" as "it works." Drive the real bench.
 
+Bench caveat (measured 2026-07-21): benchmark runs launched from a scratchpad
+**git worktree** read ~3× slower absolute GPU times, uniformly across all passes
+(the GPU never leaves its low power state — likely cold-vite frame delivery).
+A/B comparisons *within* that environment are valid; never compare worktree
+absolutes against repo-run records. Also: a `node_modules` **symlink** in a
+worktree isn't matched by the root `.gitignore`'s `node_modules/` pattern
+(trailing slash ≠ symlink) and crashes the benchmark's working-tree digest —
+`.git/info/exclude` carries a slash-less `node_modules` entry for this.
+
 ---
 
 ## Commands
@@ -205,6 +214,32 @@ explicit acceptance test), RCAS denoise on `06-screenspace-gi`.
   - **Jitter default = ON for temporal** (`UpscalerConfig.jitter`, `UpscalerNodeOptions.jitter`): jitter buys *reconstruction* (detail beyond render res) but only if the input is re-rendered under the jittered projection each frame. Because a composable node's inputs are graph dependencies three renders *in-pipeline* — after this node's `onBeforeRenderPipeline` jitter hook offsets the camera — the offset **does** land on them, so **both** `upscale()` and `upscaleScene()` default jitter **on** (this is how real FSR/DLSS run). Opt **out** (`{ jitter: false }`) only when the input is *not* re-rendered in-graph — an externally-filled `texture()`, or a noisy GI/RT buffer you want reprojected/denoised but not reconstructed (the raw `Upscaler` / example 06 is usually the better fit there). Jitter-off stays a full temporal upscale (reproject + accumulate + denoise), just no sub-pixel offset. When off, `beginFrame` no-ops `setViewOffset`, jitter constants stay zero, and the node skips the hook + velocity compensation. A temporal node that never receives depth+velocity `console.warn`s once. `09-kitchen-sink` toggles jitter on the same in-graph pipeline to A/B it.
   - Color path (both): the node emits linear/HDR color. When it is the final graph node, three's RenderPipeline applies the renderer's configured tone mapping and output color space; otherwise it can feed later linear post-processing. **Note:** three renamed `PostProcessing` → `RenderPipeline` (deprecation warning only).
   - The composable node *does* render its inputs in-graph, so an SSGI-in-a-graph pipeline jitters correctly and there's no owning-render/consuming-inputs split. An imperative pipeline that composites *outside* the post render (its own RT loop) still wants the raw `Upscaler` — `examples/06-screenspace-gi` stays on it as the imperative reference.
+- **Temporal guides (experimental, branch `feat-temporal-guides`).** The production
+  working set is published as `upscaler.guides` (`TemporalGuides` — dilated
+  motion/depth, disocclusion, reactive, shading change, exposure, locks, history)
+  and the frame can be driven split: `dispatchGuides({depth, velocity})` right
+  after the G-buffer (geometry guides only — reconstruct is the whole early
+  stage), then `dispatchUpscale({color, …})`; `path: 'guides'` runs the early
+  stage alone with no output texture. Contracts + program plan:
+  `TEMPORAL-GUIDES-SPEC.md` (root); consumer M0 review: `GUIDES-SPEC-RESPONSE.md`.
+  **Mechanisms a change must not break:** (1) guide textures are allocated via
+  `_createSharedTexture` — a three `StorageTexture` + `initTexture()`, with the
+  raw handle fetched back through `getGPUTexture()`; passes bind the raw handle,
+  consumers sample the three texture, and the two must stay the same allocation.
+  r32float products are pinned `NearestFilter` (non-filterable format — a linear
+  sampler on them is a WebGPU validation error). (2) Ping-ponged products resolve
+  through `_latestDepthWrite`/`_latestHistoryWrite` (set at encode time), NOT the
+  frame-end-flipped `_depthIndex`/`_historyIndex` — the getters must be correct
+  both mid-frame (between the split dispatches) and after the frame. (3) The
+  monolithic `dispatch()` stays one submit (`_encodeGuides` + `_encodeLate` on one
+  encoder) — GPU-verified byte-identical (Q0 captures) and perf-neutral (−2.7%,
+  within noise) against the pre-split pipeline; keep it that way. (4) A split
+  frame is two submits, so `GpuTimer` merges per-label results instead of
+  replacing the map. (5) Frame-end bookkeeping (index flips, `_frameIndex`,
+  `_pendingReset`) happens exactly once per frame: in `dispatch()`, in
+  `dispatchUpscale()`, or — guides path only — in `dispatchGuides()`.
+  `examples/12-temporal-guides` is the live reference + headless-verification
+  target (it exposes `window.__guidesExample` for the CDP harness).
 - **MSAA input — rejected by design.** FSR's temporal path *is* the anti-aliaser (Native AA mode is exactly that), so the correct input is an aliased, single-sample, jittered render with MSAA **off** — MSAA is redundant with FSR's own AA, costs perf, and a multisampled texture can't even bind to the compute passes. (Stacking a *temporal* AA — TAA/`traa` — before FSR is worse still: double-jitter smear; example 06 already drops `traa` for this reason.) `Upscaler` warns once if handed a multisampled input (`_checkMsaa`).
 
 **Performance structure:** dilate + depth-clip are fused into the single `reconstruct.ts` dispatch (GPU-verified disocclusion unchanged); the shading detector is one fused workgroup-local reduction instead of the source's SPD mip chain + resolve pair. The measured story of these divergences from FSR 3.1.5 — and the four upstream behaviors adopted in re-derived form — is `PARITY.md` (root) with evidence in `bench/docs/NEXT-STEPS.md`.
