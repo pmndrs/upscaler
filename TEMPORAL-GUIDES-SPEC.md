@@ -1,6 +1,8 @@
 # Temporal Guides — opening the upscaler's internals (spec)
 
-Status: **draft for review** (2026-07-21, branch `feat-temporal-guides`).
+Status: **M0 resolved — contract frozen for build** (2026-07-21, branch
+`feat-temporal-guides`; consumer review in
+[GUIDES-SPEC-RESPONSE.md](GUIDES-SPEC-RESPONSE.md), resolution in §10).
 Request: [bench/docs/FSR3-BRIEF.md](bench/docs/FSR3-BRIEF.md) — the consuming
 pipeline (SSGI temporal pass, an SVGF-style denoiser, any TAA-class effect)
 wants the upscaler's early data products as first-class outputs instead of
@@ -150,7 +152,10 @@ So `MomentPyramid` is a **new, standalone, signal-agnostic pass**:
 
 - in: any texture + `{ space: 'linear' | 'ycocg', channels }` — hardcodes no
   exposure/tonemap/albedo assumption, per the brief's contract.
-- out: `moments` rg16float `(E[x], E[x²])` per pixel; optional mip chain.
+- out: `moments` rg16float `(E[x], E[x²])` per pixel, plus one coarse level
+  (mip-2-equivalent, 4× reduction) — the consumer's short-history fallback
+  reads exactly one coarse neighborhood and nothing deeper (§10, answer 4).
+  No full chain.
 - Lives in its own files (`shaders/moments.ts` + a small `MomentsPass`
   driver / `moments()` node), exported `@experimental`. It touches nothing
   in the core pipeline — zero regression surface.
@@ -229,6 +234,8 @@ when the consumer lab has accepted.
   producing guide texture nodes in-graph; `upscale(..., { guides })` to share
   one computation between the effect graph and the upscale. Gate: examples
   07/09 unchanged; new node demo consumes `disocclusion` in a toy effect.
+  Priority per §10 answer 5: every hot-path consumer binds raw — if M4 needs
+  trimming, defer the TSL example, never the raw path.
 - **M5 — `MomentPyramid`** (§5), `@experimental`. Gate: structural test +
   scripted GPU check vs CPU reference in the bench (not CI).
 - **M6 — cross-repo acceptance.** The consumer's demo-10 guides lab and SVGF
@@ -250,3 +257,28 @@ haven't seen consumed.
    fallback actually read? (We'd rather allocate 3 than "a full chain".)
 5. Consumption mechanism: TSL `texture()` nodes, raw bind groups, or both?
    (Both are spec'd; if only one is consumed we defer the other's example.)
+
+## 10. M0 resolution (2026-07-21)
+
+Consumer review: [GUIDES-SPEC-RESPONSE.md](GUIDES-SPEC-RESPONSE.md). Every
+deviation D1–D6 accepted; the brief's pass-boundary language and suggested
+formats are superseded by D5/D1/D4 (reconciled on the brief side). §9
+answers, now binding:
+
+1. **UV-delta motion accepted and preferred.** The consumer harness will
+   align its own guides pass to *our* convention before the swap (their
+   work, scheduled with the swap) so the bundle is drop-in.
+2. **Frame N−1 locks/age sufficient** — it is the semantics their shipping
+   consumers already validated, not a compromise.
+3. **Display-res age sampling accepted for day one**, with one recorded
+   risk their guides lab measures: filtered age may dilate across
+   silhouettes → transient over-effort at edges (fails safe). Their
+   render-res counter remains as fallback; we build nothing extra unless
+   the lab rejects display-res sampling.
+4. **Moments: mip 0 + one coarse level (mip-2-equivalent) only.** Nothing
+   reads deeper.
+5. **Raw bind groups first; TSL second.** Per-frame texture re-pointing is
+   fine on their side; the stable-identity copy (§4) stays spec'd-only.
+
+Standing acceptance criteria unchanged: their live demo-10 guides rig is
+M6's exit A/B; their SVGF/moments lab builds only after our M2 + M5 exist.
