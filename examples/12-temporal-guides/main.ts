@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu';
 import { fract, mix, mrt, output, step, texture, uv, vec3, vec4, velocity } from 'three/tsl';
 
-import { Upscaler } from '@pmndrs/upscaler';
+import { MomentsPass, Upscaler } from '@pmndrs/upscaler';
 
 import { bootRenderer, displaySize } from '../shared/boot';
 import { addStudioLighting, createGridFloor } from '../shared/props';
@@ -140,7 +140,7 @@ window.addEventListener('resize', () => {
 // Exposed for the headless GPU-verification harness (drives the guides-only
 // path against this page's live renderer + render target).
 Object.assign(window as unknown as Record<string, unknown>, {
-    __guidesExample: { upscaler, renderer, camera, Upscaler, getRenderTarget: () => rt },
+    __guidesExample: { upscaler, renderer, camera, Upscaler, MomentsPass, THREE, getRenderTarget: () => rt },
 });
 
 //* Loop — the split frame.

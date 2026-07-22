@@ -41,6 +41,7 @@ import { DEBUG_SHADER } from './debug';
 import { EASU_SHADER } from './easu';
 import { GENERATE_REACTIVE_SHADER } from './generateReactive';
 import { LUMINANCE_PYRAMID_SHADER } from './luminancePyramid';
+import { MOMENTS_SHADER } from './moments';
 import {
     RCAS_HOISTED_EXPOSURE_SHADER,
     RCAS_LEGACY_SHADER,
@@ -61,6 +62,7 @@ const ALL_SHADERS: Record<string, string> = {
     luminancePyramid: LUMINANCE_PYRAMID_SHADER,
     generateReactive: GENERATE_REACTIVE_SHADER,
     debug: DEBUG_SHADER,
+    moments: MOMENTS_SHADER,
 };
 
 const BASELINE_BINDING_COUNTS: Record<string, number> = {
@@ -74,6 +76,8 @@ const BASELINE_BINDING_COUNTS: Record<string, number> = {
     // 5 since 2026-07-22: incoming-mask binding for merge-not-overwrite.
     generateReactive: 5,
     debug: 10,
+    // Added 2026-07-22: standalone signal-agnostic moments (guides spec M5).
+    moments: 4,
 };
 
 const BASELINE_FINGERPRINTS: Record<string, string> = {
@@ -94,6 +98,8 @@ const BASELINE_FINGERPRINTS: Record<string, string> = {
     // generator max-merges an incoming mask instead of being suppressed by it.
     generateReactive: '9d0739e5',
     debug: 'e30ebd6c',
+    // Added 2026-07-22: standalone signal-agnostic moments (guides spec M5).
+    moments: 'ec1952d4',
 };
 
 const CANDIDATE_SHADERS: Record<string, string> = {

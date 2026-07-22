@@ -18,6 +18,8 @@ export const FLAG_SHADING_CHANGE = 128;
 export const FLAG_REACTIVE = 256;
 export const FLAG_RCAS_DENOISE = 512;
 export const FLAG_EXTERNAL_EXPOSURE = 1024;
+// Consumed only by the standalone moments pass (its own constants buffer).
+export const FLAG_MOMENTS_YCOCG = 2048;
 
 /** Per-frame constants uniform block. Binding 0 in every FSR pass. */
 export const WGSL_CONSTANTS = /* wgsl */ `
