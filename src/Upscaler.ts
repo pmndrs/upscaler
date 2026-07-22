@@ -877,18 +877,32 @@ export class Upscaler {
         const locksOut = this._locks![1 - this._historyIndex];
         const exposurePrev = this._exposure![this._historyIndex];
         const exposureCur = this._exposure![1 - this._historyIndex];
-        //* Reactive mask — explicit mask, else auto-generate from an opaque-only
-        //* color diff against the final color, else a zero dummy.
+        //* Reactive mask — merge-not-overwrite (TEMPORAL-GUIDES-SPEC §6).
+        //* With an opaque-only color, the generator runs and max-merges any
+        //* incoming mask (explicit, or effect-written into guides.reactive
+        //* and passed back as `reactive`); an explicit mask alone binds
+        //* directly; else the zero dummy.
         let reactiveView: GPUTextureView;
-        if (inputs.reactive) {
-            reactiveView = getGPUTexture(this._renderer, inputs.reactive).createView();
-        } else if (inputs.reactiveOpaqueColor) {
+        if (inputs.reactiveOpaqueColor) {
+            let incomingView = this._reactiveDummy!.createView();
+            if (inputs.reactive) {
+                const incoming = getGPUTexture(this._renderer, inputs.reactive);
+                if (incoming === this._reactiveGenerated) {
+                    throw new Error(
+                        '@pmndrs/upscaler: `reactive` must not be the generated mask itself ' +
+                            '(guides.reactive) while `reactiveOpaqueColor` is set — the generator ' +
+                            'writes that texture. Pass one of the two, not both.',
+                    );
+                }
+                incomingView = incoming.createView();
+            }
             const opaqueGPU = getGPUTexture(this._renderer, inputs.reactiveOpaqueColor);
             const genBindGroup = this._generateReactivePass.createBindGroup([
                 { buffer: this._constants.buffer },
                 opaqueGPU.createView(),
                 colorGPU.createView(),
                 this._reactiveGenerated!.createView(),
+                incomingView,
             ]);
             const genPass = encoder.beginComputePass({
                 label: 'upscale-gen-reactive',
@@ -902,6 +916,8 @@ export class Upscaler {
             );
             genPass.end();
             reactiveView = this._reactiveGenerated!.createView();
+        } else if (inputs.reactive) {
+            reactiveView = getGPUTexture(this._renderer, inputs.reactive).createView();
         } else {
             reactiveView = this._reactiveDummy!.createView();
         }
@@ -1066,12 +1082,17 @@ export class Upscaler {
             reactiveView = getGPUTexture(this._renderer, inputs.reactive).createView();
         } else if (inputs.reactiveOpaqueColor) {
             const opaqueGPU = getGPUTexture(this._renderer, inputs.reactiveOpaqueColor);
-            const bindGroup = this._generateReactivePass.createBindGroup([
+            // The filter bundle reuses the production generator, which now has
+            // the incoming-mask binding — feed it the inert dummy. The
+            // structural bundle's source-policy shader has no such binding.
+            const genResources: GPUBindingResource[] = [
                 { buffer: this._constants.buffer },
                 opaqueGPU.createView(),
                 colorGPU.createView(),
                 this._reactiveGenerated!.createView(),
-            ]);
+            ];
+            if (!this._usesStructuralInputs) genResources.push(this._reactiveDummy!.createView());
+            const bindGroup = this._generateReactivePass.createBindGroup(genResources);
             const pass = encoder.beginComputePass({
                 label: 'upscale-gen-reactive',
                 timestampWrites: this._timer.passDescriptor('genReactive'),

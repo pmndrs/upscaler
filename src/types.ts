@@ -135,8 +135,13 @@ export interface DispatchInputs {
      * Optional reactive mask at render resolution — the red channel in `[0, 1]`
      * flags pixels whose current-frame color should dominate over history
      * (additive particles, transparent/animated surfaces that have no reliable
-     * depth or motion and would otherwise ghost). Higher = more reactive. Author
-     * it yourself (render your transparents' coverage) or via a future helper.
+     * depth or motion and would otherwise ghost). Higher = more reactive.
+     * Author it yourself (render your transparents' coverage), or let an
+     * effect write into `guides.reactive` between the split dispatches and
+     * pass that texture here. When {@link reactiveOpaqueColor} is also set,
+     * this mask **merges** (per-pixel `max`) with the auto-generated diff —
+     * it is never overwritten — but it must then be a different texture than
+     * the generated target (`guides.reactive`).
      */
     reactive?: Texture;
     /**
@@ -149,11 +154,12 @@ export interface DispatchInputs {
      */
     transparencyAndComposition?: Texture;
     /**
-     * Opaque-only scene color at render resolution. When provided (and no
-     * explicit {@link reactive} mask is given), the upscaler auto-generates the
-     * reactive mask from the difference between this and the final `color` —
-     * FSR2's `GenerateReactiveMask`. Render your scene once with transparents
-     * hidden into this buffer; `color` stays the full composited render.
+     * Opaque-only scene color at render resolution. When provided, the
+     * upscaler auto-generates a reactive mask from the difference between
+     * this and the final `color` — FSR2's `GenerateReactiveMask` — and
+     * max-merges any {@link reactive} input into it. Render your scene once
+     * with transparents hidden into this buffer; `color` stays the full
+     * composited render.
      */
     reactiveOpaqueColor?: Texture;
     /**
@@ -233,9 +239,12 @@ export interface TemporalGuides {
     /** Graded disocclusion at render res (rgba8unorm, `.r`): 0 stable → 1 fresh. */
     readonly disocclusion: Texture;
     /**
-     * The auto-generated reactive mask target at render res (rgba8unorm,
-     * `.r`). Meaningful after a dispatch with `reactiveOpaqueColor`; zero
-     * otherwise. `null` on the `guides` path (no color, no generator).
+     * The merged reactive mask target at render res (rgba8unorm, `.r`).
+     * Written by the generator on a dispatch with `reactiveOpaqueColor`
+     * (max-merged with any incoming mask). Storage-writable: an effect may
+     * also write reactivity into it between `dispatchGuides` and
+     * `dispatchUpscale` and pass it back as `DispatchInputs.reactive`
+     * (without `reactiveOpaqueColor`). `null` on the `guides` path.
      */
     readonly reactive: Texture | null;
     /**

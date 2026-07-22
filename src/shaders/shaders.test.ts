@@ -71,7 +71,8 @@ const BASELINE_BINDING_COUNTS: Record<string, number> = {
     shadingChange: 9,
     accumulate: 13,
     luminancePyramid: 7,
-    generateReactive: 4,
+    // 5 since 2026-07-22: incoming-mask binding for merge-not-overwrite.
+    generateReactive: 5,
     debug: 10,
 };
 
@@ -89,7 +90,9 @@ const BASELINE_FINGERPRINTS: Record<string, string> = {
     // Updated 2026-07-21: DeltaPreExposure history correction (NEXT-STEPS item 2).
     accumulate: 'a2a4ec79',
     luminancePyramid: 'e4b7a644',
-    generateReactive: '6ed4b549',
+    // Updated 2026-07-22: reactive merge-not-overwrite (guides spec M3) — the
+    // generator max-merges an incoming mask instead of being suppressed by it.
+    generateReactive: '9d0739e5',
     debug: 'e30ebd6c',
 };
 
