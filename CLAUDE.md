@@ -244,6 +244,8 @@ explicit acceptance test), RCAS denoise on `06-screenspace-gi`.
 
 **Performance structure:** dilate + depth-clip are fused into the single `reconstruct.ts` dispatch (GPU-verified disocclusion unchanged); the shading detector is one fused workgroup-local reduction instead of the source's SPD mip chain + resolve pair. The measured story of these divergences from FSR 3.1.5 — and the four upstream behaviors adopted in re-derived form — is `PARITY.md` (root) with evidence in `bench/docs/NEXT-STEPS.md`.
 
+**Paper material:** findings that clear the "surprised us + measured + others would hit it" bar are tracked in `PAPER-NOTES.md` (root) — claim, evidence pointers, and what a publication-grade version still needs. Add new entries there as they land; don't let them live only in commit messages.
+
 ## Deferred / out of scope
 
 - **Transparency & Composition (T&C) mask** — deliberately deferred (assessed 2026-07-10). FSR2/3 takes a second render-res mask alongside reactive, but it is *not* a clean parallel: in FSR2 the T&C mask has a distinct-but-overlapping effect (a softer history-distrust than reactive, it widens the rectification AABB and interacts with locks) that is genuinely tuned. Adding it means new tuning constants and touching the accumulate blend/lock path, and our reactive mask (+ auto-generate) already covers the common three.js transparency case (example 05's whole point). Shipping it as a second channel that behaves identically to reactive would be misleading; shipping the *real* distinct behavior needs core tuning we shouldn't ride onto other work. Revisit if a user actually authors T&C masks and the reactive path proves insufficient.
