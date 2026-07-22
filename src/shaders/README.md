@@ -194,12 +194,23 @@ when drawing to the screen; library users may instead continue linear post-proce
 #### Reconstruction and disocclusion (`reconstruct.ts`)
 
 - **Current status:** Hybrid — fused pass structure kept (measured faster), AMD's
-  threshold formulation adopted (2026-07-21, NEXT-STEPS item 3).
+  threshold formulation adopted (2026-07-21, NEXT-STEPS item 3), plus the
+  2026-07-22 cross-frame stability fix (below).
 - **Local implementation:** One fused render-resolution pass: nearest-depth dilation,
   then per-bilinear-tap disocclusion voting against last frame's dilated depth using
   AMD's viewport/depth-scaled tolerance
   (`1.37e-5 · halfViewportWidth · max(depth)` — `ffx_fsr2_depth_clip.h`
-  `ComputeDepthClip`, taken from the GPU-verified candidate port).
+  `ComputeDepthClip`, taken from the GPU-verified candidate port). Because the
+  comparison is cross-frame (no same-frame scatter), three stabilizers apply
+  (2026-07-22): taps at/behind the current surface are *skipped*, never allowed
+  to veto the pixel (matches the reference's per-tap semantics); the reprojection
+  is jitter-delta-compensated (same derivation as `shadingChange.ts`); and the
+  tolerance is widened by the 3×3 ring's own depth relief (free from the dilation
+  loop), so a slope's legitimate per-texel depth change is not read as
+  separation. Without these, grazing-incidence planes (a ground plane near the
+  horizon) flickered fully disoccluded per jitter phase — measured 12–14% of
+  disocclusion-view pixels flipping >32/255 per frame in example 12, ~1.5%
+  (moving-content baseline) after.
 - **FSR 3.1.5 behavior:** Scatters nearest current depth into previous-frame positions
   with atomics, then evaluates reconstructed samples with the same viewport- and
   depth-scaled thresholds in a separate pass.

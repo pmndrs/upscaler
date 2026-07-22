@@ -16,6 +16,20 @@ import { assembleShader } from './wgsl';
  *    was hidden behind something nearer last frame is disoccluded and its
  *    history must be dropped.
  *
+ * The comparison is cross-frame (current depth vs last frame's dilated-depth
+ * texture) — deliberately cheaper than the reference, which scatters current
+ * depth into a same-frame "reconstructed previous depth" buffer and compares
+ * against that (measured +22–30% for those passes in the parity program). The
+ * price of the cross-frame form is sampling mismatch: the reprojected point
+ * carries sub-texel error (bilinear taps, jitter phase), so on steep depth
+ * gradients — a ground plane at grazing incidence — neighboring taps differ
+ * by many view units and a fixed tolerance reads that as separation
+ * (measured: full-screen disocclusion flicker on the distant floor in
+ * example 12). Two compensations make the cheap form sound: the reprojection
+ * is jitter-delta-compensated (same derivation as shadingChange.ts), and the
+ * separation tolerance is widened by the 3×3 neighborhood's own depth relief,
+ * which the dilation ring provides for free.
+ *
  * Bindings:
  * - 1: scene depth (depth texture, render size)
  * - 2: velocity (rgba16float, NDC delta in .xy, render size)
@@ -52,6 +66,7 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
     // With a reversed depth buffer larger values are nearer; otherwise smaller.
     let reversed = hasFlag(FLAG_REVERSED_DEPTH);
     var bestDepth = textureLoad(sceneDepth, center, 0);
+    var farthestDepth = bestDepth;
     var bestCoord = center;
     for (var y = -1; y <= 1; y++) {
         for (var x = -1; x <= 1; x++) {
@@ -65,10 +80,16 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
                 bestDepth = d;
                 bestCoord = p;
             }
+            let farther = select((d > farthestDepth), (d < farthestDepth), reversed);
+            if (farther) { farthestDepth = d; }
         }
     }
 
     let curDepth = linearizeDepth(bestDepth);
+    // The neighborhood's own depth relief in view units — how much the local
+    // surface slopes across one texel ring. A reprojected tap can legitimately
+    // land anywhere inside this relief without being a different surface.
+    let localRelief = max(linearizeDepth(farthestDepth) - curDepth, 0.0);
     let uvDelta = textureLoad(sceneVelocity, bestCoord, 0).xy * C.motionScale;
     textureStore(dilatedDepth, gid.xy, vec4f(curDepth, 0.0, 0.0, 0.0));
     textureStore(dilatedMotion, gid.xy, vec4f(uvDelta, 0.0, 0.0));
@@ -81,7 +102,11 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
     // complement, and only positive separations (current surface was occluded)
     // count at all.
     let uv = (vec2f(gid.xy) + 0.5) * C.renderSizeInv;
-    let prevUV = uv - uvDelta;
+    // Texel i samples the scene at i + jitter, so the previous frame's
+    // equivalent position shifts by the jitter delta — without this the
+    // comparison point oscillates ±½ texel with the jitter sequence, which
+    // on a depth gradient reads as per-phase disocclusion flicker.
+    let prevUV = uv - uvDelta + (C.jitter - C.jitterPrev) * C.renderSizeInv;
     if (any(prevUV < vec2f(0.0)) || any(prevUV > vec2f(1.0))) {
         textureStore(maskOutput, gid.xy, vec4f(1.0, 0.0, 0.0, 1.0));
         return;
@@ -99,24 +124,32 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
     let halfViewportWidth = length(C.renderSize * 0.5);
     var separationConfidence = 0.0;
     var weightSum = 0.0;
-    var potentialDisocclusion = true;
     for (var index = 0; index < 4; index++) {
         let weight = weights[index];
         if (weight <= DEPTH_TAP_WEIGHT_FLOOR) { continue; }
         let p = clamp(base + offsets[index], vec2i(0), maxCoord);
         let prevDepth = textureLoad(previousDepth, p, 0).r;
         let difference = curDepth - prevDepth;
-        potentialDisocclusion = potentialDisocclusion && difference > 1.175e-38;
-        if (potentialDisocclusion) {
-            let required = DEPTH_SEPARATION_CONSTANT * halfViewportWidth * max(curDepth, prevDepth);
-            separationConfidence += clamp(required / max(difference, 1.0e-7), 0.0, 1.0) * weight;
-            weightSum += weight;
-        }
+        // A tap at or behind the current surface can't witness an occluder —
+        // it contributes nothing. It must NOT veto the pixel: on a depth
+        // gradient the four taps routinely straddle the current depth, and a
+        // veto turns that into a binary 0↔1 flip per jitter phase (the
+        // grazing-floor flicker this pass shipped with).
+        if (difference <= 0.0) { continue; }
+        // Tolerance: the viewport/depth-scaled quantization term (reference
+        // formulation), widened by the neighborhood's own relief so a slope's
+        // legitimate per-texel depth change is not read as separation.
+        let required = max(
+            DEPTH_SEPARATION_CONSTANT * halfViewportWidth * max(curDepth, prevDepth),
+            localRelief,
+        );
+        separationConfidence += clamp(required / max(difference, 1.0e-7), 0.0, 1.0) * weight;
+        weightSum += weight;
     }
     let disocclusion = select(
         0.0,
         clamp(1.0 - separationConfidence / max(weightSum, 1.0e-6), 0.0, 1.0),
-        potentialDisocclusion && weightSum > 0.0,
+        weightSum > 0.0,
     );
     textureStore(maskOutput, gid.xy, vec4f(disocclusion, 0.0, 0.0, 1.0));
 }

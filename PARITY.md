@@ -68,6 +68,22 @@ runs in 0.035 ms at ratio 2 with disocclusion output validated identical in beha
 (thin stable silhouette outlines, quiet still scenes, age resets confined to
 disocclusion trails).
 
+**The price of skipping the scatter, and its fix (2026-07-22):** upstream's scatter
+compares each pixel against *same-frame* depth values relocated to their previous
+positions, so a continuously-visible surface effectively compares against itself. Our
+gather form compares against *last frame's* depth texture, which carries sub-texel
+sampling mismatch (bilinear taps, jitter phase). On steep depth gradients — a ground
+plane at grazing incidence — neighboring taps differ by tens of view units, far beyond
+the ~3-unit tolerance, and the pass shipped with a full-flicker artifact there
+(12–14% of disocclusion pixels flipping per jitter phase, found via the temporal-guides
+example). Three compensations restore stability at zero measurable cost: reference
+per-tap skip semantics (a tap at/behind the current surface contributes nothing and
+must not veto the pixel — the original port's running-AND veto was itself a
+misreading of upstream), jitter-delta-compensated reprojection, and a separation
+tolerance widened by the 3×3 ring's own depth relief (available free from the dilation
+loop). All are geometry-derived; no scene-tuned constants were added. Genuine
+disocclusion (Q3's fence trails and silhouettes) is unchanged.
+
 ### 2. RCAS in conditioned tonemap space
 
 **Upstream:** RCAS sharpens exposed linear texels; each of the 5 taps is loaded in the

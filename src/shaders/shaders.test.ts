@@ -80,8 +80,10 @@ const BASELINE_FINGERPRINTS: Record<string, string> = {
     easu: '11632358',
     // Updated 2026-07-21: conditioned-space sharpening adopted (NEXT-STEPS item 1).
     rcas: '51bd6d54',
-    // Updated 2026-07-21: AMD viewport/depth-scaled disocclusion (NEXT-STEPS item 3).
-    reconstruct: '19104db7',
+    // Updated 2026-07-22: depth-clip flicker fix — reference tap-skip semantics
+    // (no all-taps veto), jitter-delta-compensated reprojection, and a
+    // neighborhood-relief-widened separation tolerance (grazing-angle planes).
+    reconstruct: '46f7b9e4',
     // Added 2026-07-21: multi-scale shading-change detector (NEXT-STEPS item 4).
     shadingChange: '41ed97fa',
     // Updated 2026-07-21: DeltaPreExposure history correction (NEXT-STEPS item 2).
