@@ -1,8 +1,11 @@
 # Temporal Guides — opening the upscaler's internals (spec)
 
-Status: **M0 resolved — contract frozen for build** (2026-07-21, branch
-`feat-temporal-guides`; consumer review in
-[GUIDES-SPEC-RESPONSE.md](GUIDES-SPEC-RESPONSE.md), resolution in §10).
+Status: **handed off for consumer integration** (2026-07-22): M1/M2/M3/M5
+landed + GPU-verified, M4 deferred per consumer priority, M6 (their demo-10
+A/B) is the exit criterion. Integration entry point:
+[GUIDES-HANDOFF.md](GUIDES-HANDOFF.md). Contract frozen at M0
+(consumer review in [GUIDES-SPEC-RESPONSE.md](GUIDES-SPEC-RESPONSE.md),
+resolution in §10).
 Request: [bench/docs/FSR3-BRIEF.md](bench/docs/FSR3-BRIEF.md) — the consuming
 pipeline (SSGI temporal pass, an SVGF-style denoiser, any TAA-class effect)
 wants the upscaler's early data products as first-class outputs instead of
@@ -250,12 +253,15 @@ when the consumer lab has accepted.
   GPU-verified across manual/auto/off modes with no validation errors. The
   bench merged-mask capture scenario is deferred to M6 (the consumer lab
   exercises the merge for real).
-- **M4 — TSL surface.** `temporalGuides(depth, velocity, camera)` node
-  producing guide texture nodes in-graph; `upscale(..., { guides })` to share
-  one computation between the effect graph and the upscale. Gate: examples
-  07/09 unchanged; new node demo consumes `disocclusion` in a toy effect.
-  Priority per §10 answer 5: every hot-path consumer binds raw — if M4 needs
-  trimming, defer the TSL example, never the raw path.
+- **M4 — TSL surface. DEFERRED post-handoff (2026-07-22).**
+  `temporalGuides(depth, velocity, camera)` node producing guide texture
+  nodes in-graph; `upscale(..., { guides })` to share one computation
+  between the effect graph and the upscale. Gate when built: examples 07/09
+  unchanged; new node demo consumes `disocclusion` in a toy effect.
+  Deferred deliberately per §10 answer 5 (every hot-path consumer binds
+  raw; TSL wanted composite-side only) — the consumer's linked build (see
+  [GUIDES-HANDOFF.md](GUIDES-HANDOFF.md)) needs nothing from M4. It moves
+  up when composite-side consumption is actually next on their side.
 - **M5 — `MomentPyramid` (§5). DONE (`52c3b12`, 2026-07-22).** Shipped as
   `MomentsPass` + `shaders/moments.ts`, `@experimental`, zero coupling to
   the upscaling pipeline. Deviations recorded: outputs are rgba16float
