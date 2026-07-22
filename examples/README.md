@@ -21,14 +21,21 @@ shader/pipeline edits hot-reload here just like in the bench.
 | 03 | **Split compare** (`03-split-compare`) | Native vs FSR3, same scene and instant, wiped by the mouse. |
 | 04 | **Aliasing torture** (`04-aliasing-torture`) | A chain-link fence + moiré floor under a moving camera — where naive upscaling shimmers and temporal holds. |
 | 05 | **Transparency & particles** (`05-transparency`) | The honest limitation: particles/transparents ghost (no depth/motion) — the acceptance test for a future reactive mask. |
-| 06 | **Screen-space effects** (`06-screenspace-gi`) | GTAO / SSR / SSGI rendered at reduced resolution, then upscaled by FSR3. |
+| 06 | **Screen-space effects** (`06-screenspace-gi`) | GTAO / SSR / SSGI rendered at reduced resolution, then upscaled — the raw-`Upscaler` reference for imperative effect pipelines. |
+| 07 | **TSL node** (`07-tsl-node`) | The whole upscaler as one line: `post.outputNode = upscaleScene(scene, camera)`. |
+| 08 | **TSL compose** (`08-tsl-compose`) | The node composed with other TSL effects (`.mul(vignette)`) in the same post graph. |
+| 09 | **Kitchen sink** (`09-kitchen-sink`) | The composable `upscale()` node driving a full SSGI+SSR stack rendered small, in one post graph, with jitter A/B. |
+| 10 | **SSGI denoise** (`10-ssgi-denoise`) | Experimental documentation, not a feature: why a second temporal denoiser in front of FSR3 can't work (jitter-blind history rejection). |
+| 11 | **Reactive mask (node)** (`11-node-reactive`) | The reactive mask through the composable node — an in-graph coverage pass, toggleable to A/B ghost trails. |
+| 12 | **Temporal guides** (`12-temporal-guides`) | The upscaler as a data-products provider: the split `dispatchGuides()`/`dispatchUpscale()` frame, guide textures sampled live (raw driver). |
+| 13 | **Guides node** (`13-guides-node`) | The same split frame, declaratively: `temporalGuides()` publishes the bundle into the graph, a toy effect consumes disocclusion pre-upscale, `upscale({ guides })` shares one computation. |
 
-Every interactive demo has a **render scale ×** slider (1.0×–3.0×) that sweeps the
+Most interactive demos have a **render scale ×** slider (1.0×–3.0×) that sweeps the
 base render resolution, with the resulting size + base % shown in the HUD.
 
 ## Planned
 
-- **07 · DPR budget** (`07-dpr`) — the mobile win, made explicit. Simulate a device
+- **DPR budget** — the mobile win, made explicit. Simulate a device
   pixel ratio (e.g. a phone at DPR 1.5–3) and compare **native render at that DPR**
   vs **FSR: render at a lower effective resolution, present at the DPR output**.
   Show total pixels rendered *and* GPU ms for both sides so the saving is a number,
@@ -58,12 +65,14 @@ inspector can't give you per-GPU-pass times. Notes for the DPR demo:
 
 ## How they're built
 
-Every demo drives the library through [`shared/UpscalePresenter.ts`](shared/UpscalePresenter.ts),
-which encapsulates the whole integration recipe (jitter-free velocity, MRT output
-count matched to the render-target attachment count, float depth, the
-linear/HDR output, and renderer-owned presentation). New demos should reuse it rather than re-deriving the
-wiring — the one exception is `06`, which drives the raw `Upscaler` directly
-so it can feed FSR3 the output of a TSL pass graph.
+Demos `01`–`05` drive the library through [`shared/UpscalePresenter.ts`](shared/UpscalePresenter.ts),
+which encapsulates the whole imperative integration recipe (jitter-free velocity,
+MRT output count matched to the render-target attachment count, float depth, the
+linear/HDR output, and renderer-owned presentation). `06` and `12` drive the raw
+`Upscaler` directly (an external effect graph, and the split guides frame).
+`07`–`11` and `13` are the TSL-node surface — no presenter at all, the node owns
+the recipe inside the post graph. New imperative demos should reuse the presenter
+rather than re-deriving the wiring; new graph demos should start from `07`.
 
 ### The `06` pattern (TSL effect graph → FSR3)
 

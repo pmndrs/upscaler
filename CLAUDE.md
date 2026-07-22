@@ -240,7 +240,21 @@ explicit acceptance test), RCAS denoise on `06-screenspace-gi`.
   `dispatchUpscale()`, or — guides path only — in `dispatchGuides()`.
   `examples/12-temporal-guides` is the live reference + headless-verification
   target (it exposes `window.__guidesExample` — including `MomentsPass` and
-  `THREE` — for the CDP harness). Also in this program: reactive is
+  `THREE` — for the CDP harness). **TSL surface (M4):**
+  `temporalGuides(depth, velocity, camera)` (`TemporalGuidesNode.ts`)
+  publishes the bundle as texture nodes (`getTextureNode(name)` — stable
+  node identity, ping-ponged products re-pointed per frame; a 1×1 nearest
+  placeholder pre-configure so r32float format inference never sees a
+  filterable stand-in). Standalone = node owns a guides-only upscaler sized
+  to its depth input; linked = `upscale(..., { guides })` adopts the node's
+  upscaler via `_acquireUpscaler` and runs the split frame in-graph, with
+  the upscale node falling back to monolithic `dispatch()` whenever the
+  early stage didn't run this frame (`Upscaler.guidesPending` is the
+  branch). The guides node must be registered as a graph dep BEFORE the
+  color chain so its dispatch precedes effect renders.
+  `examples/13-guides-node` is its live reference (exposes
+  `window.__guidesNodeExample` + tsl handles for the CDP harness; the
+  dispatch-spy probe there proves the pure split path steady-state). Also in this program: reactive is
   merge-not-overwrite (`generateReactive` max-merges an incoming mask;
   passing `guides.reactive` back while `reactiveOpaqueColor` is set throws —
   the generator writes that texture), and `MomentsPass`/`shaders/moments.ts`

@@ -18,7 +18,7 @@ review [GUIDES-SPEC-RESPONSE.md](GUIDES-SPEC-RESPONSE.md) is folded in as
 | Reactive merge-not-overwrite (+ effect-writable `guides.reactive`) | ✅ M3 | `DispatchInputs.reactive` docs |
 | `MomentsPass` — signal-agnostic (E[x], E[x²]) + one coarse level, linear or YCoCg-Y | ✅ M5 | `MomentsPass` export |
 | Grazing-angle disocclusion stability fix | ✅ | commit `b16274a` — **baseline your lab on this or later**; earlier disocclusion flickered on grazing planes |
-| TSL node surface (`temporalGuides()` node, `upscale({guides})`) | ⏳ M4, deferred | per your answer 5 (raw first); design sketch in spec §8. Tell us when composite-side consumption is actually next and it moves up |
+| TSL node surface: `temporalGuides()` publishes the bundle as texture nodes; `upscale({guides})` shares one computation (split frame in-graph) | ✅ M4 | `temporalGuides` / `TemporalGuidesNode` exports; live reference `examples/13-guides-node`. Built post-handoff so it's ready when your composite-side consumption lands — nothing in your raw path depends on it |
 
 Everything guides-related is `@experimental`: the contract is frozen (M0)
 but may still shift until your integration (M6) accepts. Flag friction in a
@@ -165,9 +165,9 @@ moments.dispatch({ source: giIrradiance });            // any float texture, per
 
 Respond the way M0 worked: a doc in this repo (or a note pointing at one in
 yours) with accepted/friction/blocked per item. Known-open items on our
-side: M4 (TSL surface, deferred per your priority), the bench merged-mask
-capture scenario (deferred to your lab exercising the real merge), and the
-`@experimental` freeze pending your M6.
+side: the bench merged-mask capture scenario (deferred to your lab
+exercising the real merge) and the `@experimental` freeze pending your M6.
+(M4, deferred at handoff, has since landed — see the readiness table.)
 
 **Report 1 received** ([GUIDES-HANDOFF-RESPONSE.md](GUIDES-HANDOFF-RESPONSE.md),
 demo-16, against `34f784d`): linked build + M2 contract accepted and verified

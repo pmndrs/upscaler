@@ -545,6 +545,16 @@ export class Upscaler {
         return this._guides;
     }
 
+    /**
+     * True while a split frame is in flight — {@link dispatchGuides} has run
+     * this frame and {@link dispatchUpscale} hasn't yet. Lets a driver decide
+     * between finishing the split frame and the monolithic {@link dispatch}.
+     * @experimental See {@link guides}.
+     */
+    get guidesPending(): boolean {
+        return this._guidesPending;
+    }
+
     /** Per-pass GPU times (ms) when timestamp queries are supported. */
     get gpuTimings(): ReadonlyMap<string, number> {
         return this._timer.timings;

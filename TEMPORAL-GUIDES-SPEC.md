@@ -1,8 +1,10 @@
 # Temporal Guides — opening the upscaler's internals (spec)
 
-Status: **handed off for consumer integration** (2026-07-22): M1/M2/M3/M5
-landed + GPU-verified, M4 deferred per consumer priority, M6 (their demo-10
-A/B) is the exit criterion. Integration entry point:
+Status: **handed off for consumer integration** (2026-07-22): M1–M5 all
+landed + GPU-verified (M4 followed post-handoff, same day), M6 (their
+demo-10 A/B) is the exit criterion. Consumer report 1
+([GUIDES-HANDOFF-RESPONSE.md](GUIDES-HANDOFF-RESPONSE.md)): linked build +
+M2 contract accepted, verified live, nothing blocked. Integration entry point:
 [GUIDES-HANDOFF.md](GUIDES-HANDOFF.md). Contract frozen at M0
 (consumer review in [GUIDES-SPEC-RESPONSE.md](GUIDES-SPEC-RESPONSE.md),
 resolution in §10).
@@ -253,15 +255,26 @@ when the consumer lab has accepted.
   GPU-verified across manual/auto/off modes with no validation errors. The
   bench merged-mask capture scenario is deferred to M6 (the consumer lab
   exercises the merge for real).
-- **M4 — TSL surface. DEFERRED post-handoff (2026-07-22).**
-  `temporalGuides(depth, velocity, camera)` node producing guide texture
-  nodes in-graph; `upscale(..., { guides })` to share one computation
-  between the effect graph and the upscale. Gate when built: examples 07/09
-  unchanged; new node demo consumes `disocclusion` in a toy effect.
-  Deferred deliberately per §10 answer 5 (every hot-path consumer binds
-  raw; TSL wanted composite-side only) — the consumer's linked build (see
-  [GUIDES-HANDOFF.md](GUIDES-HANDOFF.md)) needs nothing from M4. It moves
-  up when composite-side consumption is actually next on their side.
+- **M4 — TSL surface. DONE (2026-07-22, post-handoff).**
+  `temporalGuides(depth, velocity, camera)` (`TemporalGuidesNode`) publishes
+  the bundle as texture nodes via `getTextureNode(name)` — stable node
+  identity, ping-ponged products re-pointed per frame. Two modes decided by
+  wiring: **standalone** (node owns a guides-only upscaler sized to its
+  depth input; late products null + a one-shot guidance warning) and
+  **linked** (`upscale(..., { guides })` adopts the node's upscaler and the
+  frame runs split in-graph: guides dispatch → effects render → late
+  upscale — the node falls back to the monolithic dispatch on frames where
+  the early stage couldn't run, e.g. inputs not yet GPU-backed or a
+  mid-frame reconfigure). Enabled by a `guidesPending` getter on
+  `Upscaler`. Gates met: examples 07/09 GPU-verified unchanged; new
+  `13-guides-node` demo consumes `disocclusion` in a toy effect (orange
+  trailing-silhouette tint, pre-upscale) — dispatch-spy probe shows the
+  pure split path steady-state (120 guides + 120 late, 0 monolithic over
+  1 s) on one shared upscaler; standalone mode CDP-driven under a
+  validation error scope (clean, early products live, late products null,
+  warning fires). Originally deferred per §10 answer 5; built post-handoff
+  so the surface is ready when composite-side consumption lands. Was: gate
+  design sketched at handoff.
 - **M5 — `MomentPyramid` (§5). DONE (`52c3b12`, 2026-07-22).** Shipped as
   `MomentsPass` + `shaders/moments.ts`, `@experimental`, zero coupling to
   the upscaling pipeline. Deviations recorded: outputs are rgba16float

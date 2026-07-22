@@ -151,7 +151,11 @@ upscaler.dispatchGuides({ depth, velocity }, camera); // right after the G-buffe
 upscaler.dispatchUpscale({ color, deltaTime }, camera); // finish the frame
 ```
 
-An app that never upscales can run `path: 'guides'` for the geometry products alone. Reactivity is bidirectional: an explicit mask **merges** (per-pixel `max`) with the auto-generated one, and effects can write into `guides.reactive` mid-frame. The standalone `MomentsPass` rounds out the bundle — per-pixel `(E[x], E[x²])` of a configurable scalar (linear luma or YCoCg Y) over *any* float texture plus one coarse level, the statistics half an SVGF-class denoiser needs, with no beauty/exposure assumption baked in. Per-product contracts (format, space, resolution, latency) are documented on the `TemporalGuides` type and in [`TEMPORAL-GUIDES-SPEC.md`](./TEMPORAL-GUIDES-SPEC.md); `examples/12-temporal-guides` is the live reference. Marked experimental until the first external consumer integration lands.
+An app that never upscales can run `path: 'guides'` for the geometry products alone. Reactivity is bidirectional: an explicit mask **merges** (per-pixel `max`) with the auto-generated one, and effects can write into `guides.reactive` mid-frame. The standalone `MomentsPass` rounds out the bundle — per-pixel `(E[x], E[x²])` of a configurable scalar (linear luma or YCoCg Y) over *any* float texture plus one coarse level, the statistics half an SVGF-class denoiser needs, with no beauty/exposure assumption baked in.
+
+The same surface exists declaratively for `THREE.PostProcessing` graphs: `temporalGuides(depth, velocity, camera)` publishes the bundle as texture nodes (`guides.getTextureNode('disocclusion')`), and `upscale(color, depth, velocity, camera, { guides })` shares one computation — the guides dispatch runs as soon as the G-buffer has rendered, in-graph effects consume the products, and the upscale finishes the split frame.
+
+Per-product contracts (format, space, resolution, latency) are documented on the `TemporalGuides` type and in [`TEMPORAL-GUIDES-SPEC.md`](./TEMPORAL-GUIDES-SPEC.md); `examples/12-temporal-guides` (raw) and `examples/13-guides-node` (TSL) are the live references. Marked experimental until the first external consumer integration lands.
 
 ## Status
 

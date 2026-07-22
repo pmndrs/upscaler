@@ -3,6 +3,7 @@ import { NodeUpdateType, TempNode, type WebGPURenderer } from 'three/webgpu';
 import { convertToTexture, mrt, nodeObject, output, pass, passTexture, velocity } from 'three/tsl';
 
 import { Upscaler } from './Upscaler';
+import type { TemporalGuidesNode } from './TemporalGuidesNode';
 import { getGPUTexture } from './internal/threeWebGPU';
 import { getQualityModeRatio } from './math/resolution';
 import { QualityMode, type UpscalePath } from './types';
@@ -73,6 +74,17 @@ export interface UpscalerNodeOptions {
      * other inputs. Mirrors {@link DispatchInputs.exposureTexture}.
      */
     exposureTexture?: TextureNodeLike;
+    /**
+     * Optional {@link TemporalGuidesNode} to share one upscaler with (temporal
+     * path only). When set, the guides node dispatches the early geometry
+     * stage as soon as depth+velocity have rendered, effects in the graph can
+     * consume the guide products, and this node finishes the frame with the
+     * split late stage — one reconstruct dispatch serves both. The guides
+     * node's `depth`/`velocity`/`camera` should be the same ones handed to
+     * {@link upscale}. See `examples/13-guides-node`.
+     * @experimental Rides on the guides contract (TEMPORAL-GUIDES-SPEC.md).
+     */
+    guides?: TemporalGuidesNode;
 }
 
 /**
@@ -124,6 +136,8 @@ export class UpscalerNode extends TempNode {
     private readonly _reactive: TextureNodeLike;
     private readonly _reactiveOpaqueColor: TextureNodeLike;
     private readonly _exposureTexture: TextureNodeLike;
+    // Linked guides node (split-frame sharing) — see UpscalerNodeOptions.guides.
+    private readonly _guidesNode: TemporalGuidesNode | null;
     private readonly _camera: CameraLike;
     private readonly _options: UpscalerNodeOptions;
     // Temporal nodes default to jittered: a composable node's inputs render
@@ -158,6 +172,7 @@ export class UpscalerNode extends TempNode {
         this._reactive = options.reactive ?? null;
         this._reactiveOpaqueColor = options.reactiveOpaqueColor ?? null;
         this._exposureTexture = options.exposureTexture ?? null;
+        this._guidesNode = options.guides ?? null;
         this._camera = camera;
         this._options = options;
         this._jitter = options.jitter ?? true;
@@ -172,8 +187,14 @@ export class UpscalerNode extends TempNode {
     setup(builder: any): any {
         const renderer = builder.renderer as WebGPURenderer;
         if (!this._upscaler) {
-            this._upscaler = new Upscaler({ renderer });
-            this._upscaler.init();
+            // Linked guides mode shares one upscaler with the guides node —
+            // that node dispatches the early stage, we finish the split frame.
+            if (this._guidesNode) {
+                this._upscaler = this._guidesNode._acquireUpscaler(renderer);
+            } else {
+                this._upscaler = new Upscaler({ renderer });
+                this._upscaler.init();
+            }
             // When we jitter, motion vectors must stay jitter-free — feed the
             // velocity node the upscaler's (stable) unjittered projection. When
             // we don't jitter, the camera projection is already jitter-free, so
@@ -191,6 +212,10 @@ export class UpscalerNode extends TempNode {
         // passes are never built → never rendered → black output. depth/velocity
         // are optional (a non-jittered spatial upscale needs neither).
         const props = builder.getNodeProperties(this);
+        // The guides node goes first: its early-stage dispatch must precede
+        // the color chain's renders so effects sampling guide products see
+        // this frame's geometry stage.
+        if (this._guidesNode) props.guidesNode = this._guidesNode;
         props.colorNode = this._color;
         if (this._depth) props.depthNode = this._depth;
         if (this._velocity) props.velocityNode = this._velocity;
@@ -313,18 +338,24 @@ export class UpscalerNode extends TempNode {
             ? this._texture(this._exposureTexture)
             : null;
 
-        this._upscaler.dispatch(
-            {
-                color,
-                depth: depth ?? undefined,
-                velocity: velocityTex ?? undefined,
-                reactive: reactive ?? undefined,
-                reactiveOpaqueColor: reactiveOpaqueColor ?? undefined,
-                exposureTexture: exposureTexture ?? undefined,
-                deltaTime: dt,
-            },
-            this._camera as never,
-        );
+        const dispatchInputs = {
+            color,
+            depth: depth ?? undefined,
+            velocity: velocityTex ?? undefined,
+            reactive: reactive ?? undefined,
+            reactiveOpaqueColor: reactiveOpaqueColor ?? undefined,
+            exposureTexture: exposureTexture ?? undefined,
+            deltaTime: dt,
+        };
+        // Linked guides mode: the guides node already dispatched the early
+        // stage this frame — finish the split. If it couldn't (inputs not
+        // backed yet, or a reconfigure cleared the split), fall back to the
+        // monolithic dispatch so the frame still completes.
+        if (this._guidesNode && this._upscaler.guidesPending) {
+            this._upscaler.dispatchUpscale(dispatchInputs, this._camera as never);
+        } else {
+            this._upscaler.dispatch(dispatchInputs, this._camera as never);
+        }
     }
 
     dispose(): void {
