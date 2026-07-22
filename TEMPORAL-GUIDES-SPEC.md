@@ -243,16 +243,28 @@ when the consumer lab has accepted.
   split-frame timings read out); guides-only path CDP-driven under a
   validation error scope (clean across both ping-pong halves, API guards
   throw, late products null). Evidence: `bench/results/raw/GUIDES-M1/capture-m2`.
-- **M3 — reactive merge** (§6). Gate: example 05 GPU re-verify; new
-  `generateReactive` fingerprint; merged-mask capture test in the bench.
+- **M3 — reactive merge (§6). DONE (`64a4e65`, 2026-07-22).** The generator
+  max-merges an incoming mask (new binding, inert dummy when absent); the
+  aliasing hazard (passing `guides.reactive` back while the generator writes
+  it) throws. Gates met: fingerprint updated, 165 tests green, example 05
+  GPU-verified across manual/auto/off modes with no validation errors. The
+  bench merged-mask capture scenario is deferred to M6 (the consumer lab
+  exercises the merge for real).
 - **M4 — TSL surface.** `temporalGuides(depth, velocity, camera)` node
   producing guide texture nodes in-graph; `upscale(..., { guides })` to share
   one computation between the effect graph and the upscale. Gate: examples
   07/09 unchanged; new node demo consumes `disocclusion` in a toy effect.
   Priority per §10 answer 5: every hot-path consumer binds raw — if M4 needs
   trimming, defer the TSL example, never the raw path.
-- **M5 — `MomentPyramid`** (§5), `@experimental`. Gate: structural test +
-  scripted GPU check vs CPU reference in the bench (not CI).
+- **M5 — `MomentPyramid` (§5). DONE (`52c3b12`, 2026-07-22).** Shipped as
+  `MomentsPass` + `shaders/moments.ts`, `@experimental`, zero coupling to
+  the upscaling pipeline. Deviations recorded: outputs are rgba16float
+  (`.rg` used — rg16float is not a core WebGPU storage format); the coarse
+  level is the single 4×-reduction the consumer asked for (§10 answer 4).
+  Gates met: structural tests + fingerprint (172 tests green); scripted GPU
+  check vs CPU reference on a seeded DataTexture in BOTH linear and ycocg
+  spaces — validation-clean, max rel. error <0.1% (f16 tol 1%), coarse
+  variance non-negative.
 - **M6 — cross-repo acceptance.** The consumer's demo-10 guides lab and SVGF
   lab run against a tarball/linked build; their A/B (guides-fed SSGI temporal
   vs private logic) is the program's exit criterion, per the brief.

@@ -239,7 +239,15 @@ explicit acceptance test), RCAS denoise on `06-screenspace-gi`.
   `_pendingReset`) happens exactly once per frame: in `dispatch()`, in
   `dispatchUpscale()`, or — guides path only — in `dispatchGuides()`.
   `examples/12-temporal-guides` is the live reference + headless-verification
-  target (it exposes `window.__guidesExample` for the CDP harness).
+  target (it exposes `window.__guidesExample` — including `MomentsPass` and
+  `THREE` — for the CDP harness). Also in this program: reactive is
+  merge-not-overwrite (`generateReactive` max-merges an incoming mask;
+  passing `guides.reactive` back while `reactiveOpaqueColor` is set throws —
+  the generator writes that texture), and `MomentsPass`/`shaders/moments.ts`
+  is a standalone signal-agnostic statistics primitive with **zero coupling**
+  to the pipeline (its `FLAG_MOMENTS_YCOCG` bit is declared locally in
+  moments.ts, deliberately NOT in `WGSL_CONSTANTS` — adding anything to the
+  shared chunk re-fingerprints every shader).
 - **MSAA input — rejected by design.** FSR's temporal path *is* the anti-aliaser (Native AA mode is exactly that), so the correct input is an aliased, single-sample, jittered render with MSAA **off** — MSAA is redundant with FSR's own AA, costs perf, and a multisampled texture can't even bind to the compute passes. (Stacking a *temporal* AA — TAA/`traa` — before FSR is worse still: double-jitter smear; example 06 already drops `traa` for this reason.) `Upscaler` warns once if handed a multisampled input (`_checkMsaa`).
 
 **Performance structure:** dilate + depth-clip are fused into the single `reconstruct.ts` dispatch (GPU-verified disocclusion unchanged); the shading detector is one fused workgroup-local reduction instead of the source's SPD mip chain + resolve pair. The measured story of these divergences from FSR 3.1.5 — and the four upstream behaviors adopted in re-derived form — is `PARITY.md` (root) with evidence in `bench/docs/NEXT-STEPS.md`.
