@@ -138,7 +138,6 @@ export class UpscalerNode extends TempNode {
     private readonly _output = new Vector2();
     private readonly _input = new Vector2();
 
-    private _renderer: WebGPURenderer | null = null;
     private _upscaler: Upscaler | null = null;
     private _configured = false;
     private _textureNode: ReturnType<typeof passTexture> | null = null;
@@ -172,7 +171,6 @@ export class UpscalerNode extends TempNode {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     setup(builder: any): any {
         const renderer = builder.renderer as WebGPURenderer;
-        this._renderer = renderer;
         if (!this._upscaler) {
             this._upscaler = new Upscaler({ renderer });
             this._upscaler.init();

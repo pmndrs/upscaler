@@ -32,19 +32,34 @@ shader hot-reload while we iterate.
 **(a) Vite alias straight at the source (recommended for the labs):**
 
 ```ts
-// vite.config.ts in your repo
+// vite.config.ts in your repo (block verified by the demo-16 integration)
 resolve: {
-    alias: {
-        '@pmndrs/upscaler': '/Users/dex/Developer/fsr3/src/index.ts',
-    },
+    alias: [
+        { find: '@pmndrs/upscaler', replacement: '/Users/dex/Developer/fsr3/src/index.ts' },
+        { find: /^three$/, replacement: 'three/webgpu' }, // collapse dual-entry core
+    ],
+    dedupe: ['three'], // pin to YOUR copy, not fsr3/node_modules
 },
+optimizeDeps: { exclude: ['three'] }, // else vite's pre-bundle shortcut beats the alias
 build: { target: 'esnext' },   // the lib uses modern syntax; examples use TLA
 ```
 
-TypeScript path (optional, for editor types): `"paths": { "@pmndrs/upscaler":
-["/Users/dex/Developer/fsr3/src/index.ts"] }`. The source consumes `three` /
-`three/webgpu` as bare imports, so it uses **your** three instance — no
-duplicate-three hazard.
+The bare-imports design means the library *can* use your three instance —
+but an out-of-root consumer does NOT get that for free: vite resolves our
+`three` and your `three/webgpu` from two different `node_modules` (two core
+copies → the "Multiple instances of Three.js" warning, and worse, two
+backend maps). All three extra lines above are load-bearing; they came out
+of the first real integration (GUIDES-HANDOFF-RESPONSE.md).
+
+TypeScript path (for editor types): point `paths` at the **built
+declarations**, not the source — `"paths": { "@pmndrs/upscaler":
+["/Users/dex/Developer/fsr3/dist/index.d.ts"] }`. Aliasing at `src/`
+pulls our sources into your program and subjects them to your compiler
+flags (the first integration hit `noUnusedLocals` on our code). The trade:
+your tsc sees `dist/` while runtime uses live `src/` — **we keep `npm run
+build` current whenever the public surface moves** (it's part of our commit
+gate for API changes); if you hit a type error that looks stale, re-run the
+build here first.
 
 **(b) Packed dependency (for anything that shouldn't track our working tree):**
 
@@ -153,3 +168,10 @@ yours) with accepted/friction/blocked per item. Known-open items on our
 side: M4 (TSL surface, deferred per your priority), the bench merged-mask
 capture scenario (deferred to your lab exercising the real merge), and the
 `@experimental` freeze pending your M6.
+
+**Report 1 received** ([GUIDES-HANDOFF-RESPONSE.md](GUIDES-HANDOFF-RESPONSE.md),
+demo-16, against `34f784d`): linked build + M2 contract accepted and verified
+live on cornell/sponza; nothing blocked. Both friction items are resolved
+here — the vite block above is theirs, the dead `UpscalerNode._renderer`
+field is deleted, and the tsconfig-`paths` guidance now points at `dist/`.
+Next on their side: D1 motion-convention alignment, then the demo-10 A/B (M6).
