@@ -70,8 +70,10 @@ const BASELINE_FINGERPRINTS: Record<string, string> = {
     // Updated 2026-07-21: conditioned-space sharpening adopted (NEXT-STEPS item 1);
     // 2026-08-25: alpha passthrough; 2026-10-02: the spatial path conditions its
     // linear/HDR taps the same way (anchored, gain-capped inversion);
-    // 2026-10-02: the temporal inversion is gain-capped too (issue #32).
-    rcas: '0addd34e',
+    // 2026-10-02: the temporal inversion is gain-capped too (issue #32);
+    // 2026-10-03: both caps become the lobe applied in linear space against
+    // the ring min (issue #50, HDR plateau overshoot).
+    rcas: 'b0405308',
     // Updated 2026-07-22: depth-clip flicker fix — reference tap-skip semantics
     // (no all-taps veto), jitter-delta-compensated reprojection, and a
     // neighborhood-relief-widened separation tolerance (grazing-angle planes).
@@ -190,12 +192,16 @@ describe('RCAS on the spatial path', () => {
         }
     });
 
-    it('inverts once, anchored on the linear center and capped at linear RCAS gain', () => {
-        expect(RCAS_SHADER).toContain(
-            'eIn + tonemapInvert(max(pix, vec3f(0.0))) - tonemapInvert(e),',
+    it('inverts once, anchored on the linear center and capped by the lobe in linear space', () => {
+        const spatial = RCAS_SHADER.split('//* Resolve')[1]?.split('} else {')[1] ?? '';
+        expect(spatial).toContain('eIn + tonemapInvert(max(pix, vec3f(0.0))) - tonemapInvert(e),');
+        // The linear taps are at hand: the ring min needs no inversion.
+        expect(spatial).toContain(
+            'let mnIn = max(min(min(bIn, dIn), min(fIn, hIn)), vec3f(0.0));',
         );
-        expect(RCAS_SHADER).toContain('let maxGain = 1.0 / (1.0 - 4.0 * RCAS_LIMIT * peak);');
-        expect(RCAS_SHADER).toContain('maxIn * maxGain');
+        expect(spatial).toContain(
+            'let ceiling = max(eIn, vec3f(0.0)) - 4.0 * lobe * rcpL * max(eIn - mnIn, vec3f(0.0));',
+        );
     });
 
     it('leaves the frozen benchmark forms sharpening in linear space', () => {
@@ -216,23 +222,30 @@ describe('RCAS on the temporal path', () => {
     // peak to ~1 in conditioned space, which inverts to a ~1000x firefly
     // (issue #32: a lone sub-pixel 16 on black became 1754; converged Q1/Q2
     // highlights reached 316/423 next to ~17/~65 neighbours).
-    it('caps the single inversion at linear RCAS gain over the inverted tap maximum', () => {
-        const temporal = RCAS_SHADER.split('if (hasFlag(FLAG_INPUT_REINHARD)) {')[1]?.split('} else {')[0] ?? '';
+    // Issue #50: below the firefly range the same inversion still overshoots
+    // converged HDR plateau edges — a 64 plateau corner read 127 at sharpness
+    // 1 against 64-67 for linear RCAS. Both are bounded by one cap: the lobe
+    // applied in linear space against the darkest ring tap.
+    it('caps the single inversion by the lobe applied in linear space against the ring min', () => {
+        const temporal =
+            RCAS_SHADER.split('//* Resolve')[1]
+                ?.split('if (hasFlag(FLAG_INPUT_REINHARD)) {')[1]
+                ?.split('} else {')[0] ?? '';
         expect(temporal).not.toBe('');
+        // One inversion each for the center and the per-channel ring min (the
+        // inversion is monotone, so the min bounds every inverted ring tap).
+        expect(temporal).toContain('let eLin = tonemapInvert(e);');
+        expect(temporal).toContain('let mnLin = tonemapInvert(max(mn4, vec3f(0.0)));');
         expect(temporal).toContain(
-            'let maxIn = tonemapInvert(max(max(mx4, e), vec3f(0.0))) / exposure;',
+            'let ceiling = eLin - 4.0 * lobe * rcpL * max(eLin - mnLin, vec3f(0.0));',
         );
-        // The uncapped expression is main's, so uncapped pixels stay bit-exact.
+        // The uncapped expression is unchanged, so uncapped pixels stay bit-exact.
         expect(temporal).toContain(
-            'pix = min(tonemapInvert(max(pix, vec3f(0.0))) / exposure, maxIn * maxGain);',
+            'pix = min(tonemapInvert(max(pix, vec3f(0.0))) / exposure, ceiling / exposure);',
         );
-        // One shared cap definition, ahead of the uniform branch.
-        const resolve = RCAS_SHADER.split('//* Resolve')[1] ?? '';
-        expect(resolve.indexOf('let maxGain')).toBeGreaterThan(-1);
-        expect(resolve.indexOf('let maxGain')).toBeLessThan(
-            resolve.indexOf('if (hasFlag(FLAG_INPUT_REINHARD))'),
-        );
-        expect(RCAS_SHADER.match(/let maxGain/g)).toHaveLength(1);
+        // The ceiling subsumes the #32 gain cap (at most center / (1 - 4 *
+        // RCAS_LIMIT * peak) with a non-negative ring min), which is gone.
+        expect(RCAS_SHADER).not.toContain('maxGain');
     });
 
     it('leaves the frozen benchmark forms uncapped', () => {
@@ -242,6 +255,7 @@ describe('RCAS on the temporal path', () => {
             RCAS_HOISTED_EXPOSURE_SHADER,
             RCAS_TONEMAP_SPACE_SHADER,
         ]) {
+            expect(source).not.toContain('ceiling');
             expect(source).not.toContain('maxGain');
         }
     });

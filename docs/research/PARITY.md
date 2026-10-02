@@ -113,6 +113,15 @@ captures across Q0/Q1/Q3 plus an HDR-bulb stress scenario show full-frame RMSE
 form is frozen in the bench registry (`rcas-fsr315-limiter`) so the comparison stays
 reproducible.
 
+**Correction (2026-10-02/03, issues #32 and #50):** those were 8-bit captures, and ACES
+saturates everything above ~4, so they could not see HDR overshoot. GPU readbacks of
+the rgba16float output showed ~1000× fireflies on isolated peaks and ~2× overshoot on
+converged HDR plateau edges. The conditioned limiter bounds the result below
+conditioned 1, which is linear infinity. The single inversion is now capped at the
+conditioned lobe applied in linear space against the darkest ring tap. On ordinary
+content the cap is bit-exact outside a few hundred pixels per frame. It costs ~+4–5%
+RCAS, so most of the −34% win stands (`bench/docs/NEXT-STEPS.md` §12).
+
 ### 3. Fused multi-scale shading-change detector
 
 The most substantial re-derivation, and the one with a genuinely new result.
