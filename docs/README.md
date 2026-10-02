@@ -47,6 +47,9 @@ Live records, kept current as findings land:
 
 - [FSR 3.1.5 parity report](research/PARITY.md): where this implementation matches
   and diverges from FSR 3.1.5, and the measurements behind each choice.
+- [GI history fusion](research/GI-HISTORY-FUSION.md): the issue #7 spike — accumulating
+  a noisy SSGI signal inside the upscaler (experimental, opt-in `giFusion`) against
+  the 06/09 SSGI + `DenoiseNode` recipe, with the measurements and a recommendation.
 - [Paper notes](research/PAPER-NOTES.md): a running tracker of write-up-worthy
   findings (*surprised us + measured + others would hit it*) and what each still needs
   for publication ([#10](https://github.com/pmndrs/upscaler/issues/10)).

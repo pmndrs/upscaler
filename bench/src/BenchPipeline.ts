@@ -25,7 +25,18 @@ import { DebugView, QualityMode, getQualityModeRatio } from '@pmndrs/upscaler';
 /** Bench render modes — what fills the screen each frame. */
 export type BenchMode = 'native' | 'bilinear' | 'fsr1-spatial' | 'upscale-temporal';
 
-type EffectScenarioId = 'Q6' | 'Q7' | 'Q8' | 'Q14';
+type EffectScenarioId = 'Q6' | 'Q7' | 'Q8' | 'Q14' | 'Q20';
+
+/** Experimental GI-fusion tuning a capture may override (`settings.giFusion`). */
+type GiFusionTuning = {
+    maxHistory?: number;
+    momentsAlpha?: number;
+    clampGamma?: number;
+    tonemap?: boolean;
+    surfaceTolerance?: number;
+    antiLag?: 'standard-error' | 'temporal';
+    blockAntiLag?: boolean;
+};
 
 type EffectScenario = {
     id: EffectScenarioId;
@@ -164,6 +175,15 @@ export class BenchPipeline {
     private _effectSizedNodes: SizedEffectNode[] = [];
     private _effectTemporalNodes: unknown[] = [];
     private _effectTextures: TextureExpectation[] = [];
+    // Q14/Q20 `fused-*` (issue #7): the undenoised SSGI outputs + base color
+    // and albedo, handed to the resolver's experimental `giFusion` input.
+    private _giFusionSources: {
+        base: THREE.Texture;
+        signal: THREE.Texture;
+        albedo: THREE.Texture;
+        occlusion: THREE.Texture;
+    } | null = null;
+    private _giFusionTuning: GiFusionTuning = {};
     private _velocitySeedFrame = -2;
 
     private _mode: BenchMode = 'upscale-temporal';
@@ -227,7 +247,7 @@ export class BenchPipeline {
 
     /**
      * Selects the pinned three.js effect graph built during configuration.
-     * @param id - Q6, Q7, Q8, or Q14
+     * @param id - Q6, Q7, Q8, Q14, or Q20
      * @param subrun - Manifest-selected effect subrun
      * @param scene - Fixed room fixture
      * @param camera - Scenario camera
@@ -375,12 +395,19 @@ export class BenchPipeline {
         this._effectSizedNodes = [];
         this._effectTemporalNodes = [];
         this._effectTextures = [];
+        this._giFusionSources = null;
 
         const combined = effect.id === 'Q7' || effect.id === 'Q8';
-        // Q14 (issue #17): SSGI over 1px wires; subrun = off/static/rotating/builtin.
-        const wires = effect.id === 'Q14';
+        // Q14 (issue #17) / Q20 (issue #7): SSGI over 1px wires. Subruns:
+        // off/static/rotating/builtin (#17), raw-* / fused-* (#7).
+        const wires = effect.id === 'Q14' || effect.id === 'Q20';
         const isolated = wires ? null : effect.subrun;
         const wireSsgi = wires && effect.subrun !== 'off';
+        const wireSubrun = wires ? (effect.subrun ?? '') : '';
+        // raw-* composites SSGI undenoised; fused-* additionally hands it to
+        // the upscaler's giFusion input (the effect quad still renders the raw
+        // composite, which is what makes SSGI evaluate each frame).
+        const undenoised = wireSubrun.startsWith('raw-') || wireSubrun.startsWith('fused-');
         if (combined) {
             scenePass.setMRT(
                 mrt({
@@ -437,12 +464,14 @@ export class BenchPipeline {
             }
             // SSGINode defaults to the rotating 6-frame pattern (needs a real
             // TRAA); `static` is the 06/09/10 no-TRAA recipe.
-            if (wires) giPass.useTemporalFiltering = effect.subrun === 'rotating';
+            if (wires) giPass.useTemporalFiltering = wireSubrun.endsWith('rotating');
             const aoTexture = giPass.getAONode() as unknown as ReturnType<typeof vec4>;
             const giRaw = giPass.getGINode();
             let gi = giRaw as unknown as ReturnType<typeof vec4>;
 
-            if ((effect.id === 'Q8' && effect.subrun === 'spatial') || (wires && effect.subrun !== 'builtin')) {
+            if (undenoised) {
+                // gi stays the raw SSGI output.
+            } else if ((effect.id === 'Q8' && effect.subrun === 'spatial') || (wires && effect.subrun !== 'builtin')) {
                 const spatial = recurrentDenoise(giRaw as never, effect.camera, {
                     depth: depth as never,
                     normal: normal as never,
@@ -545,6 +574,15 @@ export class BenchPipeline {
             privatePass._ssgiRenderTarget.textures.forEach((effectTexture, index) =>
                 this._trackEffectTexture(`ssgi.attachment-${index}`, effectTexture),
             );
+            if (wireSubrun.startsWith('fused-')) {
+                const output = scenePass.getTexture('output');
+                const albedo = scenePass.getTexture('diffuse');
+                // SSGINode r186: textures[0] = AO (r8), textures[1] = GI (rg11b10).
+                const [occlusion, signal] = privatePass._ssgiRenderTarget.textures;
+                if (!output || !albedo || !occlusion || !signal)
+                    throw new Error('Pinned SSGI/PassNode texture shape changed.');
+                this._giFusionSources = { base: output, signal, albedo, occlusion };
+            }
         }
 
         if (combined || isolated === 'ssr') {
@@ -845,7 +883,8 @@ export class BenchPipeline {
         const temporal = this._mode === 'upscale-temporal';
         const effectDepth = this._effectPass?.renderTarget.depthTexture ?? undefined;
         const effectVelocity = this._effectPass?.getTexture('velocity');
-        const color = rt.textures[0];
+        const fusion = this._giFusionSources;
+        const color = fusion ? fusion.base : rt.textures[0];
         const depth = effectDepth ?? rt.depthTexture ?? undefined;
         const velocityTexture = this._effectPass
             ? effectVelocity
@@ -866,6 +905,14 @@ export class BenchPipeline {
                     this._hostPreExposureValue !== null
                         ? this._hostPreExposureTexture(this._hostPreExposureValue)
                         : undefined,
+                giFusion: fusion
+                    ? {
+                          signal: fusion.signal,
+                          albedo: fusion.albedo,
+                          occlusion: fusion.occlusion,
+                          ...this._giFusionTuning,
+                      }
+                    : undefined,
                 deltaTime,
                 frameTag,
             },
@@ -992,7 +1039,7 @@ export class BenchPipeline {
                 throw new Error('Pinned SSRNode._noiseIndex shape changed.');
             ssrNode._noiseIndex.value = 0;
         }
-        if (this._effectScenario.id === 'Q8' || this._effectScenario.id === 'Q14')
+        if (['Q8', 'Q14', 'Q20'].includes(this._effectScenario.id))
             for (const sizedNode of this._effectSizedNodes) {
                 if (typeof sizedNode.setSize !== 'function')
                     throw new Error('Pinned recurrent effect setSize shape changed.');
@@ -1126,8 +1173,12 @@ export class BenchPipeline {
         lockThinFeatures: boolean;
         detectShadingChanges: boolean;
         debugView: DebugView;
+        /** Experimental `fused-*` tuning (issue #7) — dispatch input, not a setting. */
+        giFusion?: GiFusionTuning;
     }): void {
-        Object.assign(this.resolver.settings, settings);
+        const { giFusion, ...runtime } = settings;
+        this._giFusionTuning = giFusion ?? {};
+        Object.assign(this.resolver.settings, runtime);
         // Debug buffers are already normalized visualization colors; only the
         // final linear/HDR result should pass through presentation tone mapping
         // (see present()).

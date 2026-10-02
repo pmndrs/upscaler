@@ -8,6 +8,7 @@ export {
     QualityMode,
     type UpscalerConfig,
     type DispatchInputs,
+    type GiFusionInputs,
     type GuideDispatchInputs,
     type RuntimeSettings,
     type TemporalGuides,

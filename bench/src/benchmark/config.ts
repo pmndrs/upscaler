@@ -12,7 +12,7 @@ const VARIANTS = [
     'source-spd-resolver-bundle-v1',
 ] as const;
 const SCENARIOS = [
-    'Q0', 'Q1', 'Q2', 'Q3', 'Q4', 'Q5', 'Q6', 'Q7', 'Q8', 'Q9', 'Q10', 'Q11', 'Q12', 'Q13', 'Q14', 'Q15',
+    'Q0', 'Q1', 'Q2', 'Q3', 'Q4', 'Q5', 'Q6', 'Q7', 'Q8', 'Q9', 'Q10', 'Q11', 'Q12', 'Q13', 'Q14', 'Q15', 'Q20',
 ] as const;
 
 function numberParam(params: URLSearchParams, name: string, fallback: number): number {

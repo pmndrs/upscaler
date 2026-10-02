@@ -65,6 +65,9 @@ function createGridTexture(): THREE.CanvasTexture {
     return texture;
 }
 
+/** The Q14/Q20 wire room's point light (Q20 steps it via `wireLightScale`). */
+const WIRE_LIGHT_INTENSITY = 45;
+
 /**
  * Creates the bench scene.
  * @returns The scene and its per-frame update hook
@@ -218,7 +221,7 @@ export function createBenchScene(): BenchScene {
     // the `off` subrun is a clean control for the same geometry.
     const wireRoomScene = new THREE.Scene();
     wireRoomScene.background = new THREE.Color(0x05060a);
-    const wireLight = new THREE.PointLight(0xfff4e5, 45, 0, 2);
+    const wireLight = new THREE.PointLight(0xfff4e5, WIRE_LIGHT_INTENSITY, 0, 2);
     wireLight.position.set(0, 5.2, 1.2);
     wireRoomScene.add(wireLight);
     wireRoomScene.add(new THREE.AmbientLight(0x8090b0, 0.15));
@@ -498,6 +501,7 @@ export function createBenchScene(): BenchScene {
         mergeGroup.visible = frame.reactiveMerge === true;
         mergeCoverage.visible = frame.reactiveMerge === true;
         sun.intensity = frame.directionalIntensity;
+        wireLight.intensity = WIRE_LIGHT_INTENSITY * (frame.wireLightScale ?? 1);
         // The Q11 host pre-exposure multiplier lives in the MRT output node,
         // which the background never passes through — scale it here so the
         // whole frame is uniformly pre-exposed like a real app's render.

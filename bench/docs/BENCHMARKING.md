@@ -161,7 +161,7 @@ work did not change, the rest of the frame got cheaper.
 
 ---
 
-## Scenarios (Q0–Q15)
+## Scenarios (Q0–Q15, Q20)
 
 Scripted camera and scene animations, defined in
 `bench/src/benchmark/scenarios.ts`. Performance runs use the default; capture
@@ -183,8 +183,9 @@ runs select them with `--scenarios`.
 | Q11 | `host-pre-exposure` | Host pre-exposure steps 2.5× at 60 and ramps back. With DeltaPreExposure correct, the shading-change view stays black throughout. |
 | Q12 | `cornell-still-convergence` | A consumer's Cornell-box repro: still camera, point-light shadow dither. The hardest convergence case we have. |
 | Q13 | `merged-reactive-masks` | Explicit reactive mask **and** the `reactiveOpaqueColor` auto-generator at once, on three still panels: explicit-only (reads 1.0), overlap (explicit 0.5 under a generated ramp, so it reads as a flat 0.5 floor rising to the 0.9 cap), diff-only. The `reactivity` capture is the per-pixel `max` from `generateReactive.ts`. A merge that overwrites, takes the min or sums the masks changes a panel. |
-| Q14 | `ssgi-thin-feature-locks` | Issue #17: still camera into an SSGI-lit box holding 1px wireframe meshes. Subruns `off` (no SSGI, clean control) / `static` (SSGI static pattern + spatial `recurrentDenoise`, the issue's config) / `rotating` (SSGI's default rotating pattern) / `builtin` (static pattern + `DenoiseNode`, the 06/09 recipe). Measure with `measure-convergence.mjs --scenario Q14 --subrun <s> --pairs 40`. |
+| Q14 | `ssgi-thin-feature-locks` | Issue #17: still camera into an SSGI-lit box holding 1px wireframe meshes. Subruns `off` (no SSGI, clean control) / `static` (SSGI static pattern + spatial `recurrentDenoise`, the issue's config) / `rotating` (SSGI's default rotating pattern) / `builtin` (static pattern + `DenoiseNode`, the 06/09 recipe). Issue #7 adds `raw-static` / `raw-rotating` (SSGI composited undenoised) and `fused-static` / `fused-rotating` (the same SSGI handed to the experimental `giFusion` input, [GI-HISTORY-FUSION.md](../../docs/research/GI-HISTORY-FUSION.md)). Measure with `measure-convergence.mjs --scenario Q14 --subrun <s> --pairs 40` or `measure-gi-fusion.mjs still`. |
 | Q15 | `sub-detector-lighting-drift` | Still camera, sun ramps 8 → 2 (120–188) and back 2 → 8 (240–308), exponentially at ~2 %/frame: half the shading detector's flattest floor, so the detector stays silent and only the variance clip limits lag. Measure with `scripts/measure-drift-lag.mjs`. |
+| Q20 | `ssgi-wires-camera-sweep` | Issue #7: Q14's room and subruns, still to 119, a sideways camera sweep 120–239 (wires parallax against GI-lit walls), still again, then the wire light steps to 35 % at 330. Measure with `scripts/measure-gi-fusion.mjs motion`, which compares each frame to a held-state reference (that recipe's own converged image at the same pose and lighting). |
 
 ---
 
@@ -228,6 +229,17 @@ alpha is measured exactly — run it before and after touching the alpha resolve
 
 ```bash
 node scripts/measure-alpha-convergence.mjs --ratio 3
+```
+
+The GI-fusion meter (issue #7) runs four measurements over the bench capture API.
+`snapshot` hashes captures for byte-identity checks across branches. `still` measures
+churn, temporal std-dev, locks and distance to a long-accumulated reference, on a wire
+mask taken from the `off` control. `motion` compares against held-state references.
+`timing` reads per-pass GPU medians in ABBA blocks:
+
+```bash
+node scripts/measure-gi-fusion.mjs still --scenario Q14 --subruns off,builtin,fused-rotating
+node scripts/measure-gi-fusion.mjs motion --scenario Q20 --subruns builtin,fused-rotating --frames 130:310:12
 ```
 
 ---

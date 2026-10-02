@@ -19,6 +19,8 @@ import { DEBUG_SHADER } from './debug';
 import * as easuModule from './easu';
 import { EASU_SHADER } from './easu';
 import { GENERATE_REACTIVE_SHADER } from './generateReactive';
+import * as giFusionModule from './giFusion';
+import { GI_FUSION_PARAMS_SIZE, GI_FUSION_SHADER } from './giFusion';
 import { LUMINANCE_PYRAMID_SHADER } from './luminancePyramid';
 import { MOMENTS_SHADER } from './moments';
 import * as rcasModule from './rcas';
@@ -44,6 +46,7 @@ const ALL_SHADERS: Record<string, string> = {
     generateReactive: GENERATE_REACTIVE_SHADER,
     debug: DEBUG_SHADER,
     moments: MOMENTS_SHADER,
+    giFusion: GI_FUSION_SHADER,
 };
 
 const BASELINE_BINDING_COUNTS: Record<string, number> = {
@@ -60,6 +63,8 @@ const BASELINE_BINDING_COUNTS: Record<string, number> = {
     debug: 10,
     // Added 2026-07-22: standalone signal-agnostic moments (guides spec M5).
     moments: 4,
+    // Added 2026-10-03: experimental GI history fusion (issue #7, opt-in).
+    giFusion: 17,
 };
 
 const BASELINE_FINGERPRINTS: Record<string, string> = {
@@ -91,6 +96,9 @@ const BASELINE_FINGERPRINTS: Record<string, string> = {
     debug: 'e30ebd6c',
     // Added 2026-07-22: standalone signal-agnostic moments (guides spec M5).
     moments: 'ec1952d4',
+    // Added 2026-10-03: experimental GI history fusion (issue #7, opt-in;
+    // docs/research/GI-HISTORY-FUSION.md).
+    giFusion: '166c41e1',
 };
 
 
@@ -350,6 +358,52 @@ describe('alpha passthrough is unconditional', () => {
         expect(ACCUMULATE_SHADER).toContain(
             'let rectifiedAlpha = mix(clamp(lockPrev.a, alphaMin, alphaMax), lockPrev.a, alphaRelax);',
         );
+    });
+});
+
+// Issue #7 prototype: must stay opt-in and fenced off from production passes.
+describe('experimental GI history fusion', () => {
+    const wgslFlag = (name: string) =>
+        Number(new RegExp(`const ${name} : u32 = (\\d+)u;`).exec(GI_FUSION_SHADER)?.[1]);
+
+    it('keeps its flags pass-local and in sync with the TS side', () => {
+        const pairs: Array<[string, number]> = [
+            ['GI_FLAG_OCCLUSION', giFusionModule.GI_FUSION_FLAG_OCCLUSION],
+            ['GI_FLAG_RESET', giFusionModule.GI_FUSION_FLAG_RESET],
+            ['GI_FLAG_TONEMAP', giFusionModule.GI_FUSION_FLAG_TONEMAP],
+            ['GI_FLAG_SURFACE', giFusionModule.GI_FUSION_FLAG_SURFACE],
+            ['GI_FLAG_STDERR_BOX', giFusionModule.GI_FUSION_FLAG_STDERR_BOX],
+            ['GI_FLAG_BLOCK_ANTILAG', giFusionModule.GI_FUSION_FLAG_BLOCK_ANTILAG],
+        ];
+        for (const [name, value] of pairs) expect(wgslFlag(name)).toBe(value);
+        // Distinct single bits.
+        const values = pairs.map(([, value]) => value);
+        expect(new Set(values).size).toBe(values.length);
+        for (const value of values) expect(value & (value - 1)).toBe(0);
+        // Not added to the shared constants chunk (that re-fingerprints every pass).
+        for (const [name] of pairs)
+            expect(ACCUMULATE_SHADER).not.toContain(name);
+    });
+
+    it('declares a params struct matching the uniform size the upscaler writes', () => {
+        const body = /struct GiFusionParams \{([^}]*)\}/.exec(GI_FUSION_SHADER)?.[1] ?? '';
+        const fields = [...body.matchAll(/^\s*\w+\s*:\s*(f32|u32)\s*,/gm)];
+        expect(fields.length * 4).toBe(GI_FUSION_PARAMS_SIZE);
+        expect(GI_FUSION_SHADER).toContain('@group(0) @binding(14) var<uniform> P : GiFusionParams;');
+    });
+
+    it('leaves the production accumulate pass untouched', () => {
+        expect(ACCUMULATE_SHADER).not.toMatch(/gi[A-Z]|GiFusion/);
+    });
+
+    it('anchors its anti-lag box on the fast mean, never one phase\'s 3×3 box', () => {
+        // Convergence rule 2: the per-pixel clamp is centered on the temporal
+        // fast mean m1; the only spatial stat feeding it is a width.
+        expect(GI_FUSION_SHADER).toMatch(/clamp\(slowLuma, max\(m1 - P\.clampGamma \* sigma, 0\.0\), m1 \+ P\.clampGamma \* sigma\)/);
+    });
+
+    it('avoids WGSL reserved words as identifiers', () => {
+        expect(GI_FUSION_SHADER).not.toMatch(/\b(let|var)\s+(target|filter|enum|typedef|mat|sampler_state)\b/);
     });
 });
 
