@@ -120,7 +120,7 @@ converged HDR plateau edges. The conditioned limiter bounds the result below
 conditioned 1, which is linear infinity. The single inversion is now capped at the
 conditioned lobe applied in linear space against the darkest ring tap. On ordinary
 content the cap is bit-exact outside a few hundred pixels per frame. It costs ~+4–5%
-RCAS, so most of the −34% win stands (`bench/docs/NEXT-STEPS.md` §9).
+RCAS, so most of the −34% win stands (`bench/docs/NEXT-STEPS.md` §12).
 
 ### 3. Fused multi-scale shading-change detector
 

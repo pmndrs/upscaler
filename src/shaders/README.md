@@ -230,7 +230,7 @@ coverage only if RCAS performance becomes material.
     and leaves ordinary edges bit-exact.
   - **Uncapped pixels.** The uncapped expression is unchanged, so they stay bit-exact.
 
-  **Evidence (GPU readbacks, rgba16float, Apple Metal-3; `bench/docs/NEXT-STEPS.md` §9):**
+  **Evidence (GPU readbacks, rgba16float, Apple Metal-3; `bench/docs/NEXT-STEPS.md` §12):**
   - **Synthetic converged plateaus** (2 / 8 / 64 on 0.05 / 1 / P/4, ratio 2,
     exposure 1). At sharpness 1, a 64 plateau corner goes from 1.98× to 1.12× /
     1.22× / 1.64× against 1.04× / 1.09× / 1.31× for linear RCAS. At the default 0.8 it

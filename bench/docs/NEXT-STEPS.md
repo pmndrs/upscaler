@@ -555,7 +555,7 @@ Artifacts land under `bench/results/raw/drift-lag/` and `bench/results/raw/conve
 (git-ignored): per-frame rows per ROI, detector lit fractions, and PNGs at `--keep`
 frames.
 
-## 9. Conditioned-space RCAS overshoot on converged HDR plateaus — DONE (2026-10-03, issue #50)
+## 12. Conditioned-space RCAS overshoot on converged HDR plateaus — DONE (2026-10-03, issue #50)
 
 Item 1 moved RCAS into conditioned space (`c/(1+max(c))`) and inverts once. The
 limiter there keeps the sharpened result below conditioned 1, but conditioned 1 is
