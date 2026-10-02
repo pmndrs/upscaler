@@ -188,14 +188,12 @@ coverage only if RCAS performance becomes material.
   most history well inside [0,1), but it does not bound a peaky history: the first
   frame, a reset, disocclusion, or a sub-pixel emitter that only rasterizes on some
   jitter phases. The lobe pushes such a peak to ~1 in conditioned space, and the
-  single inversion turns it into a ~1000× firefly. The inversion is now capped at
+  single inversion turns it into a ~1000× firefly. The inversion was capped at
   `inv(max5) / exposure · 1/(1 − 4·RCAS_LIMIT·peak)`, linear RCAS's own maximum gain,
-  the same bound as the spatial path. `max5` is the per-channel max of the five
-  conditioned taps, inverted once. The inversion is monotone, so it bounds every
-  inverted tap. No anchor is needed: on this path it is algebraically the plain
-  inversion. The uncapped expression is unchanged, so pixels under the cap stay
-  bit-exact.
-- **Evidence (GPU readbacks, rgba16float):**
+  the same bound as the spatial path. No anchor is needed: on this path it is
+  algebraically the plain inversion. **Superseded on 2026-10-03 by the lobe ceiling
+  below, which is never looser.** The evidence that follows is for this first cap.
+- **Evidence for the #32 cap (GPU readbacks, rgba16float):**
   - **Synthetic, first frame, exposure 1:** a lone sub-pixel 4 / 16 / 64 on black
     became 1506 / 1754 / 1737 at sharpness 1 and 1154 / 1352 / 1379 at 0.8, against
     3.7 / 12.2 / 29.6 for linear-space RCAS on the same history. Capped, they are
@@ -212,10 +210,47 @@ coverage only if RCAS performance becomes material.
   - **No NaN, Inf or negative output** in any probe.
   - **Cost:** about +4 µs RCAS at 1920×1080 ratio 2 (+4–5%, interleaved ABBA, against
     a ~1% A-vs-A floor).
-  - **Not changed:** converged HDR plateaus still overshoot up to ~2× at their edges
-    (a 64 plateau reads 127; linear RCAS reads 64). That stays inside the linear gain
-    bound, so the cap leaves it alone. It is a property of conditioned-space
-    sharpening.
+  - **Left open, then fixed by the lobe ceiling:** converged HDR plateaus still
+    overshot up to ~2× at their edges (a 64 plateau corner read 127; linear RCAS reads
+    64–67). That stays inside the linear gain bound, so this cap left it alone.
+- **Lobe ceiling (2026-10-03, issue #50):** The limiter keeps the sharpened result
+  inside the conditioned range, but that range ends at linear infinity. Near 1 a
+  conditioned step of 0.008 doubles the linear value, so the limiter bounds nothing in
+  linear terms. Both paths now cap the inverted result at the *conditioned lobe applied
+  in linear space against the darkest ring tap*:
+  `eLin + 4·|lobe|·rcpL·max(eLin − inv(mn4), 0)` (then `/ exposure`).
+  - **Tighter than the #32 cap.** With a non-negative ring min it is at most
+    `eLin / (1 − 4·RCAS_LIMIT·peak)`, linear RCAS's maximum gain, so it replaces that
+    cap and every firefly guarantee still holds.
+  - **Cost of the bound.** It needs two inversions (the center and the per-channel
+    ring min, which is at or below every inverted ring tap because the inversion is
+    monotone) where #32 needed one.
+  - **Where it binds.** A uniform ring makes it exactly linear-space RCAS with the same
+    lobe. A brighter ring tap loosens it, so it binds on HDR edges and isolated peaks
+    and leaves ordinary edges bit-exact.
+  - **Uncapped pixels.** The uncapped expression is unchanged, so they stay bit-exact.
+
+  **Evidence (GPU readbacks, rgba16float, Apple Metal-3; `bench/docs/NEXT-STEPS.md` §9):**
+  - **Synthetic converged plateaus** (2 / 8 / 64 on 0.05 / 1 / P/4, ratio 2,
+    exposure 1). At sharpness 1, a 64 plateau corner goes from 1.98× to 1.12× /
+    1.22× / 1.64× against 1.04× / 1.09× / 1.31× for linear RCAS. At the default 0.8 it
+    goes from 1.41–1.58× to 1.08–1.32× (linear 1.03–1.15×). 2 and 8 plateaus at
+    sharpness 1 drop from 2.1–2.5× to 1.6–2.1×. That remainder is what the same
+    lobe produces in linear space against the darkest neighbour.
+  - **SDR (0.5) plateau column:** byte-identical.
+  - **Bench Q0/Q1/Q2/Q12, auto-exposure, sharpness 0.8:** 35–2745 of 921,600 pixels
+    change per frame, and every other pixel is bit-exact. Presented (ACES + sRGB), the
+    mean change is ≤ 0.0025/255 and the maximum ≤ 22/255. Examples 01/07/16 at f90:
+    189 / 277 / 797 px, ≤ 13/255.
+  - **Cost:** +4.5% / +5.3% RCAS temporal (HDR / all-SDR frame) and +2.9% spatial,
+    frame-paired at 1920×1080 ratio 2 against a 0.2% A-vs-A floor. Against the
+    per-tap form the conditioned-space win goes from −23.0% to −18.7%.
+  - **First-frame sub-pixel emitters (the #32 repro):** 4 / 16 / 64 go from 8.5 / 28.3 /
+    68.5 to 6.9 / 23.8 / 56.1 at sharpness 0.8.
+  - **Rejected alternative:** renormalising HDR neighbourhoods to a white of 1 before
+    conditioning. It is exact for content below exposed-linear 1, but auto-exposure
+    puts ordinary highlights above 1, so ~8% of pixels moved. It cost +9% RCAS, and on
+    Q2 a history texel at ~1 inverted to f16 max.
 
 #### RCAS load domain (spatial path)
 
@@ -230,14 +265,19 @@ coverage only if RCAS performance becomes material.
   unsharpened.
 - **Local implementation:** The production shader conditions the five taps with the
   temporal path's `tonemapInvertible` and sharpens in that bounded space. It inverts
-  once, anchored on the exact linear center (`eIn + inv(pix) − inv(e)`), and clamps to
-  `[0, max5 · 1/(1 − 4·RCAS_LIMIT·peak)]`. The anchor means a zero lobe passes the EASU
-  texel through bit-exact, and texels past `tonemapInvert`'s 0.999 clamp (linear ~1000)
-  are not flattened to ~1000. The cap stops isolated peaks that overshoot the conditioned
-  range from inverting to ~1000× (unguarded, a lone 0.5 on near-black became 1303 at
-  sharpness 1). It bounds the result at the most linear-space RCAS could ever produce
-  at that sharpness. The temporal path shares the cap (see *Gain cap* above). It needs
-  no anchor, because there the anchor reduces to the plain inversion.
+  once, anchored on the exact linear center (`eIn + inv(pix) − inv(e)`). It then clamps
+  to `[0, max(eIn, 0) + 4·|lobe|·rcpL·max(eIn − max(mn4In, 0), 0)]`: the lobe applied
+  in linear space against the darkest ring tap (the *Lobe ceiling* above, issue #50;
+  the linear taps are at hand, so it needs no inversion). Until 2026-10-03 the upper
+  bound was `max5 · 1/(1 − 4·RCAS_LIMIT·peak)`; the ceiling is never looser.
+  - **The anchor:** a zero lobe passes the EASU texel through bit-exact, and texels
+    past `tonemapInvert`'s 0.999 clamp (linear ~1000) are not flattened to ~1000.
+  - **The cap:** it stops isolated peaks that overshoot the conditioned range from
+    inverting to ~1000× (unguarded, a lone 0.5 on near-black became 1303 at
+    sharpness 1). It also stops converged HDR edges overshooting ~2× (a 64 plateau
+    corner read 1.77× at sharpness 1, now 1.60×; linear RCAS reads 1.30×).
+  - **The temporal path** shares the cap and needs no anchor, because there the anchor
+    reduces to the plain inversion.
 - **Evidence (GPU readbacks):** On synthetic HDR tiles, edges crossing 1.0 and 1.0|0.5
   edges now sharpen, and a flat 1.0 stays exactly 1.0. On the example scene, SDR-only
   neighborhoods moved by a mean of 0.0007 linear and 0.13/255 after ACES, because
@@ -249,10 +289,10 @@ coverage only if RCAS performance becomes material.
 - **Current status:** Source-aligned output/color domain.
 - **Local implementation:** Writes the caller's linear/HDR domain: on the temporal path
   it sharpens conditioned texels and inverse-tonemaps + divides by the current local
-  exposure once on the result, capped at linear RCAS's gain (see *RCAS load domain*
-  above); on the spatial path it
+  exposure once on the result, capped by the lobe applied in linear space against the
+  darkest ring tap (see *RCAS load domain* above); on the spatial path it
   conditions EASU's linear taps with the same tonemap, sharpens, and inverts once
-  (anchored on the linear center, capped at linear RCAS's gain — *RCAS load domain
+  (anchored on the linear center, under the same cap — *RCAS load domain
   (spatial path)*). It applies no presentation transform.
 - **FSR 3.1.5 behavior:** Filters color conditioned by `Exposure()`, reverses
   `Exposure()`, and applies no presentation transform. Host `preExposure` remains, so

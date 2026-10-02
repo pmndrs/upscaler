@@ -19,6 +19,11 @@ import { assembleShader } from './wgsl';
  * straddles 1.0 (every edge between a highlight and its surroundings) and
  * divides 0/0 on a ring of exactly 1.0. The frozen per-tap forms
  * (`conditionedInput = false`) keep sharpening that path in linear space.
+ *
+ * Both paths cap the inverted result at the conditioned lobe applied in
+ * linear space against the darkest ring tap (issues #32, #50): the limiter
+ * keeps the result inside the conditioned range, but that range ends at
+ * linear infinity, so near 1 it bounds nothing in linear terms.
  */
 function createRcasShader(fsr315NumericParity: boolean, conditionedInput = false): string {
     const luma = fsr315NumericParity
@@ -80,37 +85,44 @@ fn rcasLoad(p : vec2i) -> vec3f {
     const resolve = conditionedInput
         ? /* wgsl */ `
     var pix = (lobe * b + lobe * d + lobe * h + lobe * f + e) * rcpL;
-    // Both paths cap the inverted result at linear RCAS's own maximum gain for
-    // this sharpness (lobe >= -RCAS_LIMIT * peak, non-negative taps). In
-    // conditioned space the lobe can push an isolated peak to (or past) 1,
-    // and the inversion turns that into a ~1000x firefly.
-    let maxGain = 1.0 / (1.0 - 4.0 * RCAS_LIMIT * peak);
+    // Both paths cap the inverted result at the same lobe applied in linear
+    // space against the darkest ring tap:
+    //   center + 4 * |lobe| * rcpL * (center - ring min).
+    // The limiter keeps the result inside the conditioned range, but that
+    // range ends at linear infinity: near 1 a conditioned step of 0.008
+    // doubles the value. Uncapped, an isolated peak became a ~1000x firefly
+    // (issue #32) and a converged 64 plateau corner read 127 at sharpness 1,
+    // against 64-67 for linear RCAS (issue #50). With a non-negative ring min
+    // the cap is at most center / (1 - 4 * RCAS_LIMIT * peak), linear RCAS's
+    // own maximum gain, so it is never looser than the #32 gain cap it
+    // replaces. A uniform ring makes it exactly linear RCAS's result for the
+    // same lobe, and any brighter ring tap loosens it, so it binds on HDR
+    // edges and isolated peaks and leaves ordinary edges bit-exact.
     if (hasFlag(FLAG_INPUT_REINHARD)) {
         // Undo the accumulate conditioning once on the sharpened result: invert
-        // the tonemap, then divide out the baked-in pre-exposure. Pre-exposure
-        // does not bound a fresh, peaky history (first frame, reset,
-        // disocclusion, a sub-pixel emitter popping in): unguarded, a lone
-        // sub-pixel 16 on black became 1754 at sharpness 1 and 1379 at 0.8 in
-        // GPU probes (issue #32). The tap maximum is inverted once: the
-        // inversion is monotone, so the per-channel max of the conditioned taps
-        // bounds every inverted tap.
+        // the tonemap, then divide out the baked-in pre-exposure. The ring
+        // minimum is inverted once: the inversion is monotone, so the
+        // per-channel min of the conditioned taps is at or below every
+        // inverted ring tap.
         let exposure = max(textureLoad(exposureTex, vec2i(0), 0).r, 1.0e-4);
-        let maxIn = tonemapInvert(max(max(mx4, e), vec3f(0.0))) / exposure;
-        pix = min(tonemapInvert(max(pix, vec3f(0.0))) / exposure, maxIn * maxGain);
+        let eLin = tonemapInvert(e);
+        let mnLin = tonemapInvert(max(mn4, vec3f(0.0)));
+        let ceiling = eLin - 4.0 * lobe * rcpL * max(eLin - mnLin, vec3f(0.0));
+        pix = min(tonemapInvert(max(pix, vec3f(0.0))) / exposure, ceiling / exposure);
     } else {
-        // Spatial: invert the tap conditioning once. Unlike accumulate history,
-        // this input has no pre-exposure bounding it, so two guards:
-        // - anchor on the exact linear center — an unsharpened pixel passes
-        //   through bit-exact, and values beyond tonemapInvert's clamp
-        //   (linear ~1000) are not flattened to it;
-        // - the gain cap above. An isolated peak overshoots the conditioned
-        //   range, and inverting that multiplies it up to ~1000x (a lone 0.5
-        //   on near-black became 1303 at sharpness 1 in GPU probes).
-        let maxIn = max(max(max(bIn, dIn), max(fIn, hIn)), max(eIn, vec3f(0.0)));
+        // Spatial: invert the tap conditioning once, anchored on the exact
+        // linear center: an unsharpened pixel passes through bit-exact, and
+        // values beyond tonemapInvert's clamp (linear ~1000) are not flattened
+        // to it. This input has no pre-exposure bounding it, so isolated peaks
+        // overshoot the conditioned range easily (a lone 0.5 on near-black
+        // became 1303 at sharpness 1 in GPU probes). The linear taps are at
+        // hand, so the cap needs no inversion.
+        let mnIn = max(min(min(bIn, dIn), min(fIn, hIn)), vec3f(0.0));
+        let ceiling = max(eIn, vec3f(0.0)) - 4.0 * lobe * rcpL * max(eIn - mnIn, vec3f(0.0));
         pix = clamp(
             eIn + tonemapInvert(max(pix, vec3f(0.0))) - tonemapInvert(e),
             vec3f(0.0),
-            maxIn * maxGain
+            ceiling
         );
     }`
         : /* wgsl */ `

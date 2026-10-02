@@ -555,6 +555,158 @@ Artifacts land under `bench/results/raw/drift-lag/` and `bench/results/raw/conve
 (git-ignored): per-frame rows per ROI, detector lit fractions, and PNGs at `--keep`
 frames.
 
+## 9. Conditioned-space RCAS overshoot on converged HDR plateaus — DONE (2026-10-03, issue #50)
+
+Item 1 moved RCAS into conditioned space (`c/(1+max(c))`) and inverts once. The
+limiter there keeps the sharpened result below conditioned 1, but conditioned 1 is
+linear infinity. Near it, a conditioned step of 0.008 doubles the linear value, so
+the limiter bounds nothing in linear terms. #32 capped the inversion at linear RCAS's
+maximum gain, `inv(max5)·1/(1 − 4·RCAS_LIMIT·peak)`, which stops ~1000× fireflies.
+Up to 4× at sharpness 1 still passes that cap, so converged plateau edges kept
+overshooting. Item 1's captures were 8-bit, where ACES saturates everything above
+~4, so they could not show it.
+
+**Method.** GPU readbacks of the rgba16float output, Apple Metal-3, headless Chrome
+over CDP. The probe was a temporary page, not committed:
+
+- **Scene:** `Upscaler` driven directly at 640×480, ratio 2, with a still orthographic
+  camera.
+- **Content:** converged plateaus at P = 0.5 / 2 / 8 / 64 on backgrounds 0.05 / 1 /
+  P⁄4, each with an axis-aligned square, a diamond, a 1.5-render-px bar and a tilted
+  rectangle.
+- **Runs:** temporal (120 frames) and spatial, sharpness 0.8 and 1, auto-exposure on
+  and off.
+- **Reference:** the frozen `RCAS_PER_TAP_SHADER` stands in for linear-space RCAS.
+- **Other checks:** a #32 first-frame sub-pixel emitter scene, and bench Q0/Q1/Q2/Q12
+  read back at 1280×720 through a temporary uncommitted patch that points the
+  `baseline` identity at production `RCAS_SHADER`.
+
+**Reproduced.** At sharpness 1, temporal, exposure 1, main reads 1.98× on every 64
+plateau. That is the issue's 127, at convex corners whose ring holds two dark taps.
+Linear RCAS reads 1.04× / 1.09× / 1.31× on backgrounds 0.05 / 1 / 16. Linear reads ~64
+on dark backgrounds because a ring that straddles 1 makes its `hitMax` positive and
+switches the lobe off. That is the #30 defect, so linear RCAS is a reference for the
+*bound*, not a target to match. 2 and 8 plateaus read 2.1–2.5×. At the default 0.8,
+main reads 1.41–1.59× against 1.03–1.17× for linear. The spatial path behaves the same
+way: 1.77–1.91× at sharpness 1 against ~1.30×.
+
+**Fix (`rcas.ts`, production `RCAS_SHADER` only).** Both paths cap the inverted
+result at the conditioned lobe applied in linear space against the darkest ring tap:
+`eLin + 4·|lobe|·rcpL·max(eLin − max(mnLin, 0), 0)`.
+
+- **Inversions.** Temporal inverts the center and the per-channel ring min once
+  each. The inversion is monotone, so the min is at or below every inverted ring tap.
+  Spatial has the linear taps already, so it needs no inversion.
+- **It replaces the #32 / #30 `maxGain` cap.** With a non-negative ring min, the
+  ceiling is at most `eLin / (1 − 4·RCAS_LIMIT·peak)`, so the firefly guarantee holds.
+- **Where it binds.** A uniform ring makes it exactly linear RCAS with the same lobe.
+  Brighter ring taps loosen it, so it binds on HDR edges and isolated peaks.
+- **Unchanged.** The uncapped expression and the spatial anchor are as before.
+- **Fingerprint.** `RCAS_SHADER` moves `0addd34e` → `b0405308`. The four frozen RCAS
+  forms are byte-identical to main.
+
+| converged plateau, max out/P | main | fix | linear RCAS |
+| --- | --- | --- | --- |
+| temporal, sharpness 1, P=64 on 0.05 / 1 / 16 | 1.98 / 1.98 / 1.98 | **1.12 / 1.22 / 1.64** | 1.04 / 1.09 / 1.31 |
+| temporal, sharpness 1, P=8 on 0.05 / 1 / 2 | 2.12 / 2.12 / 2.12 | 1.62 / 1.82 / 1.79 | 1.25 / 1.34 / 1.33 |
+| temporal, sharpness 1, P=2 on 0.05 / 1 / 0.5 | 2.50 / 1.48 / 2.41 | 2.07 / 1.48 / 2.11 | 1.37 / 1.31 / 1.37 |
+| temporal, sharpness 0.8, P=64 | 1.41–1.58 | **1.08–1.32** | 1.03–1.15 |
+| temporal, sharpness 0.8, P=8 | 1.42–1.59 | 1.36–1.37 | 1.15–1.17 |
+| temporal, auto-exposure, sharpness 1, P=64 | 2.06 | 1.42–1.71 | 1.17–1.32 |
+| spatial, sharpness 1, P=64 | 1.77–1.81 | 1.59–1.61 | 1.27–1.30 |
+| spatial, sharpness 0.8, P=64 | 1.33–1.38 | 1.30–1.33 | 1.13–1.15 |
+| P=0.5 (SDR) column, every configuration | — | **byte-identical** | — |
+
+**What remains.** The residual is what the same lobe produces in linear space
+against the darkest neighbour, ~1.6–2.1× at sharpness 1 on moderate-contrast 2–8
+plateaus. Tightening it means binding ordinary SDR edges too, because conditioned
+sharpening always exceeds linear sharpening with the same lobe (the inversion is
+convex). Two tighter bounds were tested on CPU:
+
+- **Ring mean (Jensen) instead of the ring min:** P=8 corner 1.40×, but it changed
+  ~49% of random SDR neighbourhoods.
+- **Exact linear same-lobe sum:** four inversions, and it changes the same share.
+
+**#32 repro (first frame, sub-pixel emitters 4 / 16 / 64 on black, exposure 1).**
+Main reproduces #48's published numbers exactly.
+
+| sharpness | main | fix | linear |
+| --- | --- | --- | --- |
+| 0.8 | 8.5 / 28.3 / 68.5 | 6.9 / 23.8 / 56.1 | 3.7 / 12.2 / 29.6 |
+| 1 | 14.7 / 48.8 / 118 | 9.9 / 34.6 / 79.1 | 3.7 / 12.2 / 29.6 |
+
+- **Converged (f96, sharpness 1):** 64 reads 2.29 / 1.58 / 1.55 (main / fix / linear).
+- **Auto-exposure first frame:** 1.57 / 1.28 / 0.98.
+- **NaN / Inf / negative output:** none in any probe.
+
+**Real content.** Bench captures at the default settings: sharpness 0.8,
+auto-exposure, ratio 2, 1280×720, rgba16float readback, 921,600 px per frame. The
+main-vs-main control is byte-identical at every frame.
+
+| capture | changed px | max linear Δ | presented (ACES + sRGB) max / mean Δ |
+| --- | --- | --- | --- |
+| Q0 f0 / f1 / f23 | 1126 / 2745 / 1849 | 14.8 / 21.3 / 6.0 | 17 / 19 / 22 · ≤ 0.0025 /255 |
+| Q1 f59 / f239 (converged still) | 268 / 247 | 10.3 / 10.1 | 5 / 4 · ≤ 0.0002 /255 |
+| Q2 f119 / f239 | 285 / 286 | 72.4 / 109.3 | 4 / 9 · ≤ 0.0001 /255 |
+| Q12 f119 / f479 | 39 / 35 | 0.04 / 0.06 | 2 / 3 · 0 /255 |
+
+Every other pixel is bit-exact. The Q0 frame maxima fall: 41.2 → 26.7 at f0, 43.8 →
+25.0 at f1, 21.1 → 19.1 at f23. Examples at f90 (fake clock, stepped rAF, seeded
+`Math.random`; repeat runs are byte-identical) against main:
+
+- **01-hello:** 189 px, ≤ 4/255.
+- **07-tsl-node:** 277 px, ≤ 13/255.
+- **16-spatial-node:** 797 px, ≤ 6/255, with its live RCAS-ms badge strip masked.
+
+These are near-identical, not byte-identical. The changed pixels are capped
+highlights and isolated peaks.
+
+**Cost.** RCAS ms read from timestamp queries, 1920×1080, ratio 2, frame-paired:
+
+- **Pairing.** Both shaders dispatch on the same scene render every frame, in
+  alternating order, and the paired ratio's median is taken per 400-frame block.
+  Blocks alternate which shader is listed first.
+- **Why pairing.** Leg-level ABBA was unusable here. The shared GPU flipped between
+  two clock states (A legs read 0.10 or 0.36 ms), giving 30–90% A-vs-A floors. Pairing
+  inside a frame cancels that.
+- **Environment.** Run from a worktree with other agents on the GPU, so absolute ms
+  are not comparable to repo records.
+
+| comparison | paired Δ | block spread |
+| --- | --- | --- |
+| main vs main (floor) | −0.21% | 0.28% |
+| main → fix, temporal, HDR probe scene | **+4.5%** | 2.45% |
+| main → fix, temporal, same scene ×1/128 (all SDR) | **+5.3%** | 0.69% |
+| main → fix, spatial | +2.9% | 0.42% |
+| per-tap → main, temporal | −23.0% | 1.11% |
+| per-tap → fix, temporal | **−18.7%** | 1.02% |
+
+About +5 µs at the fast clock (~0.10 ms RCAS). The conditioned-space win against the
+per-tap form goes from −23.0% to −18.7% on this machine, so about four fifths of it
+survives. Item 1's −34% was measured with a different harness and scene and is not
+directly comparable.
+
+**Rejected: renormalise HDR neighbourhoods to a white of 1.** Scale the five taps so
+the brightest exposed-linear tap is 1, sharpen, scale back.
+
+- **What it got right.** It is exact for neighbourhoods below 1 by construction, and
+  sharpening becomes scale-invariant above 1.
+- **Overshoot.** Weaker than the ceiling: P=64 at sharpness 1 went to 1.22 / 1.42 /
+  2.04, and P=8 to 1.99–2.12. At white the conditioned limiter itself allows ~2×; a
+  1.0 corner on 0.5 sharpens to 1.99 in production today.
+- **Pixels moved.** Auto-exposure keys mid-grey at 0.18, so ordinary highlights sit
+  above exposed 1, and ~8% of Q0/Q1 pixels moved.
+- **Cost.** +8.9% RCAS even with the re-conditioning behind a per-pixel branch. A
+  not-taken branch still cost ~7%, likely occupancy. Single-reciprocal,
+  scalar-scale and branchless forms were all worse.
+- **Q2 f239.** A history texel at ~1 made the clamped neighbourhood max re-condition
+  one tap back to ~1, and it inverted to f16 max (65504).
+
+Reproduce: the probes are temporary pages, not committed. The method above is enough
+to rebuild them. Drive `Upscaler` with `_rcasShader` set to `RCAS_SHADER` /
+`RCAS_PER_TAP_SHADER` / a main copy, `copyTextureToBuffer` the output, and decode the
+halves.
+
 ## Explicitly not planned (measured against)
 
 - Lanczos2/bicubic history filtering (+47% accumulate, no visible win).

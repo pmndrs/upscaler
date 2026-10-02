@@ -74,16 +74,19 @@ veloc ─┘  (dilate +      dilatedDepth   │        Lanczos2 upsample        
    reactive and shading-change aging, and the alpha resolve. Blending runs in
    invertible-tonemap space with a per-pixel age stored in history `.a`.
 6. **RCAS** (`rcas.ts`) sharpens the conditioned history and inverts the tonemap and
-   exposure once, writing caller-domain linear/HDR to the output. The inversion is
-   capped at linear RCAS's own maximum gain, so an isolated peak cannot become a
-   ~1000× firefly. With
+   exposure once, writing caller-domain linear/HDR to the output. The conditioned
+   range ends at linear infinity, so the inversion is capped at the lobe applied in
+   linear space against the darkest ring tap. That keeps an isolated peak from becoming
+   a ~1000× firefly, and keeps a converged HDR plateau edge near linear RCAS's overshoot
+   instead of ~2× (issue #50). The cap is never looser than linear RCAS's own maximum
+   gain. With
    `sharpness = 0`, **blit** (`blit.ts`) does the same resolve without sharpening.
 
 The spatial path is EASU (`easu.ts`) then RCAS/blit; the bilinear path is blit alone.
 On the spatial path RCAS conditions EASU's linear/HDR taps with the same invertible
 tonemap before sharpening, because FSR1's limiter assumes [0,1] and otherwise switches
 sharpening off on every edge that crosses 1.0. It then inverts once, anchored on the
-linear center and capped at linear RCAS's own maximum gain. That input has no
+linear center and under the same lobe cap, computed on the linear taps. That input has no
 pre-exposure bounding it, so a plain inversion would clip near 1000 and turn isolated
 peaks into fireflies.
 The divergences from FSR 3.1.5's own pass graph (the fused reconstruct, the fused
