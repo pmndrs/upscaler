@@ -176,10 +176,70 @@ export interface DispatchInputs {
      * equivalent to `1`.
      */
     preExposureTexture?: Texture;
+    /**
+     * **Experimental** (issue #7 research prototype, temporal path only;
+     * docs/research/GI-HISTORY-FUSION.md): hand the upscaler a noisy GI signal
+     * separately instead of compositing it into `color`. The upscaler then
+     * accumulates it in its own history, using its own motion and
+     * disocclusion, and composites `color·occlusion + albedo·signal` itself.
+     * `color` becomes the base (direct) lighting only. Absent (the default),
+     * nothing is allocated or dispatched and output is unchanged.
+     */
+    giFusion?: GiFusionInputs;
     /** Drop all history this frame (camera cut, teleport, resize). */
     reset?: boolean;
     /** Seconds since the previous frame. */
     deltaTime?: number;
+}
+
+/**
+ * **Experimental** inputs for {@link DispatchInputs.giFusion} (issue #7
+ * research prototype; the API may change or be removed). All textures are
+ * render resolution, linear, rendered under the same jittered camera as
+ * `color`. The composite is three's SSGI recipe:
+ * `color.rgb · occlusion + albedo.rgb · signal.rgb`.
+ */
+export interface GiFusionInputs {
+    /** Noisy indirect irradiance (rgb, pre-albedo), e.g. `SSGINode`'s GI. */
+    signal: Texture;
+    /** Diffuse albedo the signal is modulated by (rgb). */
+    albedo: Texture;
+    /** Optional ambient occlusion (red) that scales `color`. Omitted = 1. */
+    occlusion?: Texture;
+    /** Longest GI history in frames. Default 48. */
+    maxHistory?: number;
+    /** Floor of the fast moments' blend weight (SVGF's α). Default 0.2. */
+    momentsAlpha?: number;
+    /**
+     * Anti-lag box half-width, in standard deviations of the fast mean (see
+     * {@link antiLag}). Larger = steadier still images, slower response to
+     * lighting changes. Default 4.
+     */
+    clampGamma?: number;
+    /**
+     * Accumulate in invertible-tonemap space (firefly guard, as the color
+     * history does). Default true.
+     */
+    tonemap?: boolean;
+    /**
+     * Relative view-depth gap at which a sample counts as a different surface
+     * than the one its pixel's GI history was built on (a wire in front of a
+     * wall under jitter); such a sample neither updates nor reads the
+     * history. Requires the `depth` input. `0` disables the test. Default 0.03.
+     */
+    surfaceTolerance?: number;
+    /**
+     * How the anti-lag box around the fast mean is sized: `'standard-error'`
+     * (this frame's spatial σ scaled to the fast mean's standard error) or
+     * `'temporal'` (the fast window's own σ, which a lighting step inflates).
+     * Default `'standard-error'`.
+     */
+    antiLag?: 'standard-error' | 'temporal';
+    /**
+     * 3×3 block-mean anti-lag: rescale the history when the neighborhood's
+     * slow mean leaves the fast mean's (block) error bar. Default true.
+     */
+    blockAntiLag?: boolean;
 }
 
 /**

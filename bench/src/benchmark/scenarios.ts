@@ -130,6 +130,25 @@ function q14(frame: number): BenchmarkFrameState {
     return state(frame, [0, 2.8, 8.8], [0, 2.6, 0]);
 }
 
+/** Q20's lateral camera sweep: still, sweep x −2.4 → +2.4, still. */
+const Q20_SWEEP = { start: 120, end: 239, from: -2.4, to: 2.4 } as const;
+/** Q20's lighting step: the wire light drops to 35 % at this frame and holds. */
+const Q20_LIGHT_STEP = { frame: 330, scale: 0.35 } as const;
+
+function q20(frame: number): BenchmarkFrameState {
+    // Issue #7: Q14's SSGI wire room under camera motion. Still until 119 (a
+    // converged start), a constant-speed sideways sweep 120–239 that keeps
+    // the target fixed (wires parallax against the GI-lit walls, so their
+    // silhouettes leave disocclusion trails), then still again to re-converge,
+    // then a lighting step (330) that the GI history must follow without lag.
+    const { start, end, from, to } = Q20_SWEEP;
+    const u = Math.min(Math.max((frame - start) / (end - start), 0), 1);
+    return {
+        ...state(frame, [from + (to - from) * u, 2.8, 8.8], [0, 2.6, 0]),
+        wireLightScale: frame >= Q20_LIGHT_STEP.frame ? Q20_LIGHT_STEP.scale : 1,
+    };
+}
+
 /** Per-frame factor of Q15's ramps: ×4 over 69 frames ≈ 2.03 %/frame. */
 const Q15_RAMP_FRAMES = 69;
 
@@ -150,6 +169,18 @@ function q15(frame: number): BenchmarkFrameState {
         directionalIntensity = 2 * 4 ** ((frame - 240) / Q15_RAMP_FRAMES);
     return { ...state(frame), directionalIntensity };
 }
+
+/** Q14/Q20 effect recipes (see Q14's definition). */
+const WIRE_ROOM_SUBRUNS = [
+    'off',
+    'static',
+    'rotating',
+    'builtin',
+    'raw-static',
+    'raw-rotating',
+    'fused-static',
+    'fused-rotating',
+] as const;
 
 const SCENARIOS: Record<BenchmarkScenarioId, BenchmarkScenarioDefinition> = {
     Q0: {
@@ -395,8 +426,12 @@ const SCENARIOS: Record<BenchmarkScenarioId, BenchmarkScenarioDefinition> = {
         // SSGI static pattern + spatial-only recurrentDenoise (accumulate:
         // false) — the issue's configuration; `rotating` = the same with SSGI's
         // default 6-frame rotating pattern; `builtin` = static pattern +
-        // DenoiseNode (the 06/09 recipe). Capture-only: measure with
-        // measure-convergence.mjs (not part of the run-benchmark manifest).
+        // DenoiseNode (the 06/09 recipe). Issue #7 adds `raw-static` /
+        // `raw-rotating` (SSGI composited undenoised — the upscaler alone owns
+        // temporal) and `fused-static` / `fused-rotating` (the same undenoised
+        // SSGI handed to the experimental `giFusion` input instead of being
+        // composited). Capture-only: measure with measure-convergence.mjs /
+        // measure-gi-fusion.mjs (not part of the run-benchmark manifest).
         endFrame: 479,
         captures: ['0', '1', '23', 'P-1', 'P', '2*P-1', '119', '239', '479'],
         debugViews: [
@@ -412,7 +447,7 @@ const SCENARIOS: Record<BenchmarkScenarioId, BenchmarkScenarioDefinition> = {
             wire_lattice: [0.3, 0.1, 0.4, 0.4],
             wire_sphere: [0.2, 0.5, 0.25, 0.35],
         },
-        subruns: ['off', 'static', 'rotating', 'builtin'],
+        subruns: [...WIRE_ROOM_SUBRUNS],
         unsupported: null,
         frame: q14,
     },
@@ -433,6 +468,32 @@ const SCENARIOS: Record<BenchmarkScenarioId, BenchmarkScenarioDefinition> = {
         subruns: [],
         unsupported: null,
         frame: q15,
+    },
+    Q20: {
+        id: 'Q20',
+        name: 'ssgi-wires-camera-sweep',
+        // Issue #7: Q14's room and subruns under a sideways camera sweep
+        // (120–239), for ghost trails and disocclusion noise, then a wire-light
+        // step (330) for GI lag. Measure with `measure-gi-fusion.mjs motion`
+        // (held-state references).
+        endFrame: 419,
+        captures: ['0', '119', '150', '180', '210', '239', '240', '270', '300', '330', '345', '419'],
+        debugViews: [
+            'final',
+            'motion-vectors',
+            'disocclusion',
+            'accumulation-age',
+            'locks',
+            'shading-change',
+        ],
+        rois: {
+            full: [0, 0, 1, 1],
+            wire_lattice: [0.25, 0.1, 0.5, 0.4],
+            wire_sphere: [0.1, 0.45, 0.4, 0.45],
+        },
+        subruns: [...WIRE_ROOM_SUBRUNS],
+        unsupported: null,
+        frame: q20,
     },
 };
 

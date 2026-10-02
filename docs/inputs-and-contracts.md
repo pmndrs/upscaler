@@ -22,6 +22,7 @@ The **upscale ratio** is display / render, per axis.
 | `reactiveOpaqueColor` | render | opaque-only color, same domain as `color` | optional, temporal |
 | `exposureTexture` | any (1×1 typical) | red channel of texel (0, 0), any float format | optional, temporal |
 | `preExposureTexture` | any (1×1 typical) | red channel of texel (0, 0) | optional, temporal (raw `Upscaler` only) |
+| `giFusion` | render | **experimental**, see [below](#experimental-gi-fusion-gifusion) | optional, temporal (raw `Upscaler` only) |
 | `deltaTime` | n/a | seconds | auto-exposure adaptation |
 
 All inputs are ordinary three textures, typically render-target attachments. The
@@ -191,6 +192,27 @@ you already applied. Omitting it is equivalent to `1`.
 
 Don't pass a host pre-exposure as `exposureTexture`. The upscaler would divide it out
 at output and apply no history correction.
+
+## Experimental: GI fusion (`giFusion`)
+
+A research prototype for issue [#7](https://github.com/pmndrs/upscaler/issues/7), on
+the raw `Upscaler`'s temporal path only. It is not a supported contract; the API may
+change or disappear. Leave it unset and nothing is compiled, allocated or dispatched.
+With it set, `color` is the **base** lighting only (direct light, emissive, and so on),
+and `giFusion` carries the noisy GI separately:
+
+| Field | Resolution | Format |
+| --- | --- | --- |
+| `signal` | render | indirect irradiance in `.rgb`, linear, pre-albedo (e.g. `SSGINode`'s GI texture) |
+| `albedo` | render | diffuse albedo in `.rgb` |
+| `occlusion` | render | optional AO in `.r`; scales `color` |
+
+The upscaler accumulates the signal in its own history, using its motion vectors,
+disocclusion and a depth tag per surface. It then composites
+`color · occlusion + albedo · signal` into the color the rest of the temporal path
+consumes, which is three's SSGI composite. `depth` must be passed to the same
+dispatch. Design, measurements and the current recommendation (iterate, don't
+adopt) are in [GI history fusion](research/GI-HISTORY-FUSION.md).
 
 ## Output
 

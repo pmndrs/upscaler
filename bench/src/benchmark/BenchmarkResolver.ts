@@ -119,6 +119,14 @@ class BenchmarkResolverAdapter implements BenchmarkResolver {
             reactive: inputs.reactive as THREE.Texture | undefined,
             reactiveOpaqueColor: inputs.reactiveOpaqueColor as THREE.Texture | undefined,
             preExposureTexture: inputs.preExposureTexture as THREE.Texture | undefined,
+            giFusion: inputs.giFusion
+                ? {
+                      ...inputs.giFusion,
+                      signal: inputs.giFusion.signal as THREE.Texture,
+                      albedo: inputs.giFusion.albedo as THREE.Texture,
+                      occlusion: inputs.giFusion.occlusion as THREE.Texture | undefined,
+                  }
+                : undefined,
             deltaTime: inputs.deltaTime,
         };
         const dispatchCamera = camera as THREE.PerspectiveCamera;

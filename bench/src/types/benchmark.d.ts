@@ -26,7 +26,8 @@ declare type BenchmarkScenarioId =
     | 'Q12'
     | 'Q13'
     | 'Q14'
-    | 'Q15';
+    | 'Q15'
+    | 'Q20';
 declare type BenchmarkDebugView =
     | 'final'
     | 'motion-vectors'
@@ -90,6 +91,19 @@ declare interface BenchmarkResolverDispatch {
     reactiveOpaqueColor?: unknown;
     transparencyAndComposition?: unknown;
     preExposureTexture?: unknown;
+    /** Experimental GI history fusion inputs (issue #7, Q14/Q20 `fused-*`). */
+    giFusion?: {
+        signal: unknown;
+        albedo: unknown;
+        occlusion?: unknown;
+        maxHistory?: number;
+        momentsAlpha?: number;
+        clampGamma?: number;
+        tonemap?: boolean;
+        surfaceTolerance?: number;
+        antiLag?: 'standard-error' | 'temporal';
+        blockAntiLag?: boolean;
+    };
     deltaTime: number;
     frameTag: number;
 }
@@ -218,6 +232,8 @@ declare interface BenchmarkFrameState {
      * the auto-generator, and render the explicit coverage alongside it.
      */
     reactiveMerge?: boolean;
+    /** Q20: multiplier on the wire room's point light (default 1). */
+    wireLightScale?: number;
 }
 
 declare interface BenchmarkCaptureSettings {

@@ -121,8 +121,8 @@ const pipeline = scenario.unsupported
       );
 if (pipeline && (scenario.id === 'Q6' || scenario.id === 'Q7' || scenario.id === 'Q8'))
     pipeline.configureEffectScenario(scenario.id, config.subrun, bench.roomScene, camera);
-if (pipeline && scenario.id === 'Q14')
-    pipeline.configureEffectScenario('Q14', config.subrun, bench.wireRoomScene, camera);
+if (pipeline && (scenario.id === 'Q14' || scenario.id === 'Q20'))
+    pipeline.configureEffectScenario(scenario.id, config.subrun, bench.wireRoomScene, camera);
 // Q11 drives an app-baked pre-exposure through the scene color + resolver.
 if (pipeline && scenario.id === 'Q11') pipeline.enableHostPreExposureDrive();
 

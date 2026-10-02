@@ -36,6 +36,16 @@ import {
 import { DEBUG_SHADER } from './shaders/debug';
 import { EASU_SHADER } from './shaders/easu';
 import { GENERATE_REACTIVE_SHADER } from './shaders/generateReactive';
+import {
+    GI_FUSION_FLAG_OCCLUSION,
+    GI_FUSION_FLAG_RESET,
+    GI_FUSION_FLAG_BLOCK_ANTILAG,
+    GI_FUSION_FLAG_STDERR_BOX,
+    GI_FUSION_FLAG_SURFACE,
+    GI_FUSION_FLAG_TONEMAP,
+    GI_FUSION_PARAMS_SIZE,
+    GI_FUSION_SHADER,
+} from './shaders/giFusion';
 import { LUMINANCE_PYRAMID_SHADER } from './shaders/luminancePyramid';
 import { RCAS_SHADER } from './shaders/rcas';
 import { RECONSTRUCT_SHADER } from './shaders/reconstruct';
@@ -45,6 +55,7 @@ import {
     QualityMode,
     type UpscalerConfig,
     type DispatchInputs,
+    type GiFusionInputs,
     type GuideDispatchInputs,
     type RuntimeSettings,
     type TemporalGuides,
@@ -172,6 +183,20 @@ export class Upscaler {
     // Production shading-change detector state.
     private _shadingLumaHistory: [GPUTexture, GPUTexture] | null = null;
     private _shadingSignal: GPUTexture | null = null;
+
+    //* Experimental GI History Fusion (issue #7, docs/research/GI-HISTORY-FUSION.md)
+    // Everything here is created on the first dispatch that passes
+    // `giFusion` — with the option absent nothing is compiled, allocated or
+    // dispatched, so production output is untouched by construction.
+    private _giFusionPass: ComputePass | null = null;
+    private _giFusionParams: GPUBuffer | null = null;
+    private readonly _giFusionParamData = new ArrayBuffer(GI_FUSION_PARAMS_SIZE);
+    private _giHistory: [GPUTexture, GPUTexture] | null = null;
+    private _giMoments: [GPUTexture, GPUTexture] | null = null;
+    private _giSurface: [GPUTexture, GPUTexture] | null = null;
+    private _giComposite: GPUTexture | null = null;
+    // Whether last frame ran the fusion pass — its history is stale otherwise.
+    private _giFusedLastFrame = false;
 
     //* Published Guides (contract: docs/temporal-guides.md)
     // The production working set is allocated as three StorageTextures so the
@@ -585,6 +610,8 @@ export class Upscaler {
     /** Releases all GPU resources. */
     dispose(): void {
         this._destroyTextures();
+        this._giFusionParams?.destroy();
+        this._giFusionParams = null;
         this._constants?.dispose();
         this._timer?.dispose();
         this._initialized = false;
@@ -711,9 +738,15 @@ export class Upscaler {
     // exposure, shading change, accumulate, and the output pass.
     private _encodeLate(
         encoder: GPUCommandEncoder,
-        colorGPU: GPUTexture,
+        inputColorGPU: GPUTexture,
         inputs: DispatchInputs,
     ): void {
+        // Experimental GI fusion: from here on the pipeline consumes the
+        // fused composite in place of the caller's color.
+        const colorGPU = inputs.giFusion
+            ? this._encodeGiFusion(encoder, inputColorGPU, inputs.giFusion, inputs.depth)
+            : inputColorGPU;
+        this._giFusedLastFrame = inputs.giFusion !== undefined;
         const depthCur = this._dilatedDepth![this._depthIndex];
         const historyIn = this._history![this._historyIndex];
         this._latestHistoryWrite = 1 - this._historyIndex;
@@ -897,6 +930,100 @@ export class Upscaler {
                 locksOut.createView(),
             );
         }
+    }
+
+    // Experimental (issue #7): accumulates the caller's noisy GI signal in its
+    // own render-res history and returns the composite the rest of the late
+    // stage consumes. See shaders/giFusion.ts.
+    private _encodeGiFusion(
+        encoder: GPUCommandEncoder,
+        baseGPU: GPUTexture,
+        gi: GiFusionInputs,
+        depth: Texture | undefined,
+    ): GPUTexture {
+        if (!depth) {
+            throw new Error(
+                '@pmndrs/upscaler: giFusion needs the depth input on the late dispatch too ' +
+                    '(it tags GI history by surface).',
+            );
+        }
+        const rw = this._renderWidth;
+        const rh = this._renderHeight;
+        this._giFusionPass ??= new ComputePass(this._device, 'gi-fusion', GI_FUSION_SHADER);
+        this._giFusionParams ??= this._device.createBuffer({
+            label: 'upscale-gi-fusion-params',
+            size: GI_FUSION_PARAMS_SIZE,
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        });
+        let reset = !this._giFusedLastFrame;
+        if (!this._giHistory || !this._giMoments || !this._giSurface || !this._giComposite) {
+            this._giHistory = [
+                this._createTexture('gi-history-0', rw, rh, 'rgba16float'),
+                this._createTexture('gi-history-1', rw, rh, 'rgba16float'),
+            ];
+            this._giMoments = [
+                this._createTexture('gi-moments-0', rw, rh, 'rgba16float'),
+                this._createTexture('gi-moments-1', rw, rh, 'rgba16float'),
+            ];
+            this._giSurface = [
+                this._createTexture('gi-surface-0', rw, rh, 'r32float'),
+                this._createTexture('gi-surface-1', rw, rh, 'r32float'),
+            ];
+            this._giComposite = this._createTexture('gi-composite', rw, rh, 'rgba16float');
+            reset = true;
+        }
+
+        //* Pass-local parameters (layout: GiFusionParams in giFusion.ts)
+        const f32 = new Float32Array(this._giFusionParamData);
+        const u32 = new Uint32Array(this._giFusionParamData);
+        f32[0] = Math.max(1, gi.maxHistory ?? 48);
+        f32[1] = Math.min(1, Math.max(0, gi.momentsAlpha ?? 0.2));
+        f32[2] = Math.max(0, gi.clampGamma ?? 4);
+        f32[3] = 4; // shortHistory: spatial fallback fades out by 4 frames
+        f32[4] = 0.02; // depthSigma: relative depth tolerance of the 3×3
+        u32[5] =
+            (gi.occlusion ? GI_FUSION_FLAG_OCCLUSION : 0) |
+            (reset ? GI_FUSION_FLAG_RESET : 0) |
+            ((gi.tonemap ?? true) ? GI_FUSION_FLAG_TONEMAP : 0) |
+            ((gi.surfaceTolerance ?? 0.03) > 0 ? GI_FUSION_FLAG_SURFACE : 0) |
+            ((gi.antiLag ?? 'standard-error') === 'standard-error' ? GI_FUSION_FLAG_STDERR_BOX : 0) |
+            ((gi.blockAntiLag ?? true) ? GI_FUSION_FLAG_BLOCK_ANTILAG : 0);
+        f32[6] = Math.max(0, gi.surfaceTolerance ?? 0.03);
+        this._device.queue.writeBuffer(this._giFusionParams, 0, this._giFusionParamData);
+
+        const historyIn = this._historyIndex;
+        const historyOut = 1 - this._historyIndex;
+        const signalView = getGPUTexture(this._renderer, gi.signal).createView();
+        const depthGPU = getGPUTexture(this._renderer, depth);
+        const depthView = depthGPU.createView(
+            depthGPU.format.includes('stencil') ? { aspect: 'depth-only' } : undefined,
+        );
+        const bindGroup = this._giFusionPass.createBindGroup([
+            { buffer: this._constants.buffer },
+            signalView,
+            gi.occlusion ? getGPUTexture(this._renderer, gi.occlusion).createView() : signalView,
+            baseGPU.createView(),
+            getGPUTexture(this._renderer, gi.albedo).createView(),
+            this._dilatedMotion!.createView(),
+            this._masks!.createView(),
+            depthView,
+            this._giHistory[historyIn].createView(),
+            this._giMoments[historyIn].createView(),
+            this._linearSampler,
+            this._giHistory[historyOut].createView(),
+            this._giMoments[historyOut].createView(),
+            this._giComposite.createView(),
+            { buffer: this._giFusionParams },
+            this._giSurface[historyIn].createView(),
+            this._giSurface[historyOut].createView(),
+        ]);
+        const pass = encoder.beginComputePass({
+            label: 'upscale-gi-fusion',
+            timestampWrites: this._timer.passDescriptor('giFusion'),
+        });
+        this._giFusionPass.dispatch(pass, bindGroup, rw, rh);
+        pass.end();
+        return this._giComposite;
     }
 
     // See _encodeBlit for what `alpha` is bound to on each path.
@@ -1230,5 +1357,14 @@ export class Upscaler {
             this._shadingLumaHistory.forEach((texture) => texture.destroy());
             this._shadingLumaHistory = null;
         }
+        this._giHistory?.forEach((texture) => texture.destroy());
+        this._giMoments?.forEach((texture) => texture.destroy());
+        this._giSurface?.forEach((texture) => texture.destroy());
+        this._giComposite?.destroy();
+        this._giSurface = null;
+        this._giHistory = null;
+        this._giMoments = null;
+        this._giComposite = null;
+        this._giFusedLastFrame = false;
     }
 }
