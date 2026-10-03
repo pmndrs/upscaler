@@ -254,6 +254,56 @@ after the change, run:
 - a look at whether FSR 3.1.5's signed-difference pyramid has the same
   asymmetry.
 
+## 9. A variance clip whose epsilon guards the wrong side switches TAA off on achromatic pixels
+
+**Claim:** the common ray form of AABB clipping, `t = min(1, min_i(extent_i /
+max(|dir_i|, ε)))`, silently disables temporal accumulation wherever one box
+axis has zero extent *and* the history sits exactly on the centre along it.
+In YCoCg that is Co/Cg on any exactly achromatic 3×3 — black or empty
+backgrounds, white-on-black content, greyscale materials under white light:
+0/ε = 0 gives `t = 0`, so history is snapped to the box mean every frame
+however wide the luma box is. The output there is the current frame's 3×3
+average: no TAA, no reconstruction, and the per-phase jitter pattern shows
+through. Playdead's original puts ε on the extents (`v / (e + ε)`), which
+leaves a degenerate axis unconstrained; ours had it on the other side. No
+chromatic test scene exposes it, which is why it survived every earlier
+scenario here.
+
+Measured on Q17 (auto-exposure off): a 1.5 render-px white disc over black,
+sampled on every phase, flickered at 0.19 (temporal std / energy) against a
+clip-free accumulator's 0.01; with ε on the extents, 0.02. Sub-pixel emitters
+over black showed the raw input's on/off flicker (0.3 px: 1.97). The lighting
+and convergence reference metrics (Q1, Q12, Q9, Q15) move by under 0.1 %.
+
+The follow-on finding is the more general point: once the clip works on
+achromatic pixels, a sub-texel emitter **fades** there, as it already did over
+texture, because a miss phase's neighbourhood has σ = 0 and every protection
+built as a σ multiplier (locks, still-scene relax) is inert. Three mechanisms
+erase it independently: the clip, cross-frame-gather disocclusion and the
+block-mean shading detector. An additive miss-phase hold that fixes it is a
+switch-off ghost by construction, since a miss and a switch-off are identical
+on the frame they happen.
+
+**Evidence:** [`bench/docs/NEXT-STEPS.md`](../../bench/docs/NEXT-STEPS.md) §11 (the
+attribution table, the clip-fix and hold-candidate tables, regressions);
+scenario **Q17** `subpixel-emitter-retention` in
+[`bench/src/benchmark/scenarios.ts`](../../bench/src/benchmark/scenarios.ts);
+[`scripts/measure-emitter-retention.mjs`](../../scripts/measure-emitter-retention.mjs)
+(output-vs-input-coverage energy, switch-off ghost).
+`bench/results/raw/emitters/*` is local-only. Regenerate with
+`node scripts/measure-emitter-retention.mjs --label <name> --settings '{"autoExposure":false}'`;
+for the before column, set `clipToAABB` in `src/shaders/accumulate.ts` back to
+`extents / max(abs(dir), vec3f(1.0e-6))`.
+
+**Still needs:**
+- a survey of public TAA/TAAU implementations for the same ε placement;
+- a greyscale *lit* scene (white materials, white lights) to show the effect
+  beyond black backgrounds;
+- the hold re-measured once the disocclusion (#54) and shading-change (#22)
+  false positives are gone, to separate what is inherent from what is
+  pipeline-specific;
+- a second device and ratios other than 2.
+
 ## 3. Source-faithful pass graphs measured against fused re-derivations
 
 **Claim:** porting FSR 3.1.5's pass graph faithfully to WebGPU costs

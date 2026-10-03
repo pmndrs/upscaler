@@ -153,9 +153,15 @@ fn sampleHistoryCatmullRom(uv : vec2f) -> vec4f {
 
 // Clips a color toward the AABB center (Playdead's variance clipping) —
 // gentler than a hard clamp, no hue snapping at box corners.
+// The epsilon sits on the extents too (Playdead's form): an axis with zero
+// extent AND zero offset must not constrain the clip. Without it a perfectly
+// achromatic 3×3 (Co/Cg variance exactly 0 — black backgrounds, empty canvas,
+// greyscale content) gave t = 0/1e-6 = 0 on the chroma axes, snapping history
+// to the box mean every frame however wide the luma box was: no accumulation
+// at all there, just the current frame's 3×3 average (issue #51).
 fn clipToAABB(center : vec3f, extents : vec3f, color : vec3f) -> vec3f {
     let dir = color - center;
-    let scale = extents / max(abs(dir), vec3f(1.0e-6));
+    let scale = (extents + 1.0e-6) / max(abs(dir), vec3f(1.0e-6));
     let t = min(1.0, min(scale.x, min(scale.y, scale.z)));
     return center + dir * t;
 }

@@ -45,7 +45,7 @@ reported +2.6% for a change that an interleaved run measured at +5.1%.)
 | **block / repetition** | One full A-B-B-A pattern. `--blocks 4` runs four of them. |
 | **warmup** | Frames rendered and thrown away before timing starts, so shader compilation and caches are not in the sample. |
 | **samples** | Timed frames per leg. More samples = tighter medians, longer runs. |
-| **scenario** | A scripted camera/scene animation, `Q0`–`Q16`. See the catalogue below. |
+| **scenario** | A scripted camera/scene animation, `Q0`–`Q17`. See the catalogue below. |
 | **noise floor** | How much the harness disagrees with *itself*. The bar your delta has to clear. |
 
 ---
@@ -161,7 +161,7 @@ work did not change, the rest of the frame got cheaper.
 
 ---
 
-## Scenarios (Q0–Q16)
+## Scenarios (Q0–Q17)
 
 Scripted camera and scene animations, defined in
 `bench/src/benchmark/scenarios.ts`. Performance runs use the default; capture
@@ -186,6 +186,7 @@ runs select them with `--scenarios`.
 | Q14 | `ssgi-thin-feature-locks` | Issue #17: still camera into an SSGI-lit box holding 1px wireframe meshes. Subruns `off` (no SSGI, clean control) / `static` (SSGI static pattern + spatial `recurrentDenoise`, the issue's config) / `rotating` (SSGI's default rotating pattern) / `builtin` (static pattern + `DenoiseNode`, the 06/09 recipe). Measure with `measure-convergence.mjs --scenario Q14 --subrun <s> --pairs 40`. |
 | Q15 | `sub-detector-lighting-drift` | Still camera, sun ramps 8 → 2 (120–188) and back 2 → 8 (240–308), exponentially at ~2 %/frame: half the shading detector's flattest floor, so the detector stays silent and only the variance clip limits lag. Measure with `scripts/measure-drift-lag.mjs`. |
 | Q16 | `sparse-wires-empty-background` | Issue #22: fans of sub-texel bars (about 0.5–1 render px at ratio 2, 0.35–0.7 at ratio 3) over an opaque black background, still camera, plus a solid knot as a control. The jitter phase decides whether a bar lands in a texel, so block means swing although nothing changed: the shading-change view must stay black until the fans' light drops to a quarter at frame 300. Measure with `measure-convergence.mjs --shading-frames 32` (and `measure-drift-lag.mjs --frames 296:356:2` for the step). |
+| Q17 | `subpixel-emitter-retention` | Issue #51: still camera onto unlit discs of 0.3–1.5 render-px diameter and 0.5 px lines, over black and over a textured backdrop, each floating (depth edge) or as a decal (no depth edge). Measure with `scripts/measure-emitter-retention.mjs` (per-emitter retention vs input coverage, flicker, switch-off ghost) and `measure-convergence.mjs --scenario Q17`. |
 
 ---
 

@@ -84,8 +84,11 @@ const BASELINE_FINGERPRINTS: Record<string, string> = {
     // 2026-08-25: alpha resolved alongside color into the locks buffer's .a;
     // 2026-10-02: the alpha clamp takes the color path's still-scene relax;
     // 2026-10-02: alphaRelax guarded against STILL_CLAMP_RELAX = 0 (NEXT-STEPS
-    // §8) — GPU captures byte-identical at the shipped 8.
-    accumulate: '63dbdfad',
+    // §8) — GPU captures byte-identical at the shipped 8;
+    // 2026-10-03: clipToAABB's epsilon moved onto the extents too, so a
+    // zero-extent (achromatic) axis no longer collapses the clip (issue #51,
+    // NEXT-STEPS §11).
+    accumulate: '76b5017b',
     luminancePyramid: 'b74eee0d',
     // Updated 2026-07-22: reactive merge-not-overwrite (guides spec M3) — the
     // generator max-merges an incoming mask instead of being suppressed by it.
@@ -338,6 +341,16 @@ describe('alpha passthrough is unconditional', () => {
         expect(ACCUMULATE_SHADER).toContain(
             'textureStore(historyOut, gid.xy, vec4f(result, newCount / C.maxAccumulation));',
         );
+    });
+
+    it('lets a zero-extent axis leave the variance clip unconstrained', () => {
+        // Issue #51: with the epsilon only on |dir|, an axis whose extent AND
+        // offset are both 0 (Co/Cg in any exactly achromatic 3×3) gave
+        // scale = 0 / 1e-6 = 0, snapping history to the box mean every frame.
+        expect(ACCUMULATE_SHADER).toContain(
+            'let scale = (extents + 1.0e-6) / max(abs(dir), vec3f(1.0e-6));',
+        );
+        expect(ACCUMULATE_SHADER).not.toContain('let scale = extents / max(abs(dir)');
     });
 
     it('relaxes the alpha clamp on the same still-scene signal as the color box', () => {

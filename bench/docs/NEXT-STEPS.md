@@ -893,6 +893,195 @@ node scripts/measure-convergence.mjs --scenario Q1 --label key04 \
 Artifacts land under `bench/results/raw/exposure-ceiling/` and
 `bench/results/raw/convergence/` (git-ignored).
 
+## 11. Sub-pixel emitters under the variance clip — one bug FIXED, the drop-out MEASURED (2026-10-03, issue #51)
+
+Issue [#51](https://github.com/pmndrs/upscaler/issues/51): an emitter smaller than one
+render pixel rasterizes only on the jitter phases whose sample lands on it. On every
+other phase its 3×3 neighbourhood holds no trace of it, so the history is pulled toward
+the background and the emitter flickers or fades instead of converging to its coverage.
+
+**Repro: new bench scenario Q17 `subpixel-emitter-retention`.** Still camera, square-on
+to a field of unlit discs (constant radiance 1 and 4) of 0.3 / 0.5 / 0.7 / 1.0 / 1.5
+render-px diameter at golden-ratio sub-pixel offsets, plus two 0.5 px lines per block
+for a points-vs-lines comparison. There are four blocks:
+- left over an empty **black** background, right over a low-contrast **textured** backdrop;
+- top **floating** (the background is far behind, so a miss phase is also a depth edge),
+  bottom **decal** (a backdrop plane 0.002 behind the discs, no depth edge — like a glint or
+  a light painted on a surface).
+
+New meter `scripts/measure-emitter-retention.mjs` reads back, per frame, the upscaler
+output (display res, linear) and the jittered input (render res, linear). For each
+emitter window it integrates luma energy minus an emitters-hidden run. The reference is
+the input itself: mean input energy × the display/render area ratio is what an ideal
+accumulator converges to. It reports `retention` (output / reference; 1 = converged to
+coverage), `flicker` (temporal std / reference), hit rate, lock / disocclusion /
+shading-change activity, and a **switch-off ghost**: the emitters are hidden after the
+measured frames and it counts frames until the output stays under 10 % of its lit level.
+
+Settings: ratio 2, 1280×720, settle 180, 64 frames (two jitter periods), Apple Metal-3,
+headless Chrome over CDP, run from a git worktree (no timing here). Auto-exposure is
+**off** for the attribution (`--settings '{"autoExposure":false}'`): with it on, the
+mostly-black frame pins exposure at `EXPOSURE_MAX` and every emitter reads ~2 % retention
+whatever else changes — that is [#49](https://github.com/pmndrs/upscaler/issues/49)'s
+saturation, and it masks everything below. Radiance-1 rows only below; radiance 4 behaves
+the same at lower retention (the invertible tonemap averages in conditioned space, an
+energy bias by design that this item does not touch). Even the ideal accumulator keeps only
+~0.5–0.6 of a radiance-1 sub-pixel emitter's linear energy for the same reason, so read
+retention against the "ideal" row, not against 1.
+
+**Attribution (floating emitters, AE off).** Each mechanism was switched off locally in
+`accumulate.ts` (clip: no `clipToAABB`; disocclusion: the mask read as 0) or by setting
+(`detectShadingChanges: false`). Retention / flicker:
+
+| variant | black 0.5 px | black 1 px | black line | textured 0.5 px | textured 1 px | textured line |
+| --- | --- | --- | --- | --- | --- | --- |
+| production | 0.54 / 1.13 | 0.53 / 0.27 | 0.63 / 0.63 | 0.14 / 0.14 | 0.23 / 0.11 | 0.20 / 0.19 |
+| clip only (no disocclusion, no shading change) | 0.53 / 1.09 | 0.53 / 0.27 | 0.60 / 0.60 | 0.46 / 0.06 | 0.35 / 0.03 | 0.26 / 0.03 |
+| disocclusion only (no clip, no shading change) | 0.22 / 0.19 | 0.39 / 0.11 | 0.34 / 0.18 | 0.26 / 0.15 | 0.42 / 0.09 | 0.40 / 0.16 |
+| ideal (none of the three) | 0.52 / 0.06 | 0.62 / 0.02 | 0.62 / 0.03 | 0.48 / 0.06 | 0.59 / 0.02 | 0.64 / 0.03 |
+
+Reading it:
+
+- **Three mechanisms, each sufficient on its own over black.** The variance clip, the
+  disocclusion mask and the shading-change detector each erase a sub-pixel emitter's
+  history on miss phases; removing any one leaves the others to do it.
+- **Disocclusion is the largest single fader for floating emitters.** It fires on 7–34 %
+  of frames — exactly the hit→miss transitions — because the reconstruct pass compares
+  against the *previous frame's* dilated depth, where the emitter's depth still sits. It
+  resets age, kills the lock and zeroes the still relax. Alone it costs 30–60 % of the
+  ideal retention. Decal emitters (no depth edge) show 0 % disocclusion. This is the
+  cross-frame-gather divergence from FSR's same-frame scatter (CLAUDE.md, "depth separation"
+  landmine), filed as [#54](https://github.com/pmndrs/upscaler/issues/54) for
+  `reconstruct.ts`; the same dashes show on #22's thin bars.
+- **Shading change fires on 12–65 % of frames over black** (block means swing with the
+  jitter phase) — [#22](https://github.com/pmndrs/upscaler/issues/22). Over texture it
+  stays under 17 % on the discs.
+- **Over texture with no depth edge (decal), the clip is the binding mechanism.**
+  Production retention there is 0.17–0.23 against an ideal of ~0.5–0.6.
+- **Locks do not engage on points.** Lock life averages 0.04 / 0.10 / 0.23 on 0.3 / 0.5 /
+  0.7 px discs and 0.14 on a black-background line (a 1.5 px disc, hit every phase, holds
+  1.0). Two reasons, both in `accumulate.ts`: the lock's break term
+  (`lockShading`, |curY − lockedLuma| against the 3×3 contrast) fires on every miss
+  phase, because curY is then the background and over black contrast is 0; and even a
+  live lock cannot protect, because its widening multiplies σ, which is exactly 0 on a
+  flat miss neighbourhood. `STILL_CLAMP_RELAX` is inert for the same reason.
+
+**And a separate bug: over black, there was no accumulation at all.** In the production row
+the black-background emitters show the *raw* input's mean and flicker (0.3 px flicker 1.97
+= on/off), and even the 1.5 px disc that is hit every phase flickers at 0.19 against the
+ideal's 0.01. `clipToAABB` divided `extents / max(|dir|, 1e-6)`. On an axis where both are
+exactly 0 — Co and Cg in any exactly achromatic 3×3: black or empty backgrounds,
+white-on-black content, greyscale materials under white light — that is 0/1e-6 = 0, so
+`t = 0` and history snapped to the box mean on every frame however wide the luma box was.
+The output there was the current frame's 3×3 average. **Fixed** by putting the epsilon on
+the extents too (Playdead's form): `(extents + 1e-6) / max(|dir|, 1e-6)`.
+
+| Q17, AE off (retention / flicker) | black decal 0.5 px | black decal 1 px | black decal 1.5 px | black decal line | textured decal 1 px |
+| --- | --- | --- | --- | --- | --- |
+| before | 0.53 / 1.10 | 0.51 / 0.26 | 0.52 / 0.19 | 0.61 / 0.61 | 0.23 / 0.07 |
+| **clip fix (shipped)** | **0.05 / 0.12** | **0.17 / 0.11** | **0.74 / 0.02** | **0.14 / 0.15** | **0.23 / 0.07** |
+
+The trade is honest and deliberate: a resolved feature over black now accumulates
+(1.5 px flicker 0.19 → 0.02), and sub-pixel emitters and lines over black stop flickering
+at the raw on/off rate but **fade** instead, exactly as they already did over any
+chromatic background (compare the unchanged textured column). The fade is the
+drop-out #51 describes, now uniform across backgrounds rather than hidden by a bug.
+
+No regression elsewhere, measured with the canonical capture settings unless noted:
+- Q1 0.1148 / 0.0267 → 0.1144 / 0.0267 (consecutive / phase-locked, 40 pairs);
+- Q12 0.0255 / 0.0300 → 0.0255 / 0.0301;
+- Q15 lag (AE off) 9.44 / 8.27 → 9.45 / 8.28 frames, peaks unchanged to 0.01;
+- Q9 (AE off) integrated error after the steps and over the ramp within 0.05 %
+  (the drift-lag meter's held-light reference).
+
+Captures are not byte-identical: Q3/Q4/Q9/Q15 differ on 0.1–2 % of pixels (≤ 0.35 mean
+|Δ| on 0–255), as low-amplitude speckle along locked edges. That is divergence through the
+lock thresholds, not a quality shift: the reference-error metrics above do not move. Q3's
+disocclusion view is byte-identical. The frozen candidate snapshot
+(`bench/src/candidates/shaders/candidateFilters.ts`) carries the same clip and was
+deliberately left as is.
+
+**Measured and not shipped: a miss-phase lock hold.** The obvious cure for the fade, built
+and measured in `accumulate.ts`:
+1. break a lock on a luma change only while its feature is present (an absent feature
+   decays at `LOCK_DECAY`);
+2. while a live lock's feature is absent on a still pixel, keep its history unrectified,
+   additively (`mix(clipped, history, hold)`), not as another σ multiplier;
+3. hold the alpha with it.
+
+On top of the clip fix it does what it should where the clip binds (AE off):
+
+| hold candidate (retention / flicker / switch-off ghost frames) | black decal 0.5 px | black decal 1 px | black decal line | textured decal 0.5 px | textured decal 1 px | textured decal line |
+| --- | --- | --- | --- | --- | --- | --- |
+| clip fix only | 0.05 / 0.12 / 0 | 0.17 / 0.11 / 0 | 0.14 / 0.15 / 0 | 0.17 / 0.08 / 45 | 0.23 / 0.07 / 33 | 0.16 / 0.15 / 2 |
+| + hold | 0.20 / 0.08 / 6 | 0.57 / 0.04 / 10 | 0.37 / 0.09 / 11 | 0.32 / 0.06 / 34 | 0.60 / 0.02 / 25 | 0.40 / 0.09 / 16 |
+
+Lock life on 0.5 / 1 px discs rises from 0.10 / 0.67 to 0.68 / 0.98. Q1 (0.114 / 0.027)
+and Q12 are unchanged. It is not shipped, for three reasons:
+- **It is a ghost by construction.** A miss phase and a switched-off emitter look the
+  same on the frame they happen; only waiting tells them apart. A mature lock now holds
+  ~9 frames (`LOCK_DECAY` 0.08 down to a 0.3 hold floor) before releasing, so a
+  resolved or line feature that switches off lingers 10–17 frames, against 0–2 before.
+  Gating the hold on the shading detector cannot help: over black it false-fires on
+  the emitters themselves (12–65 %, #22) and erases the gain, and over texture it does
+  not reliably fire on a sub-pixel switch-off (the ghost stays 16–33 frames).
+- **It stipples Q1.** The sub-pixel slivers of floor between overlapping fence pickets are
+  sub-pixel features too. Locks form on them irregularly along their length, so the hold
+  draws them as dotted red/white speckle where both the shipped output and a clip-free
+  accumulator show a clean picket. A gate on the feature's isolation from its miss
+  neighbourhood (|lockedLuma − mean| / 3×3 range) did not separate them: on a miss phase
+  the sliver also sits on a flat picket face.
+- **It does nothing for the common floating case** until #54 lands: disocclusion kills the
+  lock on every hit→miss transition. Over black, #22 has the same effect.
+
+Q9 (AE off) with the hold: integrated error after the step at 60 rises 2 %, after 180 rises
+5 % on the lit knots. The decay curve is uniformly higher, with no new trail. Q15 lag rises
+under 1 %.
+
+**Re-measured after #52 (§9) and #53 (§10) landed** — the clip fix rebased onto both,
+same settings. #52's two-sided `cv` floor took shading change on the emitters to 0 %
+of frames everywhere (black included). #53's `EXPOSURE_MAX` 8 lifted the 2 % ceiling, but
+auto-exposure still pins at the new cap on this mostly-black frame, so a radiance-1
+emitter conditions to 8 and the invertible tonemap's averaging bias still dominates:
+
+| Q17, rebased (retention / flicker) | black decal 0.5 px | black decal 1 px | black decal 1.5 px | black decal line | textured decal 1 px | black floating 0.5 px |
+| --- | --- | --- | --- | --- | --- | --- |
+| AE off | 0.02 / 0.05 | 0.06 / 0.05 | 0.76 / 0.01 | 0.03 / 0.04 | 0.28 / 0.04 | 0.08 / 0.19 |
+| **AE on (canonical)** | **0.005 / 0.01** | **0.01 / 0.01** | **0.28 / 0.005** | **0.007 / 0.008** | **0.12 / 0.02** | **0.02 / 0.04** |
+
+With #52's false fires gone, black-background sub-pixel retention drops further (decal
+0.5 px 0.05 → 0.02, AE off): the false fires had been aging history, which raised the
+blend weight on hit frames and so let more of each hit through. Over texture it rises
+(decal 1 px 0.23 → 0.28). What is left is the clip on the miss phase plus #54's
+disocclusion on floating emitters, so the hold below is now the binding question. With AE on, the
+resolved 1.5 px disc reads 0.28 against 0.76 with AE off; that gap is conditioning, not
+history loss (flicker is 0.005).
+
+**Decision.** Ship the clip fix: it is a real bug, it costs nothing, and it is neutral on
+every lighting and convergence metric. Record the hold as the next candidate, to be
+re-measured after [#54](https://github.com/pmndrs/upscaler/issues/54) (reconstruct
+disocclusion on sub-pixel depth) lands. [#22](https://github.com/pmndrs/upscaler/issues/22)'s
+shading-change false positives, the other independent eraser, are gone since #52. When it comes back it needs two answers: a lock-formation rule
+that is spatially consistent along sub-pixel slivers (or a hold limited to genuinely
+isolated points), and an explicit ghost budget. A hold that bridges a full jitter period
+(32 frames at ratio 2) would cover the sparsest emitters (a 0.3 px disc averages ~13
+frames between hits) at a 25–30-frame switch-off ghost.
+
+Reproduce (bench on `--url`, defaults to 5199; edit `accumulate.ts` locally for the
+attribution variants):
+
+```bash
+node scripts/measure-emitter-retention.mjs --label base-noae --settings '{"autoExposure":false}'
+node scripts/measure-emitter-retention.mjs --label base          # canonical: #49 dominates
+node scripts/measure-convergence.mjs --scenario Q17 --ratio 2 --pairs 40 \
+  --views final,disocclusion,locks,accumulation-age,shading-change
+node scripts/measure-drift-lag.mjs --scenario Q15 --frames 116:379:2 --settings '{"autoExposure":false}'
+node scripts/measure-drift-lag.mjs --scenario Q9 --frames 56:239:2 --settings '{"autoExposure":false}'
+```
+
+Artifacts land under `bench/results/raw/emitters/` (summary.json, plus series.json with one
+raw per-frame series per group) and `bench/results/raw/convergence/` (git-ignored).
+
 ## Explicitly not planned (measured against)
 
 - Lanczos2/bicubic history filtering (+47% accumulate, no visible win).

@@ -27,7 +27,8 @@ declare type BenchmarkScenarioId =
     | 'Q13'
     | 'Q14'
     | 'Q15'
-    | 'Q16';
+    | 'Q16'
+    | 'Q17';
 declare type BenchmarkDebugView =
     | 'final'
     | 'motion-vectors'
@@ -213,7 +214,7 @@ declare interface BenchmarkFrameState {
     /** App-baked exposure factor driven into the scene color + resolver (Q11). */
     hostPreExposure?: number;
     /** Scene rendered as the upscaler input; defaults to the main torture scene. */
-    scene?: 'main' | 'cornell' | 'sparse-wires';
+    scene?: 'main' | 'cornell' | 'sparse-wires' | 'emitters';
     /**
      * Q13: show the merged-reactive panels, render the opaque-only color for
      * the auto-generator, and render the explicit coverage alongside it.

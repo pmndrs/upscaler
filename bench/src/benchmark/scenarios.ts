@@ -164,6 +164,16 @@ function q16(frame: number): BenchmarkFrameState {
     return { ...state(frame, [0, 2.6, 8.8], [0, 2.6, 0]), scene: 'sparse-wires', directionalIntensity };
 }
 
+/** Q17: camera distance to the emitter plane (BenchScene sizes the emitters from it). */
+export const EMITTER_DISTANCE = 10;
+
+function q17(frame: number): BenchmarkFrameState {
+    // Issue #51: still camera square-on to the sub-pixel emitter field. The
+    // only per-frame variation is the upscaler's jitter, which decides on
+    // which phases each emitter (smaller than one render pixel) rasterizes.
+    return { ...state(frame, [0, 0, EMITTER_DISTANCE], [0, 0, 0]), scene: 'emitters' };
+}
+
 const SCENARIOS: Record<BenchmarkScenarioId, BenchmarkScenarioDefinition> = {
     Q0: {
         id: 'Q0',
@@ -462,6 +472,31 @@ const SCENARIOS: Record<BenchmarkScenarioId, BenchmarkScenarioDefinition> = {
         subruns: [],
         unsupported: null,
         frame: q16,
+    },
+    Q17: {
+        id: 'Q17',
+        name: 'subpixel-emitter-retention',
+        // Capture-only (like Q14): measure with measure-emitter-retention.mjs and
+        // measure-convergence.mjs (NEXT-STEPS §11).
+        endFrame: 479,
+        captures: ['0', '1', '23', 'P-1', 'P', '2*P-1', '119', '239', '479'],
+        debugViews: [
+            'final',
+            'motion-vectors',
+            'disocclusion',
+            'accumulation-age',
+            'locks',
+            'exposure',
+            'shading-change',
+        ],
+        rois: {
+            full: [0, 0, 1, 1],
+            black_emitters: [0.1, 0.3, 0.4, 0.4],
+            textured_emitters: [0.5, 0.3, 0.4, 0.4],
+        },
+        subruns: [],
+        unsupported: null,
+        frame: q17,
     },
 };
 

@@ -1,5 +1,7 @@
 import * as THREE from 'three/webgpu';
 
+import { EMITTER_DISTANCE } from './benchmark/scenarios';
+
 /**
  * The bench scene — deliberately full of upscaler torture tests:
  * - a thin-line grid floor (sub-pixel detail, shimmer magnet)
@@ -15,6 +17,8 @@ export interface BenchScene {
     wireRoomScene: THREE.Scene;
     /** Q16: sub-texel full-contrast bars over an empty black background (issue #22). */
     sparseWireScene: THREE.Scene;
+    /** Q17: isolated sub-pixel emitters over black and a textured backdrop (issue #51). */
+    emitterScene: THREE.Scene;
     reactiveScene: THREE.Scene;
     /**
      * Q13 transparents the auto-generator must see: hidden while the
@@ -28,6 +32,17 @@ export interface BenchScene {
     /** Recreates all seeded Q5 particle constants. */
     resetDeterministicState(): void;
 }
+
+/** Q17 emitter diameters per row, in render pixels at ratio 2. */
+const EMITTER_DIAMETERS = [0.3, 0.5, 0.7, 1.0, 1.5] as const;
+/** Q17 linear radiance: an LDR and an HDR group per row (left / right columns). */
+const EMITTER_RADIANCE = [1, 4] as const;
+const EMITTER_COLUMNS = 16;
+/** Render pixels between emitters, and from the centre line to the first column. */
+const EMITTER_SPACING = 12;
+const EMITTER_MARGIN = 20;
+/** Q17 block centres, render px above/below the axis (floating top, decal bottom). */
+const EMITTER_BLOCK_Y = 90;
 
 /** Builds the checkerboard+grid floor texture on a canvas (no asset deps). */
 function createGridTexture(): THREE.CanvasTexture {
@@ -308,6 +323,107 @@ export function createBenchScene(): BenchScene {
     sparseKnot.rotation.set(0.6, 0.9, 0);
     sparseWireScene.add(sparseKnot);
 
+    //* Sub-Pixel Emitter Field (Q17) ========================================
+    // Issue #51's repro: emitters smaller than one render pixel only rasterize
+    // on the jitter phases whose sample lands on them, so on every other phase
+    // the 3×3 neighbourhood holds no trace of them. Unlit discs (constant
+    // radiance) on a grid of render-pixel diameters, each at a different
+    // sub-pixel offset so coverage varies, plus two 0.5 px lines per block (the
+    // thin-feature case locks were tuned on) for a points-vs-lines comparison.
+    // Four blocks: left = empty black background (σ = 0 on a miss, and an
+    // achromatic neighbourhood), right = a low-contrast textured backdrop;
+    // top = FLOATING (the background is far behind, so a miss phase is also a
+    // depth discontinuity the reconstruct pass reads as disocclusion), bottom
+    // = DECAL (a backdrop plane just behind the discs, no depth edge — like a
+    // texture-space glint or a light painted on a surface). Spacing is 12
+    // render px so no emitter's Lanczos/3×3 footprint touches another's. The
+    // camera (scenario q17) sits at z = EMITTER_DISTANCE on the axis; fov 50 →
+    // one render pixel is 2·d·tan(25°)/360 world units at ratio 2.
+    const emitterScene = new THREE.Scene();
+    emitterScene.background = new THREE.Color(0x000000);
+    const renderPixel = (2 * EMITTER_DISTANCE * Math.tan((25 * Math.PI) / 180)) / 360;
+    const emitterGeometry = new THREE.CircleGeometry(0.5, 24);
+    const emitterMaterials = EMITTER_RADIANCE.map(
+        (radiance) =>
+            new THREE.MeshBasicMaterial({ color: new THREE.Color(radiance, radiance, radiance) }),
+    );
+    // Deterministic sub-pixel offsets (golden-ratio sequences) so no two
+    // emitters in a block share a coverage pattern.
+    const fract = (value: number) => value - Math.floor(value);
+    const rows = EMITTER_DIAMETERS.length + 2;
+    const blockWidth = (EMITTER_COLUMNS - 1) * EMITTER_SPACING;
+    for (const side of [-1, 1]) {
+        for (const centreY of [EMITTER_BLOCK_Y, -EMITTER_BLOCK_Y]) {
+            const top = centreY + ((rows - 1) / 2) * EMITTER_SPACING;
+            for (let row = 0; row < EMITTER_DIAMETERS.length; row++) {
+                for (let column = 0; column < EMITTER_COLUMNS; column++) {
+                    const index = row * EMITTER_COLUMNS + column;
+                    const disc = new THREE.Mesh(
+                        emitterGeometry,
+                        emitterMaterials[column < EMITTER_COLUMNS / 2 ? 0 : 1],
+                    );
+                    const x = side * (EMITTER_MARGIN + column * EMITTER_SPACING) + fract(index * 0.618034);
+                    const y = top - row * EMITTER_SPACING + fract(index * 0.754878);
+                    disc.position.set(x * renderPixel, y * renderPixel, 0);
+                    disc.scale.setScalar(EMITTER_DIAMETERS[row] * renderPixel);
+                    emitterScene.add(disc);
+                }
+            }
+            // Two horizontal sub-texel lines (0.5 render px thick), one per radiance.
+            for (let line = 0; line < 2; line++) {
+                const bar = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), emitterMaterials[line]);
+                bar.scale.set(blockWidth * renderPixel, 0.5 * renderPixel, 1);
+                bar.position.set(
+                    side * (EMITTER_MARGIN + blockWidth / 2) * renderPixel,
+                    (top - (EMITTER_DIAMETERS.length + line) * EMITTER_SPACING + 0.37) * renderPixel,
+                    0,
+                );
+                emitterScene.add(bar);
+            }
+        }
+    }
+    // Right-half backdrop texture: fine, low-contrast value noise (~3 render px
+    // per texel), so a miss phase sees a real (small) σ instead of 0.
+    const backdropSize = 256;
+    const backdropCanvas = document.createElement('canvas');
+    backdropCanvas.width = backdropSize;
+    backdropCanvas.height = backdropSize;
+    const backdropContext = backdropCanvas.getContext('2d')!;
+    const backdropImage = backdropContext.createImageData(backdropSize, backdropSize);
+    let backdropSeed = 0x51c0ffee;
+    for (let p = 0; p < backdropSize * backdropSize; p++) {
+        backdropSeed = (backdropSeed ^ ((backdropSeed << 13) >>> 0)) >>> 0;
+        backdropSeed = (backdropSeed ^ (backdropSeed >>> 17)) >>> 0;
+        backdropSeed = (backdropSeed ^ ((backdropSeed << 5) >>> 0)) >>> 0;
+        const value = 70 + Math.floor((backdropSeed / 4294967296) * 40);
+        backdropImage.data.set([value, value * 0.95, value * 0.9, 255], p * 4);
+    }
+    backdropContext.putImageData(backdropImage, 0, 0);
+    const backdropTexture = new THREE.CanvasTexture(backdropCanvas);
+    backdropTexture.colorSpace = THREE.SRGBColorSpace;
+    backdropTexture.magFilter = THREE.NearestFilter;
+    const halfWidth = 340 * renderPixel;
+    const halfHeight = 190 * renderPixel;
+    const backdrop = (texture: THREE.Texture | null, x: number, y: number, z: number) => {
+        const plane = new THREE.Mesh(
+            new THREE.PlaneGeometry(halfWidth, halfHeight),
+            new THREE.MeshBasicMaterial(texture ? { map: texture } : { color: 0x000000 }),
+        );
+        if (texture) {
+            texture.repeat.set(halfWidth / (backdropSize * 3 * renderPixel), halfHeight / (backdropSize * 3 * renderPixel));
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+        }
+        plane.position.set(x, y, z);
+        emitterScene.add(plane);
+    };
+    // Textured: floating (0.5 behind) top-right, decal (just behind) bottom-right.
+    // Black: floating = nothing behind at all; decal = a black plane just behind.
+    const decalOffset = -0.002;
+    backdrop(backdropTexture, halfWidth / 2 + 2 * renderPixel, halfHeight / 2, -0.5);
+    backdrop(backdropTexture, halfWidth / 2 + 2 * renderPixel, -halfHeight / 2, decalOffset);
+    backdrop(null, -halfWidth / 2 - 2 * renderPixel, -halfHeight / 2, decalOffset);
+
     //* Floor
     const floor = new THREE.Mesh(
         new THREE.PlaneGeometry(120, 120),
@@ -558,6 +674,7 @@ export function createBenchScene(): BenchScene {
         cornellScene,
         wireRoomScene,
         sparseWireScene,
+        emitterScene,
         reactiveScene,
         autoReactiveObjects: [overlapPanel, diffOnlyPanel],
         update,
