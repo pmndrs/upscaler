@@ -50,6 +50,9 @@ Live records, kept current as findings land:
 - [Paper notes](research/PAPER-NOTES.md): a running tracker of write-up-worthy
   findings (*surprised us + measured + others would hit it*) and what each still needs
   for publication ([#10](https://github.com/pmndrs/upscaler/issues/10)).
+- [Upstream candidates](research/UPSTREAM-CANDIDATES.md): ranked findings worth
+  contributing to three.js's own temporal/post nodes, with evidence and owners
+  ([#35](https://github.com/pmndrs/upscaler/issues/35)).
 - Benchmark evidence: [`bench/docs/NEXT-STEPS.md`](../bench/docs/NEXT-STEPS.md)
   (adoption record), [`bench/docs/PARITY-DECISIONS.md`](../bench/docs/PARITY-DECISIONS.md),
   [`bench/docs/PARITY-CANDIDATES.md`](../bench/docs/PARITY-CANDIDATES.md),
