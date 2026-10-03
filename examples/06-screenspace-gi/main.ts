@@ -29,12 +29,10 @@ import { addRenderScale, basePercent } from '../shared/ui';
 //* the result to full size. The pass graph produces textures; FSR3 (a raw
 //* compute pipeline) consumes them and owns the final present — so we drop the
 //* pass graph's own temporal node (TRAA) and let FSR3 be the sole temporal
-//* resolver. Caveat learned the hard way: FSR3 does NOT satisfy SSGI's TRAA
-//* contract — SSGINode's `useTemporalFiltering` rotates its sampling pattern
-//* per frame, and that swing defeats FSR3's variance clip at silhouettes
-//* (ghost streaks off moving edges). We disable it and use three's documented
-//* no-TRAA recipe instead: static pattern + DenoiseNode, with FSR3 converging
-//* the residual noise.
+//* resolver. SSGINode keeps its rotating sampling pattern
+//* (`useTemporalFiltering`): FSR3's accumulation integrates it, which is
+//* markedly cleaner than the static no-TRAA pattern's fixed hatch. Residual
+//* cost: occasional ghosting off silhouettes under fast motion.
 
 type Effect = 'gtao' | 'ssr' | 'ssgi';
 
@@ -180,10 +178,8 @@ function configure(): void {
         // three r185's SSGINode splits its output into separate AO + GI nodes
         // (getAONode/getGINode) — the old single-texture getTextureNode() is gone.
         const giPass = ssgi(beauty, depth, normal, camera);
-        // SSGI's rotating temporal pattern requires a true TRAA to resolve;
-        // under FSR3 it ghost-streaks off moving silhouettes. Static pattern +
-        // DenoiseNode is three's documented recipe for the no-TRAA case.
-        giPass.useTemporalFiltering = false;
+        // Rotating pattern — FSR3 is the temporal resolver that integrates it.
+        giPass.useTemporalFiltering = true;
         const aoTex = sw(giPass.getAONode());
         const gi = sw(denoise(giPass.getGINode() as never, depth, normal, camera));
         const diffuse = scenePass.getTextureNode('diffuse');

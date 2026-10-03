@@ -16,7 +16,7 @@ import { ssgi } from 'three/addons/tsl/display/SSGINode.js';
 import { denoise } from 'three/addons/tsl/display/DenoiseNode.js';
 import GUI from 'lil-gui';
 
-import { upscale, type Upscaler } from '@pmndrs/upscaler';
+import { DebugView, upscale, type Upscaler } from '@pmndrs/upscaler';
 
 import { bootRenderer, displaySize } from '../shared/boot';
 import { addStudioLighting } from '../shared/props';
@@ -30,12 +30,12 @@ import { addRenderScale, basePercent } from '../shared/ui';
 //*
 //* This is the whole-scene temporal path: the scene *and* both effects render at
 //* 1/ratio, and FSR3 upscales the final composited frame. There is NO separate
-//* TRAA — but note FSR3 does NOT satisfy SSGI's TRAA contract: SSGINode's
-//* `useTemporalFiltering` rotates the sampling pattern on a 6-frame cycle, and
-//* that per-frame GI swing inflates FSR3's variance clip along silhouettes, so
-//* stale history streaks out of moving edges. We turn it off and take three's
-//* documented alternative (static pattern + DenoiseNode); FSR3 still owns AA
-//* and residual-noise convergence. Because the composable `upscale()` node
+//* TRAA: FSR3 is the temporal resolver, so SSGINode keeps its rotating sampling
+//* pattern (`useTemporalFiltering`, a 6-frame cycle) and FSR3's accumulation
+//* integrates it — markedly cleaner than the static pattern, whose fixed hatch
+//* no amount of accumulation removes. Residual cost: occasional ghosting off
+//* silhouettes under fast motion (the per-frame GI swing widens the variance
+//* clip there). Because the composable `upscale()` node
 //* registers its inputs as graph dependencies, three renders the whole
 //* reduced-res chain in-pipeline, jittered, right before the FSR compute — no
 //* manual driving.
@@ -96,7 +96,17 @@ const texNode = (n: unknown) => (n as { getTextureNode(): unknown }).getTextureN
 
 const post = new THREE.RenderPipeline(renderer);
 
-const state = { ssgi: true, ssr: true, ratio: 2.0, rcasDenoise: true, jitter: true };
+const state = {
+    ssgi: true,
+    ssgiRotation: true,
+    ssr: true,
+    ratio: 2.0,
+    rcasDenoise: true,
+    jitter: true,
+    orbit: true,
+    orbitSpeed: 1,
+    debug: DebugView.None,
+};
 let fsrNode: ReturnType<typeof upscale> | null = null;
 
 /** (Re)builds the whole reduced-res post graph and points FSR3 at its output. */
@@ -136,10 +146,10 @@ function configure(): void {
         // three r185's SSGINode splits its output into separate AO + GI nodes
         // (getAONode/getGINode) — the old single-texture getTextureNode() is gone.
         const giPass = ssgi(beauty, depth, normal, camera);
-        // SSGI's rotating temporal pattern requires a true TRAA to resolve;
-        // under FSR3 it ghost-streaks off moving silhouettes. Static pattern +
-        // DenoiseNode is three's documented recipe for the no-TRAA case.
-        giPass.useTemporalFiltering = false;
+        // The rotating pattern is meant to be integrated by a temporal
+        // resolver — FSR3 is one. The toggle A/Bs it against three's static
+        // no-TRAA pattern.
+        giPass.useTemporalFiltering = state.ssgiRotation;
         const ao = sw(giPass.getAONode());
         const gi = sw(denoise(giPass.getGINode() as never, depth, normal, camera));
         // beauty * AO  +  albedo * indirect-bounce
@@ -175,6 +185,7 @@ configure();
 
 const gui = new GUI({ title: 'SSGI + SSR → FSR3' });
 gui.add(state, 'ssgi').name('SSGI (indirect)').onChange(configure);
+gui.add(state, 'ssgiRotation').name('SSGI rotating pattern').onChange(configure);
 gui.add(state, 'ssr').name('SSR (reflections)').onChange(configure);
 addRenderScale(gui, state, configure);
 // Jitter buys sub-pixel reconstruction but needs the input re-rendered under
@@ -185,6 +196,19 @@ gui.add(state, 'jitter').name('jitter (reconstruct)').onChange(configure);
 // The reduced-res effects are noisy — RCAS's denoise variant keeps the final
 // sharpen from amplifying that grain.
 gui.add(state, 'rcasDenoise').name('RCAS denoise');
+// Still-camera checks (shading change, accumulation age) need the orbit paused.
+gui.add(state, 'orbit').name('orbit camera');
+gui.add(state, 'orbitSpeed', 0.25, 8, 0.25).name('orbit speed ×');
+gui.add(state, 'debug', {
+    Off: DebugView.None,
+    'Motion vectors': DebugView.MotionVectors,
+    Disocclusion: DebugView.Disocclusion,
+    Depth: DebugView.Depth,
+    'Accumulation age': DebugView.AccumulationAge,
+    Locks: DebugView.Locks,
+    Exposure: DebugView.Exposure,
+    'Shading change': DebugView.ShadingChange,
+}).name('debug view');
 
 window.addEventListener('resize', () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -192,6 +216,26 @@ window.addEventListener('resize', () => {
     camera.updateProjectionMatrix();
     configure();
 });
+
+let orbitTime = 0;
+
+// Headless-verification handle (CDP harness), like examples 12/13.
+(window as unknown as Record<string, unknown>).__kitchenSinkExample = {
+    renderer,
+    scene,
+    camera,
+    state,
+    get upscaler() {
+        return (fsrNode as unknown as { upscaler?: Upscaler } | null)?.upscaler ?? null;
+    },
+    // Deterministic camera drive for the harness (pose = orbit time).
+    get orbitTime() {
+        return orbitTime;
+    },
+    set orbitTime(value: number) {
+        orbitTime = value;
+    },
+};
 
 const hud = document.getElementById('hud')!;
 function updateHud(): void {
@@ -215,12 +259,16 @@ renderer.setAnimationLoop(() => {
     // 360° would swing it behind the walls into darkness) — and the slow motion
     // keeps the temporal history working.
     timer.update();
-    const t = timer.getElapsed();
+    if (state.orbit) orbitTime += timer.getDelta() * state.orbitSpeed;
+    const t = orbitTime;
     camera.position.set(Math.sin(t * 0.15) * 7, 4, 9 + Math.cos(t * 0.15) * 1.5);
     camera.lookAt(0, 3, -5);
 
     const u = (fsrNode as unknown as { upscaler?: Upscaler }).upscaler;
-    if (u) u.settings.rcasDenoise = state.rcasDenoise;
+    if (u) {
+        u.settings.rcasDenoise = state.rcasDenoise;
+        u.settings.debugView = state.debug;
+    }
     post.render();
     updateHud();
 });

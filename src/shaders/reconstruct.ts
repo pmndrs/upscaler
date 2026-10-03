@@ -104,15 +104,22 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
     // same-frame scatter) carries the previous frame's silhouette
     // quantization; see the vote comment below.
     let uv = (vec2f(gid.xy) + 0.5) * C.renderSizeInv;
+    // Off-screen is a property of the world point, so it is tested on the
+    // motion-only reprojection. The jitter-delta shift below can move a border
+    // texel's comparison point up to a texel past the edge even on a still
+    // camera — testing that instead read as a disoccluded viewport border on
+    // ~14% of frames (example 09) — and last frame's border texel still covers
+    // it (taps are clamped).
+    let motionUV = uv - uvDelta;
+    if (any(motionUV < vec2f(0.0)) || any(motionUV > vec2f(1.0))) {
+        textureStore(maskOutput, gid.xy, vec4f(1.0, 0.0, 0.0, 1.0));
+        return;
+    }
     // Texel i samples the scene at i + jitter, so the previous frame's
     // equivalent position shifts by the jitter delta — without this the
     // comparison point oscillates ±½ texel with the jitter sequence, which
     // on a depth gradient reads as per-phase disocclusion flicker.
-    let prevUV = uv - uvDelta + (C.jitter - C.jitterPrev) * C.renderSizeInv;
-    if (any(prevUV < vec2f(0.0)) || any(prevUV > vec2f(1.0))) {
-        textureStore(maskOutput, gid.xy, vec4f(1.0, 0.0, 0.0, 1.0));
-        return;
-    }
+    let prevUV = motionUV + (C.jitter - C.jitterPrev) * C.renderSizeInv;
     let samplePosition = prevUV * C.renderSize - 0.5;
     let base = vec2i(floor(samplePosition));
     let fraction = fract(samplePosition);

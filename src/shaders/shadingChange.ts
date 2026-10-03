@@ -79,8 +79,9 @@ const SHADING_FLOOR_COARSE : f32 = 0.04; // 8×8
 const SHADING_FLOOR_CV : f32 = 0.35;
 
 // Sums this texel's current luma, the previous frame's luma reprojected to the
-// same world position (jitter-delta compensated, bilinear — r32float is not
-// filterable), and both squared. Reset/offscreen texels contribute neutrally
+// same world position (jitter-delta compensated; the compared value is clamped
+// into the bilinear footprint's tap range — see below), and both squared.
+// Reset/offscreen texels contribute neutrally
 // (prev = cur), and disoccluded texels are neutralized toward it — their
 // previous luma belongs to another surface, and disocclusion already discards
 // that history downstream.
@@ -90,15 +91,17 @@ fn lumaPair(coord : vec2i, currentLuma : f32, hostRatio : f32, conditioning : f3
     if (hasFlag(FLAG_RESET)) { return neutral; }
     let uv = (vec2f(coord) + 0.5) * C.renderSizeInv;
     let motion = textureLoad(dilatedMotion, coord, 0).xy;
-    // Texel i samples the scene at i + jitter, so the previous frame's
-    // equivalent position shifts by the jitter delta.
-    let previousUv = uv - motion + (C.jitter - C.jitterPrev) * C.renderSizeInv;
-    if (any(previousUv < vec2f(0.0)) || any(previousUv > vec2f(1.0))) {
+    // Off-screen tested on the motion-only reprojection, as in reconstruct.ts:
+    // the jitter shift alone must not push border texels out of detection.
+    let motionUv = uv - motion;
+    if (any(motionUv < vec2f(0.0)) || any(motionUv > vec2f(1.0))) {
         return neutral;
     }
+    // Texel i samples the scene at i + jitter, so the previous frame's
+    // equivalent position shifts by the jitter delta.
+    let previousUv = motionUv + (C.jitter - C.jitterPrev) * C.renderSizeInv;
     let pos = previousUv * C.renderSize - 0.5;
     let base = floor(pos);
-    let fraction = pos - base;
     let maxCoord = vec2i(C.renderSize) - 1;
     let p00 = clamp(vec2i(base), vec2i(0), maxCoord);
     let p11 = clamp(vec2i(base) + 1, vec2i(0), maxCoord);
@@ -106,10 +109,25 @@ fn lumaPair(coord : vec2i, currentLuma : f32, hostRatio : f32, conditioning : f3
     let l10 = textureLoad(lumaHistoryIn, vec2i(p11.x, p00.y), 0).r;
     let l01 = textureLoad(lumaHistoryIn, vec2i(p00.x, p11.y), 0).r;
     let l11 = textureLoad(lumaHistoryIn, p11, 0).r;
-    let previousHostLuma = mix(mix(l00, l10, fraction.x), mix(l01, l11, fraction.x), fraction.y);
-    let reprojected = previousHostLuma * hostRatio * conditioning;
+    // Last frame never sampled this exact position — only the four texels
+    // around it, under a different jitter. An aliased edge between them can
+    // land on either side, so no interpolation recovers the true value; the
+    // honest prior is the whole tap range. Comparing against the closest value
+    // in it reads 0 wherever jitter alone explains the difference, while a
+    // genuine change (current outside its neighbours' range) still registers.
+    // Interpolating instead left a measured ~0.7% still-scene firing floor on
+    // edges and ~2% under SSGI's rotating pattern (example 09); this reads 0%
+    // and 0.06%, with light-step detection unchanged.
+    let scale = hostRatio * conditioning;
+    let tapMin = min(min(l00, l10), min(l01, l11)) * scale;
+    let tapMax = max(max(l00, l10), max(l01, l11)) * scale;
     let disocclusion = clamp(textureLoad(masks, coord, 0).r, 0.0, 1.0);
-    let previousLuma = mix(reprojected, currentLuma, disocclusion);
+    let previousLuma = mix(clamp(currentLuma, tapMin, tapMax), currentLuma, disocclusion);
+    // The spread term keeps the interpolated value: it measures last frame's
+    // own within-block contrast (issue #22's two-sided floor), which the
+    // closest-value prior would collapse toward the current frame.
+    let fraction = pos - base;
+    let reprojected = mix(mix(l00, l10, fraction.x), mix(l01, l11, fraction.x), fraction.y) * scale;
     let previousSq = mix(reprojected * reprojected, currentSq, disocclusion);
     return vec4f(currentLuma, previousLuma, currentSq, previousSq);
 }

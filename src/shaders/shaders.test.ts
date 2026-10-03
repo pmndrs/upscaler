@@ -75,11 +75,14 @@ const BASELINE_FINGERPRINTS: Record<string, string> = {
     // Updated 2026-07-22: depth-clip flicker fix — reference tap-skip semantics
     // (no all-taps veto), jitter-delta-compensated reprojection, and a
     // neighborhood-relief-widened separation tolerance (grazing-angle planes).
-    reconstruct: '669ee05e',
+    // 2026-10-03: off-screen test on the motion-only reprojection (viewport
+    // border no longer reads disoccluded under jitter).
+    reconstruct: 'd944fd8f',
     // Added 2026-07-21: multi-scale shading-change detector (NEXT-STEPS item 4);
     // 2026-10-03: the contrast floor reads both frames' spread, not just the
-    // current frame's (issue #22, NEXT-STEPS §9).
-    shadingChange: '061f55cd',
+    // current frame's (issue #22, NEXT-STEPS §9); 2026-10-03: the compared
+    // previous value is clamped into the bilinear footprint's tap range.
+    shadingChange: '353acc93',
     // Updated 2026-07-21: DeltaPreExposure history correction (NEXT-STEPS item 2);
     // 2026-08-25: alpha resolved alongside color into the locks buffer's .a;
     // 2026-10-02: the alpha clamp takes the color path's still-scene relax;
