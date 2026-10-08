@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { QualityMode } from '../types';
-import { getQualityModeRatio, getRenderResolution } from './resolution';
+import { getPassRenderResolution, getQualityModeRatio, getRenderResolution } from './resolution';
 
 describe('quality presets', () => {
     it('matches the official FSR3 scaling ratios', () => {
@@ -28,5 +28,28 @@ describe('getRenderResolution', () => {
 
     it('never returns zero-sized targets', () => {
         expect(getRenderResolution(1, 1, 3.0)).toEqual({ width: 1, height: 1 });
+    });
+});
+
+describe('getPassRenderResolution', () => {
+    it('floors fractional sizes like three instead of rounding up (#88)', () => {
+        // 1252 / 1.5 = 834.67: three renders 834, the node used to configure 835.
+        expect(getPassRenderResolution(1252, 936, 1.5)).toEqual({ width: 834, height: 624 });
+    });
+
+    it("follows three's multiply-by-scale where custom ratios diverge", () => {
+        // 39 * (1 / 1.3) = 29.999…; 39 / 1.3 = 30.
+        expect(getPassRenderResolution(39, 39, 1.3).width).toBe(29);
+        expect(getRenderResolution(39, 39, 1.3).width).toBe(30);
+    });
+
+    it('agrees with getRenderResolution at the preset ratios', () => {
+        for (const ratio of [1, 1.5, 1.7, 2, 3]) {
+            for (let size = 1; size <= 8192; size++) {
+                if (getPassRenderResolution(size, 1, ratio).width !== getRenderResolution(size, 1, ratio).width) {
+                    throw new Error(`size ${size} @ ratio ${ratio}`);
+                }
+            }
+        }
     });
 });

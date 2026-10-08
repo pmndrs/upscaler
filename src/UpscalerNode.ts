@@ -16,7 +16,7 @@ import { Upscaler } from './Upscaler';
 import type { TemporalGuidesNode } from './TemporalGuidesNode';
 import { getGPUTexture } from './internal/threeWebGPU';
 import { getPipelineEvents, installRenderPipelineHooks } from './internal/renderPipelineHooks';
-import { getQualityModeRatio } from './math/resolution';
+import { getPassRenderResolution, getQualityModeRatio } from './math/resolution';
 import { QualityMode, type UpscalePath } from './types';
 
 // three's node base + its builder/frame carry incomplete TS types and expect a
@@ -302,7 +302,10 @@ export class UpscalerNode extends TempNode<'vec4'> {
             renderer.getDrawingBufferSize(this._output);
             const ratio = this._options.ratio ??
                 getQualityModeRatio(this._options.quality ?? QualityMode.Quality);
-            this._input.set(Math.max(1, this._output.x / ratio), Math.max(1, this._output.y / ratio));
+            // Predict the size three's PassNode renders at (floored), or the
+            // first configure is a texel larger than the real input (#88).
+            const render = getPassRenderResolution(this._output.x, this._output.y, ratio);
+            this._input.set(render.width, render.height);
             this._configureUpscaler();
         }
         if (!this._textureNode) {
@@ -389,8 +392,8 @@ export class UpscalerNode extends TempNode<'vec4'> {
         this._upscaler!.configure({
             displayWidth: Math.max(1, Math.round(this._output.x)),
             displayHeight: Math.max(1, Math.round(this._output.y)),
-            renderWidth: Math.max(1, Math.round(this._input.x)),
-            renderHeight: Math.max(1, Math.round(this._input.y)),
+            renderWidth: Math.max(1, Math.floor(this._input.x)),
+            renderHeight: Math.max(1, Math.floor(this._input.y)),
             path: this._options.path,
             jitter: this._jitterActive,
         });
