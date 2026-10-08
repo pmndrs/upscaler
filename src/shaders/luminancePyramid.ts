@@ -69,6 +69,17 @@ const EXPOSURE_MIN : f32 = 0.02;
 const EXPOSURE_MAX : f32 = 8.0;
 // Eye-adaptation rate (per second) toward the target exposure.
 const ADAPT_SPEED : f32 = 2.5;
+// Adaptation dead-band, in stops. The metering taps read the JITTERED input, so
+// on a still scene the log-average wobbles with the jitter phase (edges and
+// sub-pixel detail land on different texels each phase). Easing toward that
+// moving target re-conditions the stored history every frame (plus f16 storage
+// rounding of the exposure itself), which reads as low-level contour shimmer
+// across smooth gradients. Holding the stored exposure exactly while the target
+// stays within 1/16 stop (~4.4%) freezes a still scene's conditioning
+// bit-for-bit; genuine lighting changes are far larger and adapt as before.
+// Exposure is divided back out before display, so resting up to 1/16 stop off
+// target changes nothing visible.
+const ADAPT_DEADBAND_STOPS : f32 = 0.0625;
 
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) gid : vec3u) {
@@ -102,8 +113,11 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
     let prev = textureLoad(prevExposure, vec2i(0), 0).r;
     var exposure = targetExposure;
     if (!hasFlag(FLAG_RESET) && prev > 0.0) {
-        let rate = clamp(1.0 - exp2(-C.deltaTime * ADAPT_SPEED), 0.0, 1.0);
-        exposure = prev + (targetExposure - prev) * rate;
+        exposure = prev;
+        if (abs(log2(targetExposure / prev)) > ADAPT_DEADBAND_STOPS) {
+            let rate = clamp(1.0 - exp2(-C.deltaTime * ADAPT_SPEED), 0.0, 1.0);
+            exposure = prev + (targetExposure - prev) * rate;
+        }
     }
 
     // Manual override: when auto-exposure is off, publish the fixed setting so
