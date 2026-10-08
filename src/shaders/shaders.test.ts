@@ -115,7 +115,9 @@ const BASELINE_FINGERPRINTS: Record<string, string> = {
     // 2026-10-05: pre-exposure read guarded with max(…, 1e-4) like RCAS/blit,
     // so a fixed/external exposure of 0 no longer blacks out accumulation.
     accumulate: '1505bcb5',
-    luminancePyramid: '373ea933',
+    // 2026-10-08: 1/16-stop adaptation dead-band, so the jitter-phase wobble of
+    // the metered log-average no longer re-conditions history on still scenes.
+    luminancePyramid: '30144ae9',
     // Updated 2026-07-22: reactive merge-not-overwrite (guides spec M3) — the
     // generator max-merges an incoming mask instead of being suppressed by it.
     generateReactive: '9d0739e5',
