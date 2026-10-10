@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { PerspectiveCamera, Texture } from 'three';
+import { PerspectiveCamera, Texture, DepthTexture, FloatType, HalfFloatType, RedFormat } from 'three';
 import type { WebGPURenderer } from 'three/webgpu';
-import { Upscaler } from './Upscaler';
-import { UpscalerNotReadyError } from './initializationError';
-import { MomentsPass } from './MomentsPass';
-import { DebugView } from './types';
+import { Upscaler } from './Upscaler.js';
+import { UpscalerNotReadyError } from './initializationError.js';
+import { MomentsPass } from './MomentsPass.js';
+import { DebugView } from './types.js';
 
 function deferred<T>() {
     let resolve!: (value: T) => void;
@@ -14,15 +14,16 @@ function deferred<T>() {
 function fixture() {
     const lost = deferred<GPUDeviceLostInfo>();
     const jobs: Array<{ label: string; resolve(value: GPUComputePipeline): void; reject(error: unknown): void }> = [];
-    const resource = (descriptor: { size?: number; width?: number; height?: number } = {}) => ({
-        width: descriptor.width ?? 16, height: descriptor.height ?? 16, sampleCount: 1,
-        format: 'rgba16float', createView: () => ({}), destroy: vi.fn(),
-        getMappedRange: () => new ArrayBuffer(descriptor.size ?? 4), unmap: vi.fn(),
+    const resource = (descriptor: { size?: number | { width: number; height: number }; width?: number; height?: number; format?: string; usage?: number } = {}) => ({
+        width: descriptor.width ?? (typeof descriptor.size === 'object' ? descriptor.size.width : 16),
+        height: descriptor.height ?? (typeof descriptor.size === 'object' ? descriptor.size.height : 16), sampleCount: 1,
+        format: descriptor.format ?? 'rgba16float', usage: descriptor.usage ?? 12, createView: () => ({}), destroy: vi.fn(),
+        getMappedRange: () => new ArrayBuffer(typeof descriptor.size === 'number' ? descriptor.size : 4), unmap: vi.fn(),
         getBindGroupLayout: () => ({}),
     });
     const encoder = {
         beginComputePass: () => ({ setPipeline() {}, setBindGroup() {}, dispatchWorkgroups() {}, end() {} }),
-        finish: () => ({}),
+        finish: () => ({}), copyBufferToBuffer() {}, copyBufferToTexture() {},
     };
     const device = {
         lost: lost.promise, features: new Set(),
@@ -42,7 +43,10 @@ function fixture() {
         createBindGroup: resource, createCommandEncoder: vi.fn(() => encoder),
     };
     const renderer = {
-        backend: { device, get: () => ({ texture: resource() }) }, initTexture() {},
+        backend: { device, get: (texture: Texture) => ({ texture: resource({
+            width: (texture.image as { width?: number } | null)?.width ?? 21, height: (texture.image as { height?: number } | null)?.height ?? 21,
+            format: (texture as DepthTexture).isDepthTexture ? 'depth32float' : texture.format === RedFormat ? 'r32float' : texture.type === HalfFloatType ? 'rgba16float' : texture.type === FloatType ? 'rgba32float' : 'rgba8unorm',
+        }) }) }, initTexture() {},
     } as unknown as WebGPURenderer;
     const upscaler = new Upscaler({ renderer });
     const finish = async () => {
@@ -135,7 +139,7 @@ describe('Upscaler preparation', () => {
         upscaler.settings.detectShadingChanges = false;
         upscaler.configure({ displayWidth: 32, displayHeight: 32, path: 'temporal' });
         const ready = upscaler.init(); await finish(); await ready;
-        const color = new Texture(), depth = new Texture(), velocity = new Texture();
+        const color = new Texture(), depth = new DepthTexture(21, 21), velocity = new Texture();
         const camera = new PerspectiveCamera();
         upscaler.settings.debugView = DebugView.MotionVectors;
         upscaler.dispatch({ color, depth, velocity }, camera);
@@ -162,6 +166,18 @@ describe('Upscaler preparation', () => {
         expect(device.createComputePipelineAsync.mock.calls.map(([d]) => d.label).sort())
             .toEqual(['upscale-depth-clip', 'upscale-reconstruct']);
         expect(upscaler.guides.dilatedDepth).toBeDefined();
+    });
+
+    it('passes independent core variants through the Three facade', async () => {
+        const { upscaler, device, finish } = fixture();
+        upscaler.configure({ displayWidth: 32, displayHeight: 32, depthMode: 'linear', exposureMode: 'provided', correctConditioningExposure: true, rcasAgeKnee: 0.5 });
+        const ready = upscaler.prepare(); await finish(); await ready;
+        const shaders = device.createShaderModule.mock.calls.map(([d]) => (d as unknown as GPUShaderModuleDescriptor).code).join('\n');
+        expect(shaders).toContain('smoothstep(0.0, 0.500000000');
+        expect(shaders).toContain('var sceneDepth : texture_2d<f32>');
+        expect(shaders).toContain('hostRatio *= exposure / conditioningPrev');
+        expect(shaders).toContain('var published : texture_storage_2d<rgba32float');
+        expect(upscaler.guides.exposure?.type).toBe(FloatType);
     });
 
     it('retries failures only through explicit preparation', async () => {

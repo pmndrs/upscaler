@@ -1,7 +1,7 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { Texture } from 'three';
 import type { WebGPURenderer } from 'three/webgpu';
-import { MomentsPass, UpscalerNotReadyError } from './index';
+import { MomentsPass, UpscalerNotReadyError } from './index.js';
 
 afterEach(() => vi.restoreAllMocks());
 

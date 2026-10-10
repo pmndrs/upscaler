@@ -1,5 +1,5 @@
-import { WGSL_COLOR, WGSL_CONSTANTS, WGSL_TONEMAP } from './common';
-import { assembleShader } from './wgsl';
+import { WGSL_COLOR, WGSL_CONSTANTS, WGSL_TONEMAP } from './common.js';
+import { assembleShader } from './wgsl.js';
 
 /**
  * Reproject & accumulate — the core temporal upscaling pass (FSR2/3's
@@ -48,7 +48,8 @@ import { assembleShader } from './wgsl';
  * - 12: shading-change response, ceil(render/2) (r32float from
  *       shadingChange.ts; 1×1 zero dummy when the detector is off)
  */
-export const ACCUMULATE_SHADER = assembleShader(
+export function buildAccumulateShader(correctConditioningExposure = false): string {
+return assembleShader(
     WGSL_CONSTANTS,
     WGSL_COLOR,
     WGSL_TONEMAP,
@@ -260,7 +261,9 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
     let hostPrev = textureLoad(exposurePrevTex, vec2i(0), 0).b;
     var hostRatio = 1.0;
     if (hostPrev > 1.0e-4 && frameInfo.b > 1.0e-4) { hostRatio = frameInfo.b / hostPrev; }
-    if (abs(hostRatio - 1.0) > 1.0e-3) {
+${correctConditioningExposure ? `    let conditioningPrev = textureLoad(exposurePrevTex, vec2i(0), 0).r;
+    if (conditioningPrev > 1.0e-4) { hostRatio *= exposure / conditioningPrev; }
+` : ''}    if (abs(hostRatio - 1.0) > 1.0e-3) {
         history = vec4f(tonemapInvertible(tonemapInvert(history.rgb) * hostRatio), history.a);
     }
 
@@ -385,3 +388,6 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
 }
 `,
 );
+
+}
+export const ACCUMULATE_SHADER = buildAccumulateShader();

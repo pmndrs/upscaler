@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { PerspectiveCamera } from 'three';
+import { PerspectiveCamera, DepthTexture, Texture, FloatType, HalfFloatType, RedFormat } from 'three';
 import type { WebGPURenderer } from 'three/webgpu';
 
-import { Upscaler } from './Upscaler';
-import { generateJitterSequence } from './math/halton';
-import type { UpscalePath } from './types';
+import { Upscaler } from './Upscaler.js';
+import { generateJitterSequence } from './math/halton.js';
+import type { UpscalePath } from './types.js';
 
 //* Mock Renderer — answers every create* call with a stub (shape of
 // Upscaler.timing.test.ts) plus the texture plumbing configure() needs, so the
@@ -12,10 +12,12 @@ import type { UpscalePath } from './types';
 
 function mockRenderer() {
     const writes: Float32Array[] = [];
-    const resource = (descriptor: { size?: number } = {}) => ({
+    const resource = (descriptor: { size?: number | { width: number; height: number }; width?: number; height?: number; format?: string } = {}) => ({
+        width: descriptor.width ?? (typeof descriptor.size === 'object' ? descriptor.size.width : 640), height: descriptor.height ?? (typeof descriptor.size === 'object' ? descriptor.size.height : 360),
+        format: descriptor.format ?? 'rgba16float', sampleCount: 1, usage: 14,
         getBindGroupLayout: () => ({}),
         createView: () => ({}),
-        getMappedRange: () => new ArrayBuffer(descriptor.size ?? 4),
+        getMappedRange: () => new ArrayBuffer(typeof descriptor.size === 'number' ? descriptor.size : 4),
         unmap: () => {},
         destroy: () => {},
     });
@@ -34,13 +36,17 @@ function mockRenderer() {
         createSampler: resource,
         createBuffer: resource,
         createTexture: resource,
+        createCommandEncoder: () => ({ beginComputePass() { throw new Error('GPU encoding is outside this constants test.'); } }),
     };
     const backing = new WeakMap<object, object>();
     const renderer = {
         backend: {
             device,
-            get: (texture: object) => {
-                if (!backing.has(texture)) backing.set(texture, { texture: resource() });
+            get: (texture: Texture) => {
+                if (!backing.has(texture)) backing.set(texture, { texture: resource({
+                    width: (texture.image as { width?: number } | null)?.width ?? 640, height: (texture.image as { height?: number } | null)?.height ?? 360,
+                    format: (texture as DepthTexture).isDepthTexture ? 'depth32float' : texture.format === RedFormat ? 'r32float' : texture.type === HalfFloatType ? 'rgba16float' : texture.type === FloatType ? 'rgba32float' : 'rgba8unorm',
+                }) });
                 return backing.get(texture);
             },
         },
@@ -67,7 +73,7 @@ const camera = () => {
 describe('Upscaler jitter accessors', async () => {
     beforeEach(() => {
         vi.stubGlobal('GPUBufferUsage', { MAP_READ: 1, COPY_SRC: 4, COPY_DST: 8, UNIFORM: 64, STORAGE: 128 });
-        vi.stubGlobal('GPUTextureUsage', { TEXTURE_BINDING: 4, STORAGE_BINDING: 8 });
+        vi.stubGlobal('GPUTextureUsage', { TEXTURE_BINDING: 4, STORAGE_BINDING: 8, COPY_DST: 2 });
     });
 
     afterEach(() => {
@@ -124,7 +130,7 @@ describe('Upscaler jitter accessors', async () => {
         writes.length = 0;
         // The constants upload runs before any GPU texture lookup in dispatch.
         try {
-            upscaler.dispatchGuides({ depth: {} as never, velocity: {} as never }, cam);
+            upscaler.dispatchGuides({ depth: new DepthTexture(640, 360), velocity: new Texture() }, cam);
         } catch {
             // The mock can't encode passes; the constants were already written.
         }

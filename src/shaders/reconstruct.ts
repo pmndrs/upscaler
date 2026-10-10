@@ -1,5 +1,5 @@
-import { WGSL_CONSTANTS, WGSL_DEPTH } from './common';
-import { assembleShader } from './wgsl';
+import { WGSL_CONSTANTS, WGSL_DEPTH } from './common.js';
+import { assembleShader } from './wgsl.js';
 
 /**
  * Reconstruct pass — FSR2/3's "reconstruct & dilate" stage: dilation plus the
@@ -34,11 +34,12 @@ import { assembleShader } from './wgsl';
  *      carries the 3×3 depth relief to the depth clip — a reserved channel)
  * - 5: reconstructed previous depth (storage buffer, u32 = f32 bits)
  */
-export const RECONSTRUCT_SHADER = assembleShader(
+export function buildReconstructShader(linear = false): string {
+return assembleShader(
     WGSL_CONSTANTS,
-    WGSL_DEPTH,
+    linear ? 'fn linearizeDepth(depth : f32) -> f32 { return depth; }' : WGSL_DEPTH,
     /* wgsl */ `
-@group(0) @binding(1) var sceneDepth : texture_depth_2d;
+@group(0) @binding(1) var sceneDepth : ${linear ? 'texture_2d<f32>' : 'texture_depth_2d'};
 @group(0) @binding(2) var sceneVelocity : texture_2d<f32>;
 @group(0) @binding(3) var dilatedDepth : texture_storage_2d<r32float, write>;
 @group(0) @binding(4) var dilatedMotion : texture_storage_2d<rgba16float, write>;
@@ -57,14 +58,14 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
     //* Nearest Depth Search (dilate)
     // With a reversed depth buffer larger values are nearer; otherwise smaller.
     let reversed = hasFlag(FLAG_REVERSED_DEPTH);
-    var bestDepth = textureLoad(sceneDepth, center, 0);
+    var bestDepth = textureLoad(sceneDepth, center, 0)${linear ? '.r' : ''};
     var farthestDepth = bestDepth;
     var bestCoord = center;
     for (var y = -1; y <= 1; y++) {
         for (var x = -1; x <= 1; x++) {
             if (x == 0 && y == 0) { continue; }
             let p = clamp(center + vec2i(x, y), vec2i(0), maxCoord);
-            let d = textureLoad(sceneDepth, p, 0);
+            let d = textureLoad(sceneDepth, p, 0)${linear ? '.r' : ''};
             // Parenthesize the comparisons: WGSL otherwise parses the
             // '<' ... '>' as a template argument list and fails to compile.
             let nearer = select((d < bestDepth), (d > bestDepth), reversed);
@@ -112,6 +113,8 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
 }
 `,
 );
+}
+export const RECONSTRUCT_SHADER = buildReconstructShader();
 
 /**
  * Depth-clip pass — FSR2/3's disocclusion test against the reconstructed

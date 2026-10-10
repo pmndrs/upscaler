@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WebGPURenderer } from 'three/webgpu';
 
-import { Upscaler } from './Upscaler';
+import { Upscaler } from './Upscaler.js';
 
 //* Mock Renderer — a device that answers every create* call with a stub and
 // records which ones ran, so init() completes without a GPU (issue #70).

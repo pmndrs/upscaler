@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { generateJitterSequence, halton } from './halton';
+import { generateJitterSequence, halton } from './halton.js';
 
 describe('halton', () => {
     it('produces the known base-2 radical inverse sequence', () => {

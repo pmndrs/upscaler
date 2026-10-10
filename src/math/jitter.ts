@@ -1,4 +1,4 @@
-import { generateJitterSequence } from './halton';
+import { generateJitterSequence } from './halton.js';
 
 /**
  * Computes the jitter phase count for a given upscale ratio, following the
@@ -27,6 +27,10 @@ export class JitterSequence {
     private _sequence: Array<[number, number]>;
     private _index = 0;
 
+    /**
+     * Start a cyclic sequence sized for the render/display ratio.
+     * @param upscaleRatio - Display size divided by render size on one axis.
+     */
     constructor(upscaleRatio: number) {
         this._sequence = generateJitterSequence(getJitterPhaseCount(upscaleRatio));
     }

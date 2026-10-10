@@ -1,4 +1,4 @@
-import { QualityMode } from '../types';
+import { QualityMode } from '../core/types.js';
 
 /**
  * Per-axis scaling ratios for each quality preset, matching the official

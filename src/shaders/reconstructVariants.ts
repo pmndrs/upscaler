@@ -1,5 +1,5 @@
-import { WGSL_CONSTANTS, WGSL_DEPTH } from './common';
-import { assembleShader } from './wgsl';
+import { WGSL_CONSTANTS, WGSL_DEPTH } from './common.js';
+import { assembleShader } from './wgsl.js';
 
 /**
  * Bench-only reconstruct identities for issue #67, handed to `Upscaler`

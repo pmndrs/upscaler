@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { QualityMode } from '../types';
-import { getQualityModeRatio, getRenderResolution } from './resolution';
+import { QualityMode } from '../types.js';
+import { getQualityModeRatio, getRenderResolution } from './resolution.js';
 
 describe('quality presets', () => {
     it('matches the official FSR3 scaling ratios', () => {

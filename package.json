@@ -1,7 +1,7 @@
 {
     "name": "@pmndrs/upscaler",
     "version": "0.5.0",
-    "description": "AMD FidelityFX Super Resolution (FSR1 spatial + FSR2/3-style temporal upscaling) for three.js WebGPURenderer, implemented as raw WGSL compute passes",
+    "description": "Renderer-independent WebGPU upscaling with Three.js and Babylon.js Frame Graph adapters",
     "author": "Dennis Smolek <dennis@smolek.dev>",
     "license": "MIT",
     "repository": {
@@ -24,7 +24,9 @@
         "temporal",
         "taa",
         "anti-aliasing",
-        "fidelityfx"
+        "fidelityfx",
+        "babylonjs",
+        "frame-graph"
     ],
     "type": "module",
     "publishConfig": {
@@ -34,13 +36,29 @@
         ".": {
             "types": "./dist/index.d.ts",
             "import": "./dist/index.js"
+        },
+        "./core": {
+            "types": "./dist/core/index.d.ts",
+            "import": "./dist/core.js"
+        },
+        "./three": {
+            "types": "./dist/three/index.d.ts",
+            "import": "./dist/three.js"
+        },
+        "./babylon": {
+            "types": "./dist/babylon/index.d.ts",
+            "import": "./dist/babylon.js"
         }
     },
     "main": "./dist/index.js",
     "types": "./dist/index.d.ts",
     "files": [
         "dist",
-        "src"
+        "src",
+        "NOTICE.md",
+        "docs/webgpu-core.md",
+        "docs/babylon-framegraph.md",
+        "docs/webgpu-validation.md"
     ],
     "scripts": {
         "dev": "vite --config bench/vite.config.ts",
@@ -50,6 +68,8 @@
         "bench:compare:rcas": "node scripts/compare-rcas.mjs",
         "examples": "vite --config examples/vite.config.ts",
         "examples:build": "vite build --config examples/vite.config.ts",
+        "examples:preview": "vite preview --config examples/vite.config.ts",
+        "verify:babylon-examples:gpu": "npm run examples:build && node scripts/verify-babylon-examples.mjs",
         "build": "vite build && tsc --declaration --emitDeclarationOnly -p tsconfig.build.json && node scripts/verify-artifacts.mjs",
         "verify:packed-guides": "node scripts/verify-packed-guides.mjs --build-only",
         "verify:packed-guides:gpu": "node scripts/verify-packed-guides.mjs",
@@ -57,15 +77,19 @@
         "typecheck": "tsc --noEmit",
         "test": "vitest run",
         "release": "node scripts/release.mjs",
-        "prepublishOnly": "npm run lint && npm run typecheck && npm run test && npm run build"
+        "prepublishOnly": "npm run lint && npm run typecheck && npm run test && npm run build",
+        "verify:packed-entrypoints": "node scripts/verify-packed-entrypoints.mjs",
+        "verify:core:gpu": "node scripts/verify-core-gpu.mjs",
+        "verify:packed-core:gpu": "npm run build && node scripts/verify-core-gpu.mjs --packed"
     },
     "peerDependencies": {
-        "three": ">=0.184.0"
+        "three": ">=0.184.0",
+        "@babylonjs/core": "~9.29.0"
     },
     "devDependencies": {
+        "@babylonjs/core": "9.29.0",
         "@eslint/js": "^9.18.0",
         "@types/three": "^0.186.0",
-        "@webgpu/types": "^0.1.64",
         "eslint": "^9.18.0",
         "globals": "^15.14.0",
         "lil-gui": "^0.20.0",
@@ -76,5 +100,16 @@
         "typescript-eslint": "^8.20.0",
         "vite": "^6.1.0",
         "vitest": "^3.0.0"
+    },
+    "peerDependenciesMeta": {
+        "three": {
+            "optional": true
+        },
+        "@babylonjs/core": {
+            "optional": true
+        }
+    },
+    "dependencies": {
+        "@webgpu/types": "^0.1.64"
     }
 }

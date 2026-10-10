@@ -30,6 +30,31 @@ to GitHub Pages. CI is GPU-free, so changes to shaders or passes need a real-GPU
 see [Debugging](debugging.md#verifying-on-a-real-gpu). The code layout is in
 [Architecture](architecture.md).
 
+## Contribution conventions
+
+Follow the [conventions in CLAUDE.md](../CLAUDE.md#conventions): explain why in
+comments, document exported functions/classes with TSDoc parameters and return
+values, and give exported types a doc block. Update maintained guides in the same
+change as public API/input-contract changes. Preserve the MIT and AMD attribution.
+
+CI checks lint, types, CPU tests, library build, packed Three guides and isolated
+packed entry points on Linux and Windows. To run the packaging checks locally:
+
+```bash
+npm run verify:packed-guides
+npm run verify:packed-entrypoints
+```
+
+For example changes, also run `npm run examples:build`; for Babylon rendering or
+pass changes, run `npm run verify:babylon-examples:gpu` on a compatible device.
+Record the device, visual checks and limitations. GPU runs remain separate from
+`npm test` and CI. The [WebGPU validation record](webgpu-validation.md) and
+[Babylon guide](babylon-framegraph.md#verification) contain the evidence.
+
+Use Conventional Commit subjects (`feat:`, `fix:`, `docs:`, and similar) because
+automatic version selection reads them. Describe the behavior and validation in
+the PR. Keep functional changes separate from package renaming or deployment changes.
+
 ## Releasing
 
 Merging to `main` never publishes, and releasing needs no local step. Either:

@@ -3,6 +3,7 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <link rel="icon" href="data:," />
         <title>@pmndrs/upscaler — Examples</title>
         <style>
             :root {
@@ -49,6 +50,35 @@
                 margin: 0 0 32px;
                 border-left: 2px solid var(--border);
                 padding-left: 12px;
+            }
+            .category-nav {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 12px;
+                margin-bottom: 32px;
+            }
+            .category-nav a {
+                color: var(--accent);
+                border: 1px solid var(--border);
+                border-radius: 8px;
+                padding: 8px 14px;
+                font-size: 13px;
+                text-decoration: none;
+            }
+            .category-nav a:hover {
+                border-color: var(--accent);
+            }
+            .category {
+                scroll-margin-top: 24px;
+                margin-bottom: 56px;
+            }
+            .category-title {
+                color: var(--accent);
+                font-size: 20px;
+                margin: 0 0 8px;
+            }
+            .category > .section-sub {
+                margin-bottom: 24px;
             }
             .grid {
                 display: grid;
@@ -150,226 +180,324 @@
         <div class="wrap">
             <h1><span>@pmndrs/upscaler</span> — Examples</h1>
             <p class="sub">
-                FSR1 spatial + FSR2/3-style temporal upscaling for the three.js WebGPURenderer.
+                FSR1 spatial + FSR2/3-style temporal upscaling — WebGPU, Three.js and Babylon.js.
             </p>
             <p class="note">
                 WebGPU-only — open in Chrome/Edge 113+ (or a browser with WebGPU enabled). Each
                 demo renders the scene at a lower resolution and upscales it back to full size.
             </p>
-            <section class="showcases">
-                <h2 class="section-head">Showcases</h2>
-                <p class="section-sub">
-                    What the upscaler buys you, made visible — bigger scenes built to be looked at
-                    rather than to test one feature.
-                </p>
+            <nav class="category-nav" aria-label="Example categories">
+                <a href="#three">Three.js</a>
+                <a href="#babylon">Babylon.js</a>
+                <a href="#webgpu">Raw WebGPU</a>
+            </nav>
+            <section id="three" class="category" aria-labelledby="three-heading">
+                <h2 id="three-heading" class="category-title">Three.js</h2>
+                <p class="section-sub">16 examples and 4 showcases using the Three.js WebGPURenderer.</p>
+                <section class="showcases">
+                    <h3 class="section-head">Showcases</h3>
+                    <p class="section-sub">
+                        What the upscaler buys you, made visible — bigger scenes built to be looked at
+                        rather than to test one feature.
+                    </p>
+                    <div class="grid">
+                        <a class="card" href="s1-reinvest/">
+                            <div class="num">S1</div>
+                            <div class="title">Reinvest the savings</div>
+                            <div class="desc">
+                                One GPU budget, two ways to spend it: render a quarter of the pixels and
+                                buy SSGI + SSR with the difference, or render every pixel plain. A mouse
+                                wipe compares them; each side's GPU milliseconds are measured live with
+                                timestamp queries, and auto-balance finds the render scale where the
+                                effects fit native's budget.
+                            </div>
+                            <span class="tag">budget</span>
+                        </a>
+                        <a class="card" href="s2-fractal/">
+                            <div class="num">S2</div>
+                            <div class="title">Raymarched fractal</div>
+                            <div class="desc">
+                                A Mandelbox flight where every pixel runs a long raymarch — a 2–3×
+                                render scale turns a slideshow into a smooth framerate. No meshes: the
+                                raymarcher supplies its own depth and motion vectors.
+                            </div>
+                            <span class="tag">per-pixel cost</span>
+                        </a>
+                        <a class="card" href="s3-how-low/">
+                            <div class="num">S3</div>
+                            <div class="title">How low can you go</div>
+                            <div class="desc">
+                                One slider drags the render resolution down to 1/8 per axis — 1.6% of
+                                the pixels. FSR vs bilinear from the same render, with a pixel loupe.
+                            </div>
+                            <span class="tag">stunt</span>
+                        </a>
+                        <a class="card" href="s4-convergence/">
+                            <div class="num">S4</div>
+                            <div class="title">Watch it converge</div>
+                            <div class="desc">
+                                Step the real temporal pipeline one frame at a time: the jittered
+                                low-res input, every debug buffer, the Halton jitter filling the pixel,
+                                and a magnifier where detail appears frame by frame.
+                            </div>
+                            <span class="tag">explainer</span>
+                        </a>
+                    </div>
+                </section>
+                <h3 class="section-head">Examples</h3>
+                <p class="section-sub">Single-purpose demos — one feature or integration each.</p>
                 <div class="grid">
-                    <a class="card" href="s1-reinvest/">
-                        <div class="num">S1</div>
-                        <div class="title">Reinvest the savings</div>
+                    <a class="card" href="01-hello/">
+                        <div class="num">01</div>
+                        <div class="title">Hello FSR3</div>
                         <div class="desc">
-                            One GPU budget, two ways to spend it: render a quarter of the pixels and
-                            buy SSGI + SSR with the difference, or render every pixel plain. A mouse
-                            wipe compares them; each side's GPU milliseconds are measured live with
-                            timestamp queries, and auto-balance finds the render scale where the
-                            effects fit native's budget.
+                            The minimal temporal upscale — one model, a slow orbit, no UI. The
+                            copy-paste starting point.
                         </div>
-                        <span class="tag">budget</span>
+                        <span class="tag">starter</span>
                     </a>
-                    <a class="card" href="s2-fractal/">
-                        <div class="num">S2</div>
-                        <div class="title">Raymarched fractal</div>
+                    <a class="card" href="02-fsr1-vs-fsr3/">
+                        <div class="num">02</div>
+                        <div class="title">FSR1 vs FSR3</div>
                         <div class="desc">
-                            A Mandelbox flight where every pixel runs a long raymarch — a 2–3×
-                            render scale turns a slideshow into a smooth framerate. No meshes: the
-                            raymarcher supplies its own depth and motion vectors.
+                            Switch between paths and toggle features one at a time to see what each
+                            stage of the upscaler buys you.
                         </div>
-                        <span class="tag">per-pixel cost</span>
+                        <span class="tag">showcase</span>
                     </a>
-                    <a class="card" href="s3-how-low/">
-                        <div class="num">S3</div>
-                        <div class="title">How low can you go</div>
+                    <a class="card" href="03-split-compare/">
+                        <div class="num">03</div>
+                        <div class="title">Split compare</div>
                         <div class="desc">
-                            One slider drags the render resolution down to 1/8 per axis — 1.6% of
-                            the pixels. FSR vs bilinear from the same render, with a pixel loupe.
+                            Native vs FSR side-by-side with a wipe slider — the same scene, the same
+                            moment, at two pixel budgets.
                         </div>
-                        <span class="tag">stunt</span>
+                        <span class="tag">A/B</span>
                     </a>
-                    <a class="card" href="s4-convergence/">
-                        <div class="num">S4</div>
-                        <div class="title">Watch it converge</div>
+                    <a class="card" href="04-aliasing-torture/">
+                        <div class="num">04</div>
+                        <div class="title">Aliasing torture</div>
                         <div class="desc">
-                            Step the real temporal pipeline one frame at a time: the jittered
-                            low-res input, every debug buffer, the Halton jitter filling the pixel,
-                            and a magnifier where detail appears frame by frame.
+                            Dense thin geometry and a moiré floor under a moving camera — where naive
+                            upscaling falls apart and temporal holds.
                         </div>
-                        <span class="tag">explainer</span>
+                        <span class="tag">quality</span>
+                    </a>
+                    <a class="card" href="05-transparency/">
+                        <div class="num">05</div>
+                        <div class="title">Transparency &amp; particles</div>
+                        <div class="desc">
+                            Particles and transparent geometry have no reliable motion — an honest look
+                            at ghosting and why reactive masks matter.
+                        </div>
+                        <span class="tag">limitations</span>
+                    </a>
+                    <a class="card" href="06-screenspace-gi/">
+                        <div class="num">06</div>
+                        <div class="title">Screen-space effects</div>
+                        <div class="desc">
+                            Expensive GTAO / SSR / SSGI rendered at low resolution, then upscaled back
+                            to full size through FSR3.
+                        </div>
+                        <span class="tag">advanced</span>
+                    </a>
+                    <a class="card" href="07-tsl-node/">
+                        <div class="num">07</div>
+                        <div class="title">FSR3 as a TSL node</div>
+                        <div class="desc">
+                            The declarative drop-in — <code>post.outputNode = upscaleScene(scene, camera)</code>.
+                            The whole upscaler as one node in a THREE.RenderPipeline graph.
+                        </div>
+                        <span class="tag">integration</span>
+                    </a>
+                    <a class="card" href="08-tsl-compose/">
+                        <div class="num">08</div>
+                        <div class="title">Composing FSR3</div>
+                        <div class="desc">
+                            The upscaler node feeding a downstream TSL effect — <code>upscaleScene(...).mul(vignette)</code> — showing it lives in a post graph.
+                        </div>
+                        <span class="tag">integration</span>
+                    </a>
+                    <a class="card" href="09-kitchen-sink/">
+                        <div class="num">09</div>
+                        <div class="title">Kitchen sink — SSGI + SSR</div>
+                        <div class="desc">
+                            A full screen-space stack (SSGI + SSR) rendered at low res and upscaled by the
+                            composable <code>upscale(...)</code> node — one TSL post graph, effects and all.
+                        </div>
+                        <span class="tag">advanced</span>
+                    </a>
+                    <a class="card" href="10-ssgi-denoise/">
+                        <div class="num">10</div>
+                        <div class="title">SSGI denoise A/B</div>
+                        <div class="desc">
+                            Experimental scratchpad comparing SSGI denoisers before FSR3 upscales —
+                            documents why a second temporal resolver (<code>recurrentDenoise</code>)
+                            fights FSR3's jitter. Not part of the library.
+                        </div>
+                        <span class="tag">experimental</span>
+                    </a>
+                    <a class="card" href="11-node-reactive/">
+                        <div class="num">11</div>
+                        <div class="title">Reactive mask (node)</div>
+                        <div class="desc">
+                            The reactive mask through the composable <code>upscale()</code> node —
+                            transparents and particles authored as an in-graph coverage pass. Toggle
+                            it to A/B the ghost trails.
+                        </div>
+                        <span class="tag">integration</span>
+                    </a>
+                    <a class="card" href="12-temporal-guides/">
+                        <div class="num">12</div>
+                        <div class="title">Temporal guides</div>
+                        <div class="desc">
+                            The upscaler as a data-products provider: the split
+                            <code>dispatchGuides()</code> / <code>dispatchUpscale()</code> frame, with
+                            the published dilated motion, disocclusion, and depth guides sampled live
+                            as TSL texture nodes.
+                        </div>
+                        <span class="tag">integration</span>
+                    </a>
+                    <a class="card" href="13-guides-node/">
+                        <div class="num">13</div>
+                        <div class="title">Guides node</div>
+                        <div class="desc">
+                            The guides bundle as TSL: <code>temporalGuides()</code> publishes the
+                            products into the post graph, a toy effect tints disoccluded pixels
+                            pre-upscale, and <code>upscale({ guides })</code> shares one computation
+                            across both — the split frame, declaratively.
+                        </div>
+                        <span class="tag">integration</span>
+                    </a>
+                    <a class="card" href="14-pathtracer-alpha/">
+                        <div class="num">14</div>
+                        <div class="title">Path tracer · alpha</div>
+                        <div class="desc">
+                            A transparent canvas over page content:
+                            <code>three-gpu-pathtracer</code>'s WebGPU renderer accumulates at half
+                            resolution with a zero-alpha background, and the FSR1 spatial path upscales
+                            coverage along with color.
+                        </div>
+                        <span class="tag">integration</span>
+                    </a>
+                    <a class="card" href="15-transparent-canvas/">
+                        <div class="num">15</div>
+                        <div class="title">Transparent canvas</div>
+                        <div class="desc">
+                            Alpha on the <em>temporal</em> path: coverage reconstructed from jitter
+                            rather than interpolated. Thin sub-texel wires over page content, with a
+                            temporal/spatial toggle to see the difference.
+                        </div>
+                        <span class="tag">integration</span>
+                    </a>
+                    <a class="card" href="16-spatial-node/">
+                        <div class="num">16</div>
+                        <div class="title">Spatial node</div>
+                        <div class="desc">
+                            <code>upscaleSpatial(color)</code> for inputs with no depth or motion: an
+                            in-graph <code>pass()</code> or an external texture, with RCAS sharpness and
+                            denoise controls and HDR highlights sharpened in conditioned space.
+                        </div>
+                        <span class="tag">integration</span>
                     </a>
                 </div>
             </section>
-            <h2 class="section-head">Examples</h2>
-            <p class="section-sub">Single-purpose demos — one feature or integration each.</p>
-            <div class="grid">
-                <a class="card" href="01-hello/">
-                    <div class="num">01</div>
-                    <div class="title">Hello FSR3</div>
-                    <div class="desc">
-                        The minimal temporal upscale — one model, a slow orbit, no UI. The
-                        copy-paste starting point.
-                    </div>
-                    <span class="tag">starter</span>
-                </a>
-                <a class="card" href="02-fsr1-vs-fsr3/">
-                    <div class="num">02</div>
-                    <div class="title">FSR1 vs FSR3</div>
-                    <div class="desc">
-                        Switch between paths and toggle features one at a time to see what each
-                        stage of the upscaler buys you.
-                    </div>
-                    <span class="tag">showcase</span>
-                </a>
-                <a class="card" href="03-split-compare/">
-                    <div class="num">03</div>
-                    <div class="title">Split compare</div>
-                    <div class="desc">
-                        Native vs FSR side-by-side with a wipe slider — the same scene, the same
-                        moment, at two pixel budgets.
-                    </div>
-                    <span class="tag">A/B</span>
-                </a>
-                <a class="card" href="04-aliasing-torture/">
-                    <div class="num">04</div>
-                    <div class="title">Aliasing torture</div>
-                    <div class="desc">
-                        Dense thin geometry and a moiré floor under a moving camera — where naive
-                        upscaling falls apart and temporal holds.
-                    </div>
-                    <span class="tag">quality</span>
-                </a>
-                <a class="card" href="05-transparency/">
-                    <div class="num">05</div>
-                    <div class="title">Transparency &amp; particles</div>
-                    <div class="desc">
-                        Particles and transparent geometry have no reliable motion — an honest look
-                        at ghosting and why reactive masks matter.
-                    </div>
-                    <span class="tag">limitations</span>
-                </a>
-                <a class="card" href="06-screenspace-gi/">
-                    <div class="num">06</div>
-                    <div class="title">Screen-space effects</div>
-                    <div class="desc">
-                        Expensive GTAO / SSR / SSGI rendered at low resolution, then upscaled back
-                        to full size through FSR3.
-                    </div>
-                    <span class="tag">advanced</span>
-                </a>
-                <a class="card" href="07-tsl-node/">
-                    <div class="num">07</div>
-                    <div class="title">FSR3 as a TSL node</div>
-                    <div class="desc">
-                        The declarative drop-in — <code>post.outputNode = upscaleScene(scene, camera)</code>.
-                        The whole upscaler as one node in a THREE.RenderPipeline graph.
-                    </div>
-                    <span class="tag">integration</span>
-                </a>
-                <a class="card" href="08-tsl-compose/">
-                    <div class="num">08</div>
-                    <div class="title">Composing FSR3</div>
-                    <div class="desc">
-                        The upscaler node feeding a downstream TSL effect — <code>upscaleScene(...).mul(vignette)</code> — showing it lives in a post graph.
-                    </div>
-                    <span class="tag">integration</span>
-                </a>
-                <a class="card" href="09-kitchen-sink/">
-                    <div class="num">09</div>
-                    <div class="title">Kitchen sink — SSGI + SSR</div>
-                    <div class="desc">
-                        A full screen-space stack (SSGI + SSR) rendered at low res and upscaled by the
-                        composable <code>upscale(...)</code> node — one TSL post graph, effects and all.
-                    </div>
-                    <span class="tag">advanced</span>
-                </a>
-                <a class="card" href="10-ssgi-denoise/">
-                    <div class="num">10</div>
-                    <div class="title">SSGI denoise A/B</div>
-                    <div class="desc">
-                        Experimental scratchpad comparing SSGI denoisers before FSR3 upscales —
-                        documents why a second temporal resolver (<code>recurrentDenoise</code>)
-                        fights FSR3's jitter. Not part of the library.
-                    </div>
-                    <span class="tag">experimental</span>
-                </a>
-                <a class="card" href="11-node-reactive/">
-                    <div class="num">11</div>
-                    <div class="title">Reactive mask (node)</div>
-                    <div class="desc">
-                        The reactive mask through the composable <code>upscale()</code> node —
-                        transparents and particles authored as an in-graph coverage pass. Toggle
-                        it to A/B the ghost trails.
-                    </div>
-                    <span class="tag">integration</span>
-                </a>
-                <a class="card" href="12-temporal-guides/">
-                    <div class="num">12</div>
-                    <div class="title">Temporal guides</div>
-                    <div class="desc">
-                        The upscaler as a data-products provider: the split
-                        <code>dispatchGuides()</code> / <code>dispatchUpscale()</code> frame, with
-                        the published dilated motion, disocclusion, and depth guides sampled live
-                        as TSL texture nodes.
-                    </div>
-                    <span class="tag">integration</span>
-                </a>
-                <a class="card" href="13-guides-node/">
-                    <div class="num">13</div>
-                    <div class="title">Guides node</div>
-                    <div class="desc">
-                        The guides bundle as TSL: <code>temporalGuides()</code> publishes the
-                        products into the post graph, a toy effect tints disoccluded pixels
-                        pre-upscale, and <code>upscale({ guides })</code> shares one computation
-                        across both — the split frame, declaratively.
-                    </div>
-                    <span class="tag">integration</span>
-                </a>
-                <a class="card" href="14-pathtracer-alpha/">
-                    <div class="num">14</div>
-                    <div class="title">Path tracer · alpha</div>
-                    <div class="desc">
-                        A transparent canvas over page content:
-                        <code>three-gpu-pathtracer</code>'s WebGPU renderer accumulates at half
-                        resolution with a zero-alpha background, and the FSR1 spatial path upscales
-                        coverage along with color.
-                    </div>
-                    <span class="tag">integration</span>
-                </a>
-                <a class="card" href="15-transparent-canvas/">
-                    <div class="num">15</div>
-                    <div class="title">Transparent canvas</div>
-                    <div class="desc">
-                        Alpha on the <em>temporal</em> path: coverage reconstructed from jitter
-                        rather than interpolated. Thin sub-texel wires over page content, with a
-                        temporal/spatial toggle to see the difference.
-                    </div>
-                    <span class="tag">integration</span>
-                </a>
-                <a class="card" href="16-spatial-node/">
-                    <div class="num">16</div>
-                    <div class="title">Spatial node</div>
-                    <div class="desc">
-                        <code>upscaleSpatial(color)</code> for inputs with no depth or motion: an
-                        in-graph <code>pass()</code> or an external texture, with RCAS sharpness and
-                        denoise controls and HDR highlights sharpened in conditioned space.
-                    </div>
-                    <span class="tag">integration</span>
-                </a>
-            </div>
+            <section id="babylon" class="category" aria-labelledby="babylon-heading">
+                <h2 id="babylon-heading" class="category-title">Babylon.js</h2>
+                <p class="section-sub">Mesh scenes and Frame Graph integration. Compare temporal reconstruction, native rendering and reactive masking.</p>
+                <div class="grid">
+                    <a class="card" href="18-babylon-framegraph/">
+                        <div class="num">18</div>
+                        <div class="title">Babylon Frame Graph</div>
+                        <div class="desc">
+                            Temporal upscaling in Babylon 9.29 with native Frame Graph histories.
+                            Toggle exposure changes and switch to the defined bilinear fallback.
+                        </div>
+                        <span class="tag">Babylon</span>
+                    </a>
+                    <a class="card" href="19-babylon-hello/">
+                        <div class="num">19</div><div class="title">Hello Babylon</div>
+                        <div class="desc">A real 3D scene with HDR color, linear depth and motion vectors. Switch between temporal reconstruction, bilinear and NativeAA.</div>
+                        <span class="tag">getting started</span>
+                    </a>
+                    <a class="card" href="20-babylon-aliasing/">
+                        <div class="num">20</div><div class="title">Aliasing torture</div>
+                        <div class="desc">Subpixel pickets, crossing wires and a receding checkerboard. Inspect static convergence and stability under motion.</div>
+                        <span class="tag">quality</span>
+                    </a>
+                    <a class="card" href="21-babylon-compare/">
+                        <div class="num">21</div><div class="title">Native / temporal comparison</div>
+                        <div class="desc">Move the divider between an unjittered native reference and the reconstructed image. Same scene, camera and display transform.</div>
+                        <span class="tag">comparison</span>
+                    </a>
+                    <a class="card" href="22-babylon-transparency/">
+                        <div class="num">22</div><div class="title">Transparency</div>
+                        <div class="desc">Animated alpha-blended glass and emissive patches. Toggle a reactive mask derived from opaque and complete scene color.</div>
+                        <span class="tag">reactive mask</span>
+                    </a>
+                    <a class="card" href="23-babylon-spatial-temporal/">
+                        <div class="num">23</div><div class="title">Spatial / temporal</div>
+                        <div class="desc">EASU + RCAS against temporal reconstruction. Two low-resolution renders, with a movable divider and matching display transform.</div>
+                        <span class="tag">comparison</span>
+                    </a>
+                    <a class="card" href="24-babylon-compose/">
+                        <div class="num">24</div><div class="title">Frame Graph composition</div>
+                        <div class="desc">Consume the upscaled output in another graph task. A full-resolution vignette changes color while preserving alpha and history.</div>
+                        <span class="tag">composition</span>
+                    </a>
+                    <a class="card" href="25-babylon-reactive-mask/">
+                        <div class="num">25</div><div class="title">Authored reactive mask</div>
+                        <div class="desc">Render transparent coverage in a dedicated geometry pass. Toggle its effect and inspect the mask with opaque depth occlusion.</div>
+                        <span class="tag">reactive mask</span>
+                    </a>
+                    <a class="card" href="26-babylon-transparent-canvas/">
+                        <div class="num">26</div><div class="title">Transparent canvas</div>
+                        <div class="desc">Reconstruct silhouette alpha through the temporal pipeline. Inspect thin geometry over HTML content and switch the page background.</div>
+                        <span class="tag">alpha</span>
+                    </a>
+                    <a class="card" href="27-babylon-screen-effects/">
+                        <div class="num">27</div><div class="title">Screen-space effects</div>
+                        <div class="desc">Babylon SSAO or SSR at reduced resolution, followed by temporal reconstruction. Compare contact occlusion and glossy reflections.</div>
+                        <span class="tag">effects</span>
+                    </a>
+                    <a class="card" href="28-babylon-effect-stack/">
+                        <div class="num">28</div><div class="title">Screen-space stack</div>
+                        <div class="desc">Compose SSAO, SSR and HDR bloom before upscaling. Toggle each effect independently in the same Frame Graph.</div>
+                        <span class="tag">advanced</span>
+                    </a>
+                    <a class="card" href="29-babylon-temporal-guides/">
+                        <div class="num">29</div><div class="title">Temporal guides</div>
+                        <div class="desc">Inspect live disocclusion, dilated depth and motion alongside the reconstructed image, using the split frame API.</div>
+                        <span class="tag">guides</span>
+                    </a>
+                    <a class="card" href="30-babylon-guides-compose/">
+                        <div class="num">30</div><div class="title">Shared guides</div>
+                        <div class="desc">Tint disoccluded pixels in a graph task between guide generation and final upscaling. Both consumers share one guide computation.</div>
+                        <span class="tag">composition</span>
+                    </a>
+                </div>
+            </section>
+            <section id="webgpu" class="category" aria-labelledby="webgpu-heading">
+                <h2 id="webgpu-heading" class="category-title">Raw WebGPU</h2>
+                <p class="section-sub">Use the shared core directly, without a rendering engine.</p>
+                <div class="grid">
+                    <a class="card" href="17-core-webgpu/">
+                        <div class="num">17</div>
+                        <div class="title">Raw WebGPU core</div>
+                        <div class="desc">
+                            The temporal core without an engine: positive linear depth, explicit
+                            motion, a reactive mask, and independent host and conditioning exposure.
+                        </div>
+                        <span class="tag">WebGPU</span>
+                    </a>
+                </div>
+            </section>
             <footer class="foot">
-                Built by
+                <a href="https://github.com/pmndrs/upscaler" target="_blank" rel="noopener">Fork on GitHub</a><br />
+                Upstream built by
                 <a href="https://github.com/DennisSmolek" target="_blank" rel="noopener">Dennis Smolek</a>
                 ·
-                <a href="https://www.npmjs.com/package/@pmndrs/upscaler" target="_blank" rel="noopener">npm</a>
-                ·
-                <a href="https://github.com/pmndrs/upscaler" target="_blank" rel="noopener">GitHub</a>
+                <a href="https://github.com/pmndrs/upscaler" target="_blank" rel="noopener">upstream project</a>
                 · maintained under
                 <a href="https://github.com/pmndrs" target="_blank" rel="noopener">Poimandres</a><br />
                 Based on AMD FidelityFX Super Resolution (MIT) — independent and unaffiliated.

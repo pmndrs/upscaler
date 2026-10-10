@@ -1,12 +1,12 @@
 import { HalfFloatType, NoColorSpace, RGBAFormat, type Texture } from 'three';
 import { StorageTexture, type WebGPURenderer } from 'three/webgpu';
 
-import { ComputePass } from './internal/ComputePass';
-import { notReadyError } from './initializationError';
-import { ConstantsBuffer } from './internal/ConstantsBuffer';
-import { getDevice, getGPUTexture } from './internal/threeWebGPU';
-import { FLAG_MOMENTS_YCOCG } from './shaders/common';
-import { MOMENTS_SHADER } from './shaders/moments';
+import { ComputePass } from './internal/ComputePass.js';
+import { notReadyError } from './initializationError.js';
+import { ConstantsBuffer } from './internal/ConstantsBuffer.js';
+import { getDevice, getGPUTexture } from './internal/threeWebGPU.js';
+import { FLAG_MOMENTS_YCOCG } from './shaders/common.js';
+import { MOMENTS_SHADER } from './shaders/moments.js';
 
 /** Which scalar the moments are computed over. */
 export type MomentsSpace = 'linear' | 'ycocg';

@@ -1,5 +1,5 @@
-import { WGSL_CONSTANTS } from './common';
-import { assembleShader } from './wgsl';
+import { WGSL_CONSTANTS } from './common.js';
+import { assembleShader } from './wgsl.js';
 
 /**
  * Auto-generate a reactive mask (FSR2/3's `ffxFsr2GenerateReactiveMask`).

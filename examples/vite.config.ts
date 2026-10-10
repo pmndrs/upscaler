@@ -26,12 +26,15 @@ export default defineConfig(({ mode }) => {
         // a shared node_modules/.vite makes concurrent dev servers 504 each other.
         cacheDir: resolve(root, '../node_modules/.vite-examples'),
         // Deploy base. GitHub Pages serves a project site under /<repo>/, so the CI
-        // build sets PAGES_BASE=/upscaler/; local dev/build default to '/'. A custom
-        // domain later just drops PAGES_BASE. Gallery links are relative so they
+        // build derives PAGES_BASE from configure-pages; local dev/build default
+        // to '/'. A custom domain gets '/' too. Gallery links are relative so they
         // resolve correctly under either base.
         base: process.env.PAGES_BASE ?? '/',
         resolve: {
             alias: {
+                '@pmndrs/upscaler/core': packageConsumer ? resolve(packageEntry!, '../core.js') : resolve(root, '../src/core/index.ts'),
+                '@pmndrs/upscaler/babylon': packageConsumer ? resolve(packageEntry!, '../babylon.js') : resolve(root, '../src/babylon/index.ts'),
+                '@pmndrs/upscaler/three': packageConsumer ? resolve(packageEntry!, '../three.js') : resolve(root, '../src/three/index.ts'),
                 '@pmndrs/upscaler': packageConsumer
                     ? packageEntry
                     : resolve(root, '../src/index.ts'),
@@ -63,6 +66,20 @@ export default defineConfig(({ mode }) => {
                           pathtraceralpha: resolve(root, '14-pathtracer-alpha/index.html'),
                           transparentcanvas: resolve(root, '15-transparent-canvas/index.html'),
                           spatialnode: resolve(root, '16-spatial-node/index.html'),
+                          core: resolve(root, '17-core-webgpu/index.html'),
+                          babylon: resolve(root, '18-babylon-framegraph/index.html'),
+                          babylonhello: resolve(root, '19-babylon-hello/index.html'),
+                          babylonaliasing: resolve(root, '20-babylon-aliasing/index.html'),
+                          babyloncompare: resolve(root, '21-babylon-compare/index.html'),
+                          babylontransparency: resolve(root, '22-babylon-transparency/index.html'),
+                          babylonspatial: resolve(root, '23-babylon-spatial-temporal/index.html'),
+                          babyloncompose: resolve(root, '24-babylon-compose/index.html'),
+                          babylonreactive: resolve(root, '25-babylon-reactive-mask/index.html'),
+                          babyloncanvasalpha: resolve(root, '26-babylon-transparent-canvas/index.html'),
+                          babyloneffects: resolve(root, '27-babylon-screen-effects/index.html'),
+                          babylonstack: resolve(root, '28-babylon-effect-stack/index.html'),
+                          babylonguides: resolve(root, '29-babylon-temporal-guides/index.html'),
+                          babylonguidescompose: resolve(root, '30-babylon-guides-compose/index.html'),
                           s1reinvest: resolve(root, 's1-reinvest/index.html'),
                           s2fractal: resolve(root, 's2-fractal/index.html'),
                           s3howlow: resolve(root, 's3-how-low/index.html'),

@@ -436,7 +436,7 @@ async function runGpuSmoke(outputDirectory, packageEntry, options) {
         await waitForExample(client);
         const probe = await runProbe(client);
         try { assertProbeResult(probe); } catch (error) {
-            throw new Error(String(error) + "\n" + JSON.stringify(probe));
+            throw new Error(String(error) + "\n" + JSON.stringify(probe) + '\n' + browserLogFailures(logRecords).map(({ text }) => text).join('\n'));
         }
 
         const failures = browserLogFailures(logRecords);
@@ -453,6 +453,10 @@ async function runGpuSmoke(outputDirectory, packageEntry, options) {
         // Teardown only warns: Chrome keeps writing its cache for a moment after
         // SIGTERM, so it must have exited before its profile is deleted, and a
         // leftover temp dir must never turn a PASS into a failure.
+        if (client) await Promise.race([
+            client.call('Browser.close').catch(() => {}),
+            new Promise(resolveClose => setTimeout(resolveClose, 2000)),
+        ]);
         client?.close();
         await stopChild(chrome);
         await stopChild(preview);

@@ -7,6 +7,8 @@ they disagree, the guides and the source win.
 
 ## Using the library
 
+- [WebGPU core](webgpu-core.md), [Babylon Frame Graph](babylon-framegraph.md) and [validation](webgpu-validation.md).
+
 Maintained, normative, for anyone integrating `@pmndrs/upscaler`:
 
 - [Getting started](getting-started.md): requirements, choosing between

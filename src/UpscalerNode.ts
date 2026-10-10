@@ -12,12 +12,12 @@ import {
     velocity,
 } from 'three/tsl';
 
-import { Upscaler } from './Upscaler';
-import type { TemporalGuidesNode } from './TemporalGuidesNode';
-import { getGPUTexture } from './internal/threeWebGPU';
-import { getPipelineEvents, installRenderPipelineHooks } from './internal/renderPipelineHooks';
-import { getQualityModeRatio } from './math/resolution';
-import { QualityMode, type UpscalePath } from './types';
+import { Upscaler } from './Upscaler.js';
+import type { TemporalGuidesNode } from './TemporalGuidesNode.js';
+import { getGPUTexture } from './internal/threeWebGPU.js';
+import { getPipelineEvents, installRenderPipelineHooks } from './internal/renderPipelineHooks.js';
+import { getQualityModeRatio } from './math/resolution.js';
+import { QualityMode, type UpscalePath } from './types.js';
 
 // three's node base + its builder/frame carry incomplete TS types and expect a
 // WebGPURenderer the public d.ts only types as `Renderer`, so setup()/

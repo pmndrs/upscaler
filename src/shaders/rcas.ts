@@ -1,5 +1,5 @@
-import { WGSL_CONSTANTS, WGSL_TONEMAP } from './common';
-import { assembleShader } from './wgsl';
+import { WGSL_CONSTANTS, WGSL_TONEMAP } from './common.js';
+import { assembleShader } from './wgsl.js';
 
 /**
  * Builds the RCAS compute shader.
@@ -25,7 +25,7 @@ import { assembleShader } from './wgsl';
  * keeps the result inside the conditioned range, but that range ends at
  * linear infinity, so near 1 it bounds nothing in linear terms.
  */
-function createRcasShader(fsr315NumericParity: boolean, conditionedInput = false): string {
+function createRcasShader(fsr315NumericParity: boolean, conditionedInput = false, ageKnee = 0): string {
     const luma = fsr315NumericParity
         ? /* wgsl */ `
     // FSR's inexpensive luma is scaled by two; the scale cancels in ratios.
@@ -200,7 +200,9 @@ ${lowerLimiter}
     let lobeRGB = max(-hitMin, hitMax);
     // C.sharpness 1 -> 0 attenuation stops (sharpest), 0 -> 2 stops.
     let peak = exp2(-2.0 * (1.0 - C.sharpness));
-    var lobe = max(-RCAS_LIMIT, min(max(lobeRGB.r, max(lobeRGB.g, lobeRGB.b)), 0.0)) * peak;
+    var lobe = max(-RCAS_LIMIT, min(max(lobeRGB.r, max(lobeRGB.g, lobeRGB.b)), 0.0)) * peak;${ageKnee > 0 ? `
+    if (hasFlag(FLAG_INPUT_REINHARD)) { lobe *= smoothstep(0.0, ${ageKnee.toPrecision(9)}, textureLoad(inputColor, sp, 0).a); }
+` : ''}
 
     //* Denoise (FSR1's FSR_RCAS_DENOISE)
     // A lone luma outlier vs its cross-neighborhood, normalized by the local
@@ -327,3 +329,6 @@ export const RCAS_HOISTED_EXPOSURE_SHADER = createRcasExperimentShader('hoisted'
  * validation before any adoption.
  */
 export const RCAS_TONEMAP_SPACE_SHADER = createRcasExperimentShader('tonemap-space');
+
+/** Temporal sharpening ramps up with normalized accumulation age. Spatial RCAS is unchanged. */
+export function buildRcasShader(ageKnee = 0): string { return createRcasShader(true, true, ageKnee); }

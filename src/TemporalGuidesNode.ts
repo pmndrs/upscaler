@@ -2,9 +2,9 @@ import { DataTexture, FloatType, NearestFilter, RedFormat, Vector2 } from 'three
 import { NodeUpdateType, TempNode, type WebGPURenderer } from 'three/webgpu';
 import { nodeObject, passTexture } from 'three/tsl';
 
-import { Upscaler } from './Upscaler';
-import { getGPUTexture } from './internal/threeWebGPU';
-import type { TemporalGuides } from './types';
+import { Upscaler } from './Upscaler.js';
+import { getGPUTexture } from './internal/threeWebGPU.js';
+import type { TemporalGuides } from './types.js';
 
 // Same typing posture as UpscalerNode: three's node builder/frame carry
 // incomplete TS types, so the boundary takes `any` and casts.
@@ -174,6 +174,10 @@ export class TemporalGuidesNode extends TempNode {
             // wasn't backed yet) — let the owner finish it before starting
             // another; dispatching now would throw.
             if (upscaler.guidesPending) return;
+            // The initial estimate uses rounded display/ratio dimensions, while
+            // Three's scene pass floors them. Let the owner configure from the
+            // actual beauty texture before opening a split frame (also on resize).
+            if (gpu.width !== upscaler.renderWidth || gpu.height !== upscaler.renderHeight) return;
         } else if (gpu.width !== upscaler.renderWidth || gpu.height !== upscaler.renderHeight) {
             this._configureStandalone(gpu.width, gpu.height);
         }

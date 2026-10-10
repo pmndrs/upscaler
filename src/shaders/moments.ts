@@ -1,5 +1,5 @@
-import { WGSL_COLOR, WGSL_CONSTANTS } from './common';
-import { assembleShader } from './wgsl';
+import { WGSL_COLOR, WGSL_CONSTANTS } from './common.js';
+import { assembleShader } from './wgsl.js';
 
 /**
  * Signal-agnostic per-pixel moments — the reusable statistics primitive

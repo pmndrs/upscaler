@@ -5,3 +5,6 @@ bench/dist/
 .DS_Store
 
 bench/results/windows-local/
+artifacts/
+.playwright-cli/
+output/playwright/

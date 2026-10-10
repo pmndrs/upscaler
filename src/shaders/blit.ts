@@ -1,5 +1,5 @@
-import { WGSL_CONSTANTS, WGSL_TONEMAP } from './common';
-import { assembleShader } from './wgsl';
+import { WGSL_CONSTANTS, WGSL_TONEMAP } from './common.js';
+import { assembleShader } from './wgsl.js';
 
 /**
  * Output/blit pass.

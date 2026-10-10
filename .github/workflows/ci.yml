@@ -27,3 +27,4 @@ jobs:
             - run: npm test
             - run: npm run build
             - run: npm run verify:packed-guides
+            - run: npm run verify:packed-entrypoints

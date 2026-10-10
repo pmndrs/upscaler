@@ -1,8 +1,10 @@
-# @pmndrs/upscaler — Claude Code Instructions & Handoff
+# @pmndrs/upscaler
 
-FSR1 spatial + FSR2/3-style **temporal** upscaling for three.js `WebGPURenderer`, as hand-written **WGSL compute passes**. WebGPU-only, TypeScript, no TSL, no WebGL fallback. Extracted from the homefig monorepo into this standalone repo (`pmndrs/upscaler`).
-
----
+Shared encoding lives in `src/core/UpscalerCore.ts`. The Three adapter preserves
+the root API; `src/babylon` provides a Babylon Frame Graph adapter. See
+`docs/webgpu-core.md`, `docs/babylon-framegraph.md` and `docs/webgpu-validation.md`
+for current ownership, input contracts and measured limits. Historical Three
+pass descriptions below continue to apply to neutral settings.
 
 ## ⚠️ READ FIRST: current status
 

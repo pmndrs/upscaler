@@ -1,5 +1,5 @@
-import { WGSL_COLOR, WGSL_CONSTANTS } from './common';
-import { assembleShader } from './wgsl';
+import { WGSL_COLOR, WGSL_CONSTANTS } from './common.js';
+import { assembleShader } from './wgsl.js';
 
 /**
  * Debug visualization pass. Replaces the RCAS output when a debug view is

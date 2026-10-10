@@ -38,6 +38,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 import {
+    closeOwnedCdpBrowser,
     parsePort,
     removeTempDirectory,
     resolveServerUrl,
@@ -438,6 +439,7 @@ async function main() {
             chromeExecutable(),
             [
                 '--headless=new',
+                '--enable-automation',
                 '--enable-unsafe-webgpu',
                 '--disable-background-timer-throttling',
                 '--disable-renderer-backgrounding',
@@ -451,6 +453,17 @@ async function main() {
         );
         const cdpBase = `http://127.0.0.1:${port}`;
         await waitForUrl(`${cdpBase}/json/version`);
+        // A busy debugging port may answer from somebody else's browser. Do not
+        // create a page or later close it until our unique profile is confirmed.
+        const version = await fetch(`${cdpBase}/json/version`).then((r) => r.json());
+        const identity = new CdpClient(version.webSocketDebuggerUrl);
+        try {
+            const command = await identity.call('Browser.getBrowserCommandLine');
+            if (!command.arguments.includes(`--user-data-dir=${profile}`))
+                throw new Error(`Chrome debugging port ${port} belongs to another browser. Choose another --port.`);
+        } finally {
+            identity.close();
+        }
         const created = await fetch(`${cdpBase}/json/new?about:blank`, { method: 'PUT' }).then((r) =>
             r.json(),
         );
@@ -513,7 +526,7 @@ async function main() {
         console.log(`artifacts: ${outputDirectory}`);
         if (logRecords.length) console.warn(`browser log records:\n${logRecords.join('\n')}`);
     } finally {
-        client?.close();
+        await closeOwnedCdpBrowser(client);
         await stopChild(chrome);
         await removeTempDirectory(profile, 'Chrome profile');
         await stopChild(viteServer);

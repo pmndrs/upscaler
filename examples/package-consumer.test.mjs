@@ -24,7 +24,7 @@ test('package-consumer mode resolves Example 13 from the packed entry', async ()
               })
             : config;
 
-    expect(resolvedConfig.resolve?.alias).toEqual({
+    expect(resolvedConfig.resolve?.alias).toMatchObject({
         '@pmndrs/upscaler': packageEntry,
     });
     expect(resolvedConfig.build?.rollupOptions?.input).toEqual({
@@ -45,7 +45,7 @@ test('ordinary modes ignore the package entry and resolve source', async () => {
               })
             : config;
 
-    expect(resolvedConfig.resolve?.alias).toEqual({
+    expect(resolvedConfig.resolve?.alias).toMatchObject({
         '@pmndrs/upscaler': resolve(import.meta.dirname, '../src/index.ts'),
     });
 });
