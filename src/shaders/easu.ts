@@ -1,5 +1,5 @@
-import { WGSL_CONSTANTS } from './common';
-import { assembleShader } from './wgsl';
+import { WGSL_CONSTANTS } from './common.js';
+import { assembleShader } from './wgsl.js';
 
 /**
  * EASU — Edge Adaptive Spatial Upsampling, the upscale half of FSR1.

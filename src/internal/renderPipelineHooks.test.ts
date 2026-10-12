@@ -6,7 +6,7 @@ import {
     installRenderPipelineHooks,
     type PipelineEvents,
     type PipelineHooks,
-} from './renderPipelineHooks';
+} from './renderPipelineHooks.js';
 
 //* Fixtures — r186 RenderPipeline._updateContext() / r185 RenderPipeline.context shapes
 

@@ -1,5 +1,13 @@
 # Temporal guides
 
+The raw core exposes `encodeGuides()` / `encodeUpscale()` with adapter-owned
+textures; see [WebGPU core](webgpu-core.md) for the frozen split-frame contract.
+Babylon exposes stable `FrameGraphUpscaleTask.guides` handles and
+`createGuidesTask()` for guide consumers before the final upscale. The current
+depth guide resolves to native `history.write`; see
+[Babylon Frame Graph](babylon-framegraph.md#effets-écran-et-guides-partagés).
+The remainder of this page documents the compatible Three bundle and TSL nodes.
+
 Dilated motion, dilated depth and disocclusion are **frame properties, not upscaler
 properties**. Every temporal effect upstream of the upscaler needs them: SSGI/SSR
 temporal reprojection, SVGF-class denoisers, any TAA-class pass. Without a shared

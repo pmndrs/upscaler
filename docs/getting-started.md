@@ -1,7 +1,13 @@
 # Getting started
 
-This guide covers installing `@pmndrs/upscaler` and choosing between its four
-integration surfaces. What the inputs must contain (velocity, depth, jitter,
+The package exports `/core` without engine dependencies, `/babylon` for Babylon
+9.29.x, and `/three` plus the compatible root for Three.js. Start with
+[WebGPU core](webgpu-core.md) or [Babylon Frame Graph](babylon-framegraph.md)
+for those integrations. Engine peer dependencies are optional. These entry points are proposed additions;
+validate a locally packed archive before release.
+
+The rest of this guide covers the four Three integration surfaces.
+What the inputs must contain (velocity, depth, jitter,
 reactive masks, exposure, alpha) is specified in
 [Inputs and contracts](inputs-and-contracts.md); read that before shipping an
 integration, because most upscaler bugs are input bugs.
@@ -36,7 +42,7 @@ the inputs and who applies the jitter.
 | Other temporal effects that should share the upscaler's motion/disocclusion data | [`temporalGuides()` / `upscaler.guides`](temporal-guides.md) | `examples/12-temporal-guides` (raw), `13-guides-node` (TSL) |
 
 Run the examples locally with `npm run examples` (port 5300), or browse the
-[live gallery](https://pmndrs.github.io/upscaler/).
+[example gallery](https://pmndrs.github.io/upscaler/).
 
 The upscaler's output is **linear/HDR** on every surface. It applies no tone mapping and
 no output transfer function, so presentation stays your renderer's job. The snippets

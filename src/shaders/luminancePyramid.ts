@@ -1,5 +1,5 @@
-import { WGSL_COLOR, WGSL_CONSTANTS } from './common';
-import { assembleShader } from './wgsl';
+import { WGSL_COLOR, WGSL_CONSTANTS } from './common.js';
+import { assembleShader } from './wgsl.js';
 
 /**
  * Luminance reduction → auto-exposure (FSR2/3's "compute luminance pyramid"

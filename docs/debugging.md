@@ -1,5 +1,13 @@
 # Debugging
 
+For `/core`, call `configure()` and await `prepare()` before encoding; validate
+resolved resources against its descriptors. After abandoning an encoder or split
+frame, call `resetHistory()`. For Babylon, prepare/rebuild the graph after changing
+requirements and restore camera jitter via `endFrame()` in a `finally`.
+See [WebGPU core](webgpu-core.md) and [Babylon Frame Graph](babylon-framegraph.md)
+for preparation, lifetime and split-order errors. The examples' separate GPU
+harness is `npm run verify:babylon-examples:gpu`; CPU CI never requires a device.
+
 Most upscaler problems are input problems: the image is wrong because a contract in
 [Inputs and contracts](inputs-and-contracts.md) isn't met, not because the
 accumulation math is. The debug views exist to tell those apart. Each one renders a

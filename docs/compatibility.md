@@ -1,5 +1,16 @@
 # Compatibility and limitations
 
+## Engine entry points
+
+`/core` has no engine dependency. `/babylon` targets `@babylonjs/core@9.29.0`
+with a peer range restricted to 9.29.x, guarded private accesses in
+`src/babylon/compatibility.ts`, and native Frame Graph history rotation.
+The root and `/three` preserve the Three integration described below. Engine
+peers are optional; importing `/babylon` does not require Three and importing
+`/core` requires neither engine. See [WebGPU core](webgpu-core.md),
+[Babylon Frame Graph](babylon-framegraph.md) and the recorded
+[validation limits](webgpu-validation.md).
+
 ## three.js versions
 
 | three | Status |

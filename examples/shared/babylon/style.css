@@ -1,0 +1,30 @@
+:root { color-scheme: dark; font: 14px/1.5 system-ui, sans-serif; color: #dce5ef; background: #0c111b; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+header, main { max-width: 1440px; margin: auto; padding: 16px 24px; }
+header { padding-bottom: 0; }
+a { color: #70d9cf; text-decoration: none; }
+a:hover { text-decoration: underline; }
+.badge { margin-left: 24px; color: #8ea0ba; font-size: 11px; letter-spacing: .08em; }
+h1 { font-size: 24px; margin: 14px 0 4px; font-weight: 600; }
+header p, .note { color: #92a2b9; margin: 4px 0 12px; }
+.viewport { width: 100%; height: min(62vh, 740px); min-height: 240px; position: relative; border: 1px solid #293345; border-radius: 8px; overflow: hidden; background: #111827; }
+canvas { display: block; width: 100%; height: 100%; }
+.transparent-stage { background: repeating-conic-gradient(#24394e 0% 25%, #627991 0% 50%) 0 0 / 48px 48px; }
+.transparent-stage[data-backdrop="light"] { background: #e7eff7; }
+.transparent-stage[data-backdrop="dark"] { background: #0b1320; }
+.transparent-stage canvas { position: relative; z-index: 1; }
+.html-backdrop { position: absolute; inset: 20px 15px auto; font-weight: 700; letter-spacing: .18em; color: #a9c8e5; text-shadow: 0 1px 4px #000; text-align: center; }
+.guide-labels { position: absolute; inset: 0; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; pointer-events: none; font-size: 11px; }
+.guide-labels div { padding: 8px; border: 1px solid #334155; }
+.guide-labels span { display: inline-block; padding: 3px 6px; background: #0c111bd9; border-radius: 3px; }
+.comparison-labels { position: absolute; inset: 12px 16px auto; display: flex; justify-content: space-between; pointer-events: none; }
+.comparison-labels span { background: #0c111bd9; padding: 4px 10px; border-radius: 4px; }
+.controls { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; padding: 16px 0 4px; }
+label { display: flex; gap: 8px; align-items: center; }
+select, button { font: inherit; color: inherit; background: #172235; border: 1px solid #36465d; padding: 6px 10px; border-radius: 5px; }
+button { cursor: pointer; } button:hover { border-color: #70d9cf; }
+input { accent-color: #63d5c9; }
+#status { color: #70d9cf; min-height: 21px; }
+.note { font-size: 12px; max-width: 1000px; }
+@media (max-width: 600px) { header, main { padding-left: 12px; padding-right: 12px; } .badge { margin-left: 10px; font-size: 9px; } h1 { font-size: 21px; } .controls { gap: 10px; } select { max-width: 210px; } .viewport { height: 45vh; } }

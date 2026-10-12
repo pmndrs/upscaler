@@ -14,13 +14,40 @@
         "isolatedModules": true,
         "resolveJsonModule": true,
         "noEmit": true,
-        "lib": ["ES2022", "DOM", "DOM.Iterable"],
-        "types": ["@webgpu/types", "vite/client"],
+        "lib": [
+            "ES2022",
+            "DOM",
+            "DOM.Iterable"
+        ],
+        "types": [
+            "@webgpu/types",
+            "vite/client"
+        ],
         "baseUrl": ".",
         "paths": {
-            "@pmndrs/upscaler": ["src/index.ts"]
+            "@pmndrs/upscaler": [
+                "src/index.ts"
+            ],
+            "@pmndrs/upscaler/core": [
+                "src/core/index.ts"
+            ],
+            "@pmndrs/upscaler/three": [
+                "src/three/index.ts"
+            ],
+            "@pmndrs/upscaler/babylon": [
+                "src/babylon/index.ts"
+            ]
         }
     },
-    "include": ["src", "bench/src", "examples", "test"],
-    "exclude": ["node_modules", "dist", "examples/vite.config.ts"]
+    "include": [
+        "src",
+        "bench/src",
+        "examples",
+        "test"
+    ],
+    "exclude": [
+        "node_modules",
+        "dist",
+        "examples/vite.config.ts"
+    ]
 }

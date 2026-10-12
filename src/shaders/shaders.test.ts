@@ -1,42 +1,42 @@
 import { describe, expect, it } from 'vitest';
 
-import { BenchmarkClock } from '../../bench/src/benchmark/clock';
-import { BenchmarkCollector } from '../../bench/src/benchmark/collector';
+import { BenchmarkClock } from '../../bench/src/benchmark/clock.js';
+import { BenchmarkCollector } from '../../bench/src/benchmark/collector.js';
 import {
     getBenchmarkScenario,
     resolveCaptureFrames,
-} from '../../bench/src/benchmark/scenarios';
+} from '../../bench/src/benchmark/scenarios.js';
 import {
     SingleVariantRegistry,
     getActiveResolverCount,
-} from '../../bench/src/benchmark/variants';
-import { ComputePass } from '../internal/ComputePass';
-import * as accumulateModule from './accumulate';
-import { ACCUMULATE_SHADER } from './accumulate';
-import * as blitModule from './blit';
-import { BLIT_SHADER } from './blit';
-import { DEBUG_SHADER } from './debug';
-import * as easuModule from './easu';
-import { EASU_SHADER } from './easu';
-import { GENERATE_REACTIVE_SHADER } from './generateReactive';
-import { LUMINANCE_PYRAMID_SHADER } from './luminancePyramid';
-import { MOMENTS_SHADER } from './moments';
-import * as rcasModule from './rcas';
+} from '../../bench/src/benchmark/variants.js';
+import { ComputePass } from '../internal/ComputePass.js';
+import * as accumulateModule from './accumulate.js';
+import { ACCUMULATE_SHADER } from './accumulate.js';
+import * as blitModule from './blit.js';
+import { BLIT_SHADER } from './blit.js';
+import { DEBUG_SHADER } from './debug.js';
+import * as easuModule from './easu.js';
+import { EASU_SHADER } from './easu.js';
+import { GENERATE_REACTIVE_SHADER } from './generateReactive.js';
+import { LUMINANCE_PYRAMID_SHADER } from './luminancePyramid.js';
+import { MOMENTS_SHADER } from './moments.js';
+import * as rcasModule from './rcas.js';
 import {
     RCAS_HOISTED_EXPOSURE_SHADER,
     RCAS_LEGACY_SHADER,
     RCAS_PER_TAP_SHADER,
     RCAS_SHADER,
     RCAS_TONEMAP_SPACE_SHADER,
-} from './rcas';
-import { DEPTH_CLIP_SHADER, RECONSTRUCT_SHADER } from './reconstruct';
+} from './rcas.js';
+import { DEPTH_CLIP_SHADER, RECONSTRUCT_SHADER } from './reconstruct.js';
 import {
     DEPTH_CLIP_VARIANTS,
     RECONSTRUCT_CROSS_FRAME_SHADER,
     buildDepthClipVariant,
-} from './reconstructVariants';
-import { SHADING_CHANGE_SHADER } from './shadingChange';
-import { assembleShader } from './wgsl';
+} from './reconstructVariants.js';
+import { SHADING_CHANGE_SHADER } from './shadingChange.js';
+import { assembleShader } from './wgsl.js';
 
 const ALL_SHADERS: Record<string, string> = {
     blit: BLIT_SHADER,

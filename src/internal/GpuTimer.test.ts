@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { GpuTimer } from './GpuTimer';
+import { GpuTimer } from './GpuTimer.js';
 
 //* Mock Device — just enough WebGPU surface for GpuTimer, no GPU needed
 

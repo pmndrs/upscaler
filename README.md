@@ -16,8 +16,8 @@ spend it on GI, reflections and heavier materials that wouldn't fit at native re
 pipeline.outputNode = upscaleScene(scene, camera);
 ```
 
-**▶ [See it live](https://pmndrs.github.io/upscaler/)**: showcases and 16 hands-on
-examples, each one a small, readable integration.
+**▶ [See it live](https://pmndrs.github.io/upscaler/)**: 30 hands-on examples and
+four Three.js showcases, grouped into Three.js, Babylon.js and raw WebGPU.
 
 ### Built on FSR, grown up on the web
 
@@ -46,12 +46,11 @@ FSR never had to answer, and we measured our way past the port:
 
 ### Where it runs
 
-Today it plugs into **three.js `WebGPURenderer`** (r186+). Underneath it's plain WebGPU:
-hand-written WGSL compute passes dispatched on your renderer's `GPUDevice`, with no
-three.js in the shaders. Bringing it to another WebGPU engine means writing an adapter,
-not rewriting the upscaler; that's tracked in
-[#61](https://github.com/pmndrs/upscaler/issues/61). It needs a WebGPU-capable browser,
-and there's no WebGL fallback.
+The package provides **Three.js `WebGPURenderer`** integration (r186+ recommended),
+**Babylon.js Frame Graph** integration (9.29.x), and an engine-independent WebGPU
+core. The adapters share WGSL compute passes on the host renderer's `GPUDevice`.
+The host owns textures, camera jitter, history rotation and submission. It needs a
+WebGPU-capable browser, and there's no WebGL fallback.
 
 ## Install
 
@@ -59,16 +58,27 @@ and there's no WebGL fallback.
 npm install @pmndrs/upscaler three
 ```
 
-WebGPU only: you need a WebGPU-capable browser (Chrome/Edge 113+) and `three`
-**r186+** (a peer dependency). r184/r185 still work but are deprecated. The TSL node
+The command above installs the Three integration. The additional entry points below
+are proposed additions; use a locally packed archive to validate this change.
+
+| Entry point | Engine dependency | Integration guide |
+| --- | --- | --- |
+| `@pmndrs/upscaler` or `/three` | Three.js | [Getting started](docs/getting-started.md) |
+| `@pmndrs/upscaler/core` | None | [WebGPU core](docs/webgpu-core.md) |
+| `@pmndrs/upscaler/babylon` | Babylon.js 9.29.x | [Babylon Frame Graph](docs/babylon-framegraph.md) |
+
+Engine peers are optional: install only the engine used by your chosen entry point.
+For Three, **r186+** is recommended. r184/r185 still work but are deprecated. The TSL node
 warns once and falls back to the pre-r186 render-pipeline hooks, and that fallback
 will be removed. There is no WebGL fallback. See
 [Compatibility](./docs/compatibility.md).
 
-**▶ Live demos: [pmndrs.github.io/upscaler](https://pmndrs.github.io/upscaler/)**: 16
-interactive examples, covering spatial vs temporal, the aliasing-torture scene,
+**▶ Live demos: [pmndrs.github.io/upscaler](https://pmndrs.github.io/upscaler/)**: 30
+examples and four showcases, covering spatial vs temporal, the aliasing-torture scene,
 transparency and reactive masks, the composable and spatial-only TSL nodes, SSGI/SSR
-upscaled in one post graph, temporal guides, and transparent-canvas alpha.
+upscaled in one post graph, temporal guides, transparent-canvas alpha, raw WebGPU
+and 13 Babylon Frame Graph examples, including mesh scenes, native screen-space
+effects, authored reactive coverage, transparent alpha and shared temporal guides.
 
 ## Quick start
 

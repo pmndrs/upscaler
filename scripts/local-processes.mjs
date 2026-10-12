@@ -201,9 +201,10 @@ export async function closeOwnedCdpBrowser(client, { timeoutMs = 2000 } = {}) {
  * into a failure, so errors are warned, not thrown.
  * @param {string | null | undefined} path - Directory to remove.
  * @param {string} [label] - What the directory is, for the warning.
+ * @param {number} [maxRetries] - Extra retries for slow browser shutdown on Windows.
  * @returns {Promise<boolean>} Whether the directory is gone.
  */
-export async function removeTempDirectory(path, label = 'temp directory') {
+export async function removeTempDirectory(path, label = 'temp directory', maxRetries = 5) {
     if (!path) return true;
     const target = resolve(path);
     const temporaryRoot = resolve(tmpdir());
@@ -214,7 +215,7 @@ export async function removeTempDirectory(path, label = 'temp directory') {
         return false;
     }
     try {
-        await rm(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+        await rm(path, { recursive: true, force: true, maxRetries, retryDelay: 100 });
         return true;
     } catch (error) {
         console.warn(

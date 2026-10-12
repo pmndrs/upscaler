@@ -1,6 +1,15 @@
 # @pmndrs/upscaler — Examples
 
 Standalone, single-purpose demos of the upscaler, from a minimal starter to an
+advanced integration. The gallery includes [17 — raw WebGPU](17-core-webgpu/main.ts)
+and 13 Babylon examples (18–30): an analytic Frame Graph reference and twelve
+mesh demos covering reconstruction, alpha, effects and shared temporal guides.
+
+The gallery groups examples by engine: **Three.js** (16 examples and four
+showcases), **Babylon.js** (13 examples, 18–30), and **Raw WebGPU** (example 17). Category links at the
+top jump directly to each group.
+
+The Three.js examples below range from a minimal starter to an
 expensive screen-space effect rendered small and upscaled. WebGPU-only — open in
 Chrome/Edge 113+.
 
@@ -11,6 +20,13 @@ npm run examples     # http://localhost:5300  (landing page links every demo)
 
 The library is consumed straight from `../src` (aliased as `@pmndrs/upscaler`), so
 shader/pipeline edits hot-reload here just like in the bench.
+
+## GitHub Pages
+
+The gallery is built by the existing Pages workflow on pushes to `main` and manual
+runs. Its URL remains [pmndrs.github.io/upscaler](https://pmndrs.github.io/upscaler/).
+The workflow uses `PAGES_BASE=/upscaler/`; local development uses `/`.
+
 
 ## Showcases
 
@@ -48,6 +64,37 @@ number so they sort apart from the single-purpose demos.
 
 Most interactive demos have a **render scale ×** slider (1.0×–3.0×) that sweeps the
 base render resolution, with the resulting size + base % shown in the HUD.
+
+## Babylon demos
+
+All Babylon demos target 9.29.x and use native Frame Graph allocations and history
+rotation. Shared host code is in `shared/babylon`; its resource, depth, movement,
+exposure and split-frame contracts are documented in
+[Babylon Frame Graph](../docs/babylon-framegraph.md).
+
+| # | Demo | Shows |
+| --- | --- | --- |
+| 18 | [Analytic Frame Graph](18-babylon-framegraph/main.ts) | External exposure, explicit motion, reactive mask and bilinear fallback |
+| 19 | [Hello Babylon](19-babylon-hello/main.ts) | Mesh inputs, linear depth, motion and reconstruction |
+| 20 | [Aliasing torture](20-babylon-aliasing/main.ts) | Thin geometry, convergence and camera/object motion |
+| 21 | [Native / temporal](21-babylon-compare/main.ts) | Unjittered native reference with a movable divider |
+| 22 | [Transparency](22-babylon-transparency/main.ts) | Alpha-blended meshes and a derived reactive mask |
+| 23 | [Spatial / temporal](23-babylon-spatial-temporal/main.ts) | EASU + RCAS compared with temporal reconstruction |
+| 24 | [Composition](24-babylon-compose/main.ts) | A post-upscale vignette preserving alpha |
+| 25 | [Authored reactive mask](25-babylon-reactive-mask/main.ts) | Geometry coverage tested against opaque depth |
+| 26 | [Transparent canvas](26-babylon-transparent-canvas/main.ts) | Reconstructed silhouette alpha over HTML |
+| 27 | [Screen-space effects](27-babylon-screen-effects/main.ts) | Native SSAO or SSR before upscale |
+| 28 | [Effect stack](28-babylon-effect-stack/main.ts) | SSAO, SSR and HDR bloom toggled independently |
+| 29 | [Temporal guides](29-babylon-temporal-guides/main.ts) | Actual dilated depth, motion and disocclusion textures |
+| 30 | [Shared guides](30-babylon-guides-compose/main.ts) | A color consumer between guides and final upscale |
+
+The SSAO/SSR pages adapt the screen-space pipeline examples; SSAO is ambient
+occlusion and does not reproduce Three's diffuse SSGI. The SSGI denoiser and path
+tracer remain Three-only. The four showcases also remain Three-only.
+
+`npm run verify:babylon-examples:gpu` checks the twelve mesh demos on a production
+site build, including controls, odd dimensions, NativeAA and alias optimization.
+It requires a WebGPU device and stays outside the GPU-free CI test suite.
 
 ## Planned
 

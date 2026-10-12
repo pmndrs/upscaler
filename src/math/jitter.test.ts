@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { generateJitterSequence } from './halton';
-import { getJitterPhaseCount, JitterSequence } from './jitter';
+import { generateJitterSequence } from './halton.js';
+import { getJitterPhaseCount, JitterSequence } from './jitter.js';
 
 describe('getJitterPhaseCount', () => {
     it('follows the FidelityFX 8·ratio² formula', () => {

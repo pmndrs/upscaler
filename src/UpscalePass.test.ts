@@ -13,7 +13,7 @@ vi.mock('./Upscaler', () => ({
     },
 }));
 
-const { UpscalePass } = await import('./UpscalePass');
+const { UpscalePass } = await import('./UpscalePass.js');
 
 type PassInternals = {
     _quad: THREE.QuadMesh;

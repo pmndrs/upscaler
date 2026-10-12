@@ -1,9 +1,10 @@
-export { Upscaler, type UpscalerOptions } from './Upscaler';
-export { UpscalerNotReadyError } from './initializationError';
-export { MomentsPass, type MomentsPassConfig, type MomentsSpace } from './MomentsPass';
-export { UpscalePass, type UpscalePassConfig } from './UpscalePass';
-export { UpscalerNode, upscale, upscaleSpatial, upscaleScene, type UpscalerNodeOptions } from './UpscalerNode';
-export { TemporalGuidesNode, temporalGuides, type TemporalGuidesNodeOptions } from './TemporalGuidesNode';
+/// <reference types="@webgpu/types" preserve="true" />
+export { Upscaler, type UpscalerOptions } from './Upscaler.js';
+export { UpscalerNotReadyError } from './initializationError.js';
+export { MomentsPass, type MomentsPassConfig, type MomentsSpace } from './MomentsPass.js';
+export { UpscalePass, type UpscalePassConfig } from './UpscalePass.js';
+export { UpscalerNode, upscale, upscaleSpatial, upscaleScene, type UpscalerNodeOptions } from './UpscalerNode.js';
+export { TemporalGuidesNode, temporalGuides, type TemporalGuidesNodeOptions } from './TemporalGuidesNode.js';
 export {
     DebugView,
     QualityMode,
@@ -14,7 +15,7 @@ export {
     type RuntimeSettings,
     type TemporalGuides,
     type UpscalePath,
-} from './types';
-export { halton, generateJitterSequence } from './math/halton';
-export { getJitterPhaseCount, JitterSequence } from './math/jitter';
-export { getQualityModeRatio, getRenderResolution, QUALITY_MODE_RATIOS } from './math/resolution';
+} from './types.js';
+export { halton, generateJitterSequence } from './math/halton.js';
+export { getJitterPhaseCount, JitterSequence } from './math/jitter.js';
+export { getQualityModeRatio, getRenderResolution, QUALITY_MODE_RATIOS } from './math/resolution.js';

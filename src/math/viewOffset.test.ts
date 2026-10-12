@@ -2,9 +2,9 @@ import { OrthographicCamera, PerspectiveCamera, Vector3, type Matrix4 } from 'th
 import type { WebGPURenderer } from 'three/webgpu';
 import { describe, expect, it } from 'vitest';
 
-import { Upscaler } from '../Upscaler';
-import { JitterSequence } from './jitter';
-import { applyJitterViewOffset, restoreViewOffset, type ViewOffsetCamera } from './viewOffset';
+import { Upscaler } from '../Upscaler.js';
+import { JitterSequence } from './jitter.js';
+import { applyJitterViewOffset, restoreViewOffset, type ViewOffsetCamera } from './viewOffset.js';
 
 const RENDER_W = 960;
 const RENDER_H = 540;

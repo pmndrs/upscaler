@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ComputePass } from './ComputePass';
+import { ComputePass } from './ComputePass.js';
 
 function deferred<T>() {
     let resolve!: (value: T) => void;

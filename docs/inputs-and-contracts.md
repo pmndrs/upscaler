@@ -1,5 +1,11 @@
 # Inputs and contracts
 
+This page describes the Three integration. The renderer-independent resource
+contract, positive linear R32F depth, explicit movement conversion and independent
+host/conditioning exposure are specified in [WebGPU core](webgpu-core.md).
+[Babylon Frame Graph](babylon-framegraph.md) specifies handle resolution,
+orientation normalization and native history ownership for Babylon 9.29.x.
+
 What the upscaler assumes about each input, and why. `UpscalePass` and
 `upscaleScene()` satisfy most of this for you. Anything that feeds the raw
 `Upscaler` or the composable `upscale()` node has to honour it by hand. A violated

@@ -1,5 +1,5 @@
-import { WGSL_COLOR, WGSL_CONSTANTS } from './common';
-import { assembleShader } from './wgsl';
+import { WGSL_COLOR, WGSL_CONSTANTS } from './common.js';
+import { assembleShader } from './wgsl.js';
 
 /**
  * Shading-change detection — the concept of FSR3's signed luma-difference

@@ -1,5 +1,7 @@
 # Architecture
 
+Shared WebGPU architecture: common encoding now lives in [UpscalerCore](../src/core/UpscalerCore.ts). Textures, camera jitter, history swaps and submissions belong to the engine adapters. The early and late stages use separate uniforms. See [the core contract](webgpu-core.md); the upstream pass descriptions below still apply to neutral settings.
+
 How the library is put together, for contributors. Consumer-facing contracts are in
 [Inputs and contracts](inputs-and-contracts.md) and
 [Temporal guides](temporal-guides.md). The per-pass audit against FidelityFX is in
@@ -16,8 +18,13 @@ UpscalePass  ──────────────────────�
 (your own render loop)  ────────────────────────┘
 ```
 
-`Upscaler` ([`src/Upscaler.ts`](../src/Upscaler.ts)) is the only class that
-touches the GPU pipeline. Every other surface is a recipe around it:
+`UpscalerCore` ([`src/core/UpscalerCore.ts`](../src/core/UpscalerCore.ts)) owns
+pipelines, samplers, constants and scatter buffers; it never allocates textures,
+finishes an encoder or submits host work. `Upscaler`
+([`src/Upscaler.ts`](../src/Upscaler.ts)) is the Three adapter around that core.
+`FrameGraphUpscaleTask` is the Babylon adapter, declaring allocations and
+dependencies while its texture manager rotates histories once per frame.
+The Three integration surfaces are recipes around `Upscaler`:
 `UpscalePass` owns the render target, MRT and present quad; the TSL nodes own
 graph registration and the jitter hooks. `bench/src/BenchPipeline.ts` is the
 canonical example of driving `Upscaler` by hand.
