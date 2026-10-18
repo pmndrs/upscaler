@@ -24,6 +24,7 @@ export default defineConfig({
             entry: {
                 index: resolve(__dirname, 'src/index.ts'),
                 three: resolve(__dirname, 'src/three.ts'),
+                core: resolve(__dirname, 'src/core.ts'),
             },
             formats: ['es'],
         },

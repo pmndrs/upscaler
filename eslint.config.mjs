@@ -25,4 +25,16 @@ export default tseslint.config(
             ],
         },
     },
+    {
+        // The core runs on a bare GPUDevice; engines live in their adapters.
+        files: ['packages/core/**/*.ts'],
+        rules: {
+            'no-restricted-imports': ['error', {
+                patterns: [{
+                    group: ['three', 'three/*', '@babylonjs/*', 'pixi.js', 'pixi.js/*', '@pmndrs/upscaler-*'],
+                    message: 'packages/core must stay engine-free (and depend on no other workspace package).',
+                }],
+            }],
+        },
+    },
 );

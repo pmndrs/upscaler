@@ -4,7 +4,7 @@ import { dts } from 'rollup-plugin-dts';
 // (@pmndrs/upscaler-core / -three) are inlined, so the published types never
 // name a package that isn't on npm; engine packages stay external.
 export default {
-    input: { index: 'src/index.ts', three: 'src/three.ts' },
+    input: { index: 'src/index.ts', three: 'src/three.ts', core: 'src/core.ts' },
     output: { dir: 'dist', format: 'es', chunkFileNames: 'chunks/upscaler-[hash].d.ts' },
     external: [/^three(\/|$)/],
     plugins: [dts({ respectExternal: true, tsconfig: 'tsconfig.build.json' })],

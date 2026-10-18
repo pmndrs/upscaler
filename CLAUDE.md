@@ -150,11 +150,17 @@ engine code lives in private workspace packages that the root build bundles in.
 src/                   — the PUBLISHED package's entries only (re-exports, no logic)
   index.ts             — `@pmndrs/upscaler` → the three surface (back-compat)
   three.ts             — `@pmndrs/upscaler/three`
+  core.ts              — `@pmndrs/upscaler/core` (engine-free UpscalerCore for raw WebGPU / new adapters)
 packages/
   core/                — @pmndrs/upscaler-core (private): engine-free, GPUDevice-only.
                          MUST NOT import three (or any engine).
-    src/index.ts       — public core surface (enums, config types, jitter/resolution math)
-    src/types.ts       — QualityMode, DebugView, UpscalerConfig, RuntimeSettings
+    src/index.ts       — public core surface (`@pmndrs/upscaler/core`)
+    src/UpscalerCore.ts — THE pass orchestration (start here): GPUDevice + GPUTexture inputs +
+                         plain FrameCamera data; publishes output/guides through a TextureAllocator
+    src/MomentsCore.ts — the standalone moments pass on a bare device
+    src/textures.ts    — TextureAllocator / CoreTexture: the engine seam for published textures
+    src/types.ts       — QualityMode, DebugView, UpscalerConfig, RuntimeSettings, FrameCamera, and the
+                         dispatch/guide types generic over the engine's texture type
     src/math/          — halton, jitter sequencing, resolution presets (all unit-tested)
     src/shaders/
       common.ts        — shared WGSL chunks: FsrConstants UBO, color/depth/tonemap helpers, FLAG_* bits
@@ -168,12 +174,14 @@ packages/
       GpuTimer.ts      — timestamp-query profiler (degrades to no-op)
   three/               — @pmndrs/upscaler-three (private): the three.js WebGPURenderer adapter
     src/index.ts       — the three public surface (what `@pmndrs/upscaler` exports)
-    src/Upscaler.ts    — THE low-level API + pass orchestration (start here)
+    src/Upscaler.ts    — the three low-level API: wraps UpscalerCore (texture lookup, camera jitter, FrameCamera)
+    src/MomentsPass.ts — three wrapper over MomentsCore
     src/UpscalePass.ts — high-level public drop-in (MRT/jitter/present recipe; ex-UpscalePresenter)
     src/UpscalerNode.ts — the same recipe as TSL nodes: upscale(color, depth, velocity, camera), upscaleScene(), upscaleSpatial()
     src/types.ts       — three-texture dispatch/guide types; re-exports core's enums/config
     src/math/viewOffset.ts — jitter ↔ camera.view composition
     src/internal/threeWebGPU.ts — getDevice() / getGPUTexture(): the three-internals bridge
+    src/internal/textureAllocator.ts — the core's allocator for three (StorageTexture + initTexture)
 bench/                 — Vite test bench (own vite.config.ts, own tsconfig include)
   src/main.ts          — boot, UI state, stats, render loop
   src/BenchPipeline.ts — render target + velocity MRT wiring, dispatch, present quad (THE integration reference)
@@ -195,9 +203,10 @@ docs/                  — maintained consumer/contributor docs (index: docs/REA
 - Workspace packages export TypeScript **source** (`exports: { ".": "./src/index.ts", "./*": "./src/*.ts" }`) — no per-package build. Cross-package imports use the package name (`@pmndrs/upscaler-core/shaders/rcas`), never a `../../packages/...` relative path.
 - The root build (`vite.config.ts` multi-entry + `rollup.dts.config.mjs`) bundles the private packages into `dist/` with one shared chunk, so every subpath sees the same classes. `scripts/verify-artifacts.mjs` fails the build if `dist/` names an `@pmndrs/upscaler-*` package (a consumer could not resolve it).
 - A new public subpath = a `src/<name>.ts` entry + `package.json` `exports` + both build configs' inputs + `tsconfig.json` `paths`.
-- `packages/core` must stay engine-free: anything that needs `three` belongs in `packages/three`.
+- `packages/core` must stay engine-free: anything that needs `three` belongs in `packages/three`. An eslint `no-restricted-imports` rule fails on three/Babylon/pixi (or another workspace package) imported from core.
+- Adapters are thin: an engine's `Upscaler` resolves its textures to `GPUTexture`s, fills a `FrameCamera`, applies `core.beginFrame()`'s jitter to its camera, and passes an allocator. Logic that doesn't need the engine goes in core. Bench-only knobs (`_rcasShader`, `_crossFrameReconstruct`, …) stay `_`-prefixed internal options on both layers and are never exported from an index.
 
-Read `packages/three/src/Upscaler.ts` and `bench/src/BenchPipeline.ts` together first — the second is the canonical example of how the first is meant to be driven. `examples/shared/UpscalePresenter.ts` is the same recipe packaged as a reusable helper; `examples/06-screenspace-gi` is the reference for feeding FSR3 the output of a TSL post-processing graph (GTAO/SSR/SSGI) rendered at reduced resolution.
+Read `packages/core/src/UpscalerCore.ts`, `packages/three/src/Upscaler.ts` and `bench/src/BenchPipeline.ts` together first — the last is the canonical example of how the three `Upscaler` (a thin wrapper over the core) is meant to be driven. `examples/shared/UpscalePresenter.ts` is the same recipe packaged as a reusable helper; `examples/06-screenspace-gi` is the reference for feeding FSR3 the output of a TSL post-processing graph (GTAO/SSR/SSGI) rendered at reduced resolution.
 
 ---
 
@@ -349,9 +358,10 @@ composite.
   program history (spec, consumer M0 review, handoffs) archived under
   `docs/archive/temporal-guides/`.
   **Mechanisms a change must not break:** (1) guide textures are allocated via
-  `_createSharedTexture` — a three `StorageTexture` + `initTexture()`, with the
-  raw handle fetched back through `getGPUTexture()`; passes bind the raw handle,
-  consumers sample the three texture, and the two must stay the same allocation.
+  the core's `TextureAllocator` — in three, `internal/textureAllocator.ts`: a
+  `StorageTexture` + `initTexture()`, with the raw handle fetched back through
+  `getGPUTexture()`; passes bind the raw handle, consumers sample the three
+  texture, and the two must stay the same allocation.
   r32float products are pinned `NearestFilter` (non-filterable format — a linear
   sampler on them is a WebGPU validation error). (2) Ping-ponged products resolve
   through `_latestDepthWrite`/`_latestHistoryWrite` (set at encode time), NOT the

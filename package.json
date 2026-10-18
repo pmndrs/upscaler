@@ -39,6 +39,10 @@
         "./three": {
             "types": "./dist/three.d.ts",
             "import": "./dist/three.js"
+        },
+        "./core": {
+            "types": "./dist/core.d.ts",
+            "import": "./dist/core.js"
         }
     },
     "main": "./dist/index.js",

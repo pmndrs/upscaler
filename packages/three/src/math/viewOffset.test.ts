@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import { Upscaler } from '../Upscaler';
 import { JitterSequence } from '@pmndrs/upscaler-core/math/jitter';
+import { UpscalerCore } from '@pmndrs/upscaler-core/UpscalerCore';
 import { applyJitterViewOffset, restoreViewOffset, type ViewOffsetCamera } from './viewOffset';
 
 const RENDER_W = 960;
@@ -133,17 +134,20 @@ it('leaves a perspective camera aspect untouched (setViewOffset would overwrite 
 });
 
 //* Upscaler Frame Lifecycle
-// beginFrame/endFrame only touch the jitter sequence and render size, so the
-// device-backed init() can be skipped by seeding that state directly.
+// beginFrame/endFrame only touch the core's jitter sequence and render size,
+// so the device-backed init() can be skipped by seeding that state directly.
 
 function frameOnlyUpscaler(path: 'temporal' | 'spatial' = 'temporal'): Upscaler {
     const upscaler = new Upscaler({ renderer: {} as WebGPURenderer });
-    Object.assign(upscaler as unknown as Record<string, unknown>, {
+    const core = new UpscalerCore({ device: {} as GPUDevice });
+    Object.assign(core as unknown as Record<string, unknown>, {
+        _initialized: true,
         _jitter: new JitterSequence(2),
         _path: path,
         _renderWidth: RENDER_W,
         _renderHeight: RENDER_H,
     });
+    Object.assign(upscaler as unknown as Record<string, unknown>, { _core: core });
     return upscaler;
 }
 

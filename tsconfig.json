@@ -19,7 +19,8 @@
         "baseUrl": ".",
         "paths": {
             "@pmndrs/upscaler": ["src/index.ts"],
-            "@pmndrs/upscaler/three": ["src/three.ts"]
+            "@pmndrs/upscaler/three": ["src/three.ts"],
+            "@pmndrs/upscaler/core": ["src/core.ts"]
         }
     },
     "include": ["src", "packages/*/src", "bench/src", "examples", "test"],

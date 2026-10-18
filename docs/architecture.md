@@ -13,18 +13,39 @@ root). The code lives in private workspace packages, which the root build bundle
 
 | Package | Owns | Depends on |
 | --- | --- | --- |
-| `packages/core` (`@pmndrs/upscaler-core`) | WGSL passes, constants UBO, compute-pass wrapper, GPU timer, jitter/resolution math, config enums | a `GPUDevice` only, no engine |
-| `packages/three` (`@pmndrs/upscaler-three`) | `Upscaler`, `UpscalePass`, the TSL nodes, the three-internals bridge | core, `three` |
+| `packages/core` (`@pmndrs/upscaler-core`) | `UpscalerCore` (the pass orchestration), `MomentsCore`, WGSL passes, constants UBO, compute-pass wrapper, GPU timer, jitter/resolution math, config enums | a `GPUDevice` only, no engine |
+| `packages/three` (`@pmndrs/upscaler-three`) | `Upscaler` (wraps the core), `UpscalePass`, the TSL nodes, the three-internals bridge and texture allocator | core, `three` |
 
 | Published subpath | Entry |
 | --- | --- |
 | `@pmndrs/upscaler` | the three surface (unchanged since 0.5) |
 | `@pmndrs/upscaler/three` | the same three surface, by name |
+| `@pmndrs/upscaler/core` | `UpscalerCore` and `MomentsCore` on a bare `GPUDevice`, plus the config types and math |
 
-This is the first step of a split into an engine-agnostic core plus per-engine adapters:
-three today, with Babylon and pixi-3d to follow. Today `Upscaler` itself still lives in
-`packages/three`. Moving its device-only orchestration into core (and adding a
-`./core` subpath) is the next step.
+The split is an engine-agnostic core plus per-engine adapters: three today, with
+Babylon and pixi-3d to follow.
+
+### The engine seam
+
+`UpscalerCore` takes everything it needs as plain WebGPU or plain data:
+
+- **a `GPUDevice`**: the engine's own, so the passes share its queue. The core never
+  creates or destroys it.
+- **inputs as `GPUTexture`s**: the adapter resolves its engine's textures.
+- **a `FrameCamera`** per dispatch: near, far, perspective or orthographic, and
+  reversed depth.
+- **a `TextureAllocator`**: the output and guide textures are allocated by the engine,
+  so it can sample them as its own textures. A `CoreTexture` pairs the `GPUTexture` the
+  passes bind with the engine handle consumers sample. The default allocator uses
+  `device.createTexture()` and returns the `GPUTexture` itself.
+
+The core advances the jitter (`beginFrame()` returns this frame's offset); the adapter
+applies it to the engine's camera. The core still owns ping-pong rotation and the
+split-frame bookkeeping. Besides `dispatch*()`, which submits its own encoder, it has
+`encode*()` variants that write into a host encoder without submitting. Those are not
+GPU-timed. The three `Upscaler` does exactly this and nothing more: texture lookup,
+the camera jitter and view-offset restore, the three allocator, and `FrameCamera`
+from the camera and `renderer.reversedDepthBuffer`.
 
 ## Layers
 
@@ -32,12 +53,15 @@ three today, with Babylon and pixi-3d to follow. Today `Upscaler` itself still l
 upscaleScene()  ──►  upscale() / UpscalerNode  ─┐
 upscaleSpatial() ─►  upscale(path: 'spatial')  ─┤
 temporalGuides() / TemporalGuidesNode  ─────────┤
-UpscalePass  ───────────────────────────────────┼──►  Upscaler  ──►  WGSL compute passes
-(your own render loop)  ────────────────────────┘
+UpscalePass  ───────────────────────────────────┼──►  Upscaler  ──►  UpscalerCore  ──►  WGSL compute passes
+(your own render loop)  ────────────────────────┘                     ▲
+raw WebGPU / another engine adapter  ─────────────────────────────────┘
 ```
 
-`Upscaler` ([`packages/three/src/Upscaler.ts`](../packages/three/src/Upscaler.ts)) is the only class that
-touches the GPU pipeline. Every other surface is a recipe around it:
+`UpscalerCore` ([`packages/core/src/UpscalerCore.ts`](../packages/core/src/UpscalerCore.ts)) is the only class
+that touches the GPU pipeline, and the three `Upscaler`
+([`packages/three/src/Upscaler.ts`](../packages/three/src/Upscaler.ts)) is its three adapter. Every
+other three surface is a recipe around `Upscaler`:
 `UpscalePass` owns the render target, MRT and present quad; the TSL nodes own
 graph registration and the jitter hooks. `bench/src/BenchPipeline.ts` is the
 canonical example of driving `Upscaler` by hand.
@@ -52,7 +76,9 @@ passes on its own `GPUCommandEncoder` and submits them **between** three's scene
 and the presentation draw. Queue ordering on the shared device makes that correct
 with no synchronization code.
 
-Outputs and published guides are allocated as three `StorageTexture`s, then
+Through the three allocator
+([`packages/three/src/internal/textureAllocator.ts`](../packages/three/src/internal/textureAllocator.ts)),
+outputs and published guides are allocated as three `StorageTexture`s, then
 `renderer.initTexture()` is called and the raw handle is fetched back. Passes bind
 the raw handle, and consumers sample the three texture: one allocation, two views.
 Storage views are pinned to one mip level, and `generateMipmaps` is off, because three
