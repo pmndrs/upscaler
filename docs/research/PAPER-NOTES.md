@@ -33,7 +33,7 @@ second) is unbiased; the still-scene floor drops to ~0. Additionally, 2×2
 block means are unrescuable at any threshold (thin features still swing
 them); 4×4 is the smallest stable scale.
 
-**Evidence:** [`src/shaders/shadingChange.ts`](../../src/shaders/shadingChange.ts)
+**Evidence:** [`packages/core/src/shaders/shadingChange.ts`](../../packages/core/src/shaders/shadingChange.ts)
 (inline comments record the measured floors); five GPU tuning iterations in
 [`bench/docs/NEXT-STEPS.md`](../../bench/docs/NEXT-STEPS.md) (item 4);
 [PARITY.md](PARITY.md) enhancement 3. Measured on Q1/Q4/Q9/Q11.
@@ -71,7 +71,7 @@ per-pass figure on a ~0.035 ms pass; the self-referencing property is worth
 far more than it. Evidence: `bench/docs/NEXT-STEPS.md` §15, bench Q19 +
 `scripts/measure-receding-disocclusion.mjs`.
 
-**Evidence:** commit `b16274a`; [`src/shaders/reconstruct.ts`](../../src/shaders/reconstruct.ts)
+**Evidence:** commit `b16274a`; [`packages/core/src/shaders/reconstruct.ts`](../../packages/core/src/shaders/reconstruct.ts)
 (inline); [PARITY.md](PARITY.md) enhancement 1 ("the price of skipping the
 scatter"); flicker metrology in the commit message (example-12 disocclusion
 quadrant, before/after); `bench/results/raw/GUIDES-M1/capture-depthfix`
@@ -197,7 +197,7 @@ with adaptation off, and report both.
 held-light reference + lag-in-frames metric).
 `bench/results/raw/drift-lag/*` and `bench/results/raw/convergence/relax*` are
 local-only. To regenerate them, edit `STILL_CLAMP_RELAX` in
-`src/shaders/accumulate.ts` for each value, then run:
+`packages/core/src/shaders/accumulate.ts` for each value, then run:
 - `node scripts/measure-drift-lag.mjs --scenario Q15 --frames 116:379:2 --label relax<R>-noae --settings '{"autoExposure":false}'`
 - the same command without `--settings`, for the auto-exposure-on column;
 - `node scripts/measure-convergence.mjs --scenario Q1 --ratio 2 --pairs 40 --label relax<R>` (and `--scenario Q12`).
@@ -251,7 +251,7 @@ threshold the decoded value, not the byte.
 (still-scene, genuine-step, drift-lag and alpha tables, rejected variants, the
 ratio-3 alignment check); scenario **Q16** `sparse-wires-empty-background` in
 [`bench/src/benchmark/scenarios.ts`](../../bench/src/benchmark/scenarios.ts);
-[`src/shaders/shadingChange.ts`](../../src/shaders/shadingChange.ts)
+[`packages/core/src/shaders/shadingChange.ts`](../../packages/core/src/shaders/shadingChange.ts)
 (`scaleResponse`). `bench/results/raw/convergence/*`, `drift-lag/*` and
 `alpha-convergence/*` are local-only. To regenerate them, for the code before and
 after the change, run:
@@ -304,7 +304,7 @@ scenario **Q17** `subpixel-emitter-retention` in
 (output-vs-input-coverage energy, switch-off ghost).
 `bench/results/raw/emitters/*` is local-only. Regenerate with
 `node scripts/measure-emitter-retention.mjs --label <name> --settings '{"autoExposure":false}'`;
-for the before column, set `clipToAABB` in `src/shaders/accumulate.ts` back to
+for the before column, set `clipToAABB` in `packages/core/src/shaders/accumulate.ts` back to
 `extents / max(abs(dir), vec3f(1.0e-6))`.
 
 **Still needs:**
@@ -343,7 +343,7 @@ newest of 8 jumps is the largest about one time in eight.
 (candidate table: range 4/8, nearest, EMA, gated at gain 1.0/1.5, 4/8 slots;
 steps, motion, drift lag, cost); scenario **Q18** `fine-line-chart` in
 [`bench/src/benchmark/scenarios.ts`](../../bench/src/benchmark/scenarios.ts);
-[`src/shaders/shadingChange.ts`](../../src/shaders/shadingChange.ts)
+[`packages/core/src/shaders/shadingChange.ts`](../../packages/core/src/shaders/shadingChange.ts)
 (`memoryDistance`). `bench/results/raw/convergence/*` and `drift-lag/*` are
 local-only. To regenerate them, run
 `node scripts/measure-convergence.mjs --scenario Q18 --ratio <2|3> --shading-frames 32 --views final,accumulation-age`
@@ -416,7 +416,7 @@ result, not a design essay. Note what it measures: *no loss* from sharing
 the computation, not a quality gain over the private pass.
 
 **Evidence:** the contract as shipped is the `TemporalGuides` type in
-[`src/types.ts`](../../src/types.ts) plus `examples/12-temporal-guides`
+[`packages/three/src/types.ts`](../../packages/three/src/types.ts) plus `examples/12-temporal-guides`
 (raw) and `examples/13-guides-node` (TSL); design history in
 [`TEMPORAL-GUIDES-SPEC.md`](../archive/temporal-guides/TEMPORAL-GUIDES-SPEC.md)
 (+ [`GUIDES-SPEC-RESPONSE.md`](../archive/temporal-guides/GUIDES-SPEC-RESPONSE.md),

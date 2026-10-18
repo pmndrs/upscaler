@@ -91,7 +91,7 @@ comparison.
 
 RCAS is the one shader the identities swap, and the swap can differ between the
 temporal path and the FSR1 spatial path. Shader names refer to
-`src/shaders/rcas.ts`.
+`packages/core/src/shaders/rcas.ts`.
 
 | identity | temporal mode | FSR1 spatial mode |
 | --- | --- | --- |

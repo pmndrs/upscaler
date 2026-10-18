@@ -7,7 +7,7 @@ document explains where we match upstream, where we diverge, what we changed out
 and the evidence behind each choice.
 
 Reference: FidelityFX SDK commit `60f4ea8` (FSR Upscaler 3.1.5). The full per-pass audit
-lives in [`src/shaders/README.md`](../../src/shaders/README.md); raw benchmark evidence in
+lives in [`packages/core/src/shaders/README.md`](../../packages/core/src/shaders/README.md); raw benchmark evidence in
 `bench/results/`; the adoption record in
 [`bench/docs/NEXT-STEPS.md`](../../bench/docs/NEXT-STEPS.md).
 

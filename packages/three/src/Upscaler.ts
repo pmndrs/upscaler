@@ -12,16 +12,16 @@ import {
 } from 'three';
 import { StorageTexture, type Texture, type WebGPURenderer } from 'three/webgpu';
 
-import { ComputePass } from './internal/ComputePass';
-import { notReadyError } from './initializationError';
-import { ConstantsBuffer } from './internal/ConstantsBuffer';
-import { GpuTimer } from './internal/GpuTimer';
+import { ComputePass } from '@pmndrs/upscaler-core/internal/ComputePass';
+import { notReadyError } from '@pmndrs/upscaler-core/initializationError';
+import { ConstantsBuffer } from '@pmndrs/upscaler-core/internal/ConstantsBuffer';
+import { GpuTimer } from '@pmndrs/upscaler-core/internal/GpuTimer';
 import { getDevice, getGPUTexture } from './internal/threeWebGPU';
-import { JitterSequence } from './math/jitter';
+import { JitterSequence } from '@pmndrs/upscaler-core/math/jitter';
 import { applyJitterViewOffset, restoreViewOffset, type ViewOffsetSnapshot } from './math/viewOffset';
-import { getQualityModeRatio, getRenderResolution } from './math/resolution';
-import { ACCUMULATE_SHADER } from './shaders/accumulate';
-import { BLIT_SHADER } from './shaders/blit';
+import { getQualityModeRatio, getRenderResolution } from '@pmndrs/upscaler-core/math/resolution';
+import { ACCUMULATE_SHADER } from '@pmndrs/upscaler-core/shaders/accumulate';
+import { BLIT_SHADER } from '@pmndrs/upscaler-core/shaders/blit';
 import {
     FLAG_AUTO_EXPOSURE,
     FLAG_EXTERNAL_EXPOSURE,
@@ -33,14 +33,14 @@ import {
     FLAG_RESET,
     FLAG_REVERSED_DEPTH,
     FLAG_SHADING_CHANGE,
-} from './shaders/common';
-import { DEBUG_SHADER } from './shaders/debug';
-import { EASU_SHADER } from './shaders/easu';
-import { GENERATE_REACTIVE_SHADER } from './shaders/generateReactive';
-import { LUMINANCE_PYRAMID_SHADER } from './shaders/luminancePyramid';
-import { RCAS_SHADER } from './shaders/rcas';
-import { DEPTH_CLIP_SHADER, RECONSTRUCT_SHADER } from './shaders/reconstruct';
-import { SHADING_CHANGE_SHADER } from './shaders/shadingChange';
+} from '@pmndrs/upscaler-core/shaders/common';
+import { DEBUG_SHADER } from '@pmndrs/upscaler-core/shaders/debug';
+import { EASU_SHADER } from '@pmndrs/upscaler-core/shaders/easu';
+import { GENERATE_REACTIVE_SHADER } from '@pmndrs/upscaler-core/shaders/generateReactive';
+import { LUMINANCE_PYRAMID_SHADER } from '@pmndrs/upscaler-core/shaders/luminancePyramid';
+import { RCAS_SHADER } from '@pmndrs/upscaler-core/shaders/rcas';
+import { DEPTH_CLIP_SHADER, RECONSTRUCT_SHADER } from '@pmndrs/upscaler-core/shaders/reconstruct';
+import { SHADING_CHANGE_SHADER } from '@pmndrs/upscaler-core/shaders/shadingChange';
 import {
     DebugView,
     QualityMode,

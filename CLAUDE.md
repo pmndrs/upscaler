@@ -143,25 +143,37 @@ CI (`.github/workflows/ci.yml`) runs lint → typecheck → test → build → `
 
 ## Repo layout
 
+pnpm workspace. One package is published (`@pmndrs/upscaler`, the repo root); the
+engine code lives in private workspace packages that the root build bundles in.
+
 ```
-src/
-  index.ts             — public exports
-  Upscaler.ts      — THE low-level API + pass orchestration (start here)
-  UpscalePass.ts          — high-level public drop-in (MRT/jitter/present recipe; ex-UpscalePresenter)
-  UpscalerNode.ts          — the same recipe as TSL nodes: upscale(color, depth, velocity, camera), upscaleScene(), upscaleSpatial()
-  types.ts             — QualityMode, DebugView, config/settings/dispatch types
-  math/                — halton, jitter sequencing, resolution presets (all unit-tested)
-  shaders/
-    common.ts          — shared WGSL chunks: FsrConstants UBO, color/depth/tonemap helpers, FLAG_* bits
-    wgsl.ts            — assembleShader() dedup concatenator (WGSL has no #include)
-    blit / easu / rcas / reconstruct / shadingChange / accumulate / luminancePyramid / generateReactive / debug .ts  — the passes
-    reconstructVariants.ts — bench-only: frozen pre-#67 cross-frame depth clip + its camera-compensated variant (never imported by the library)
-    README.md          — per-pass fidelity vs FidelityFX reference + debugging guide
-  internal/
-    threeWebGPU.ts     — getDevice() / getGPUTexture(): the three-internals bridge
-    ConstantsBuffer.ts — CPU writer for the FsrConstants UBO (layout MUST match common.ts)
-    ComputePass.ts     — thin compute-pipeline + bind-group wrapper
-    GpuTimer.ts        — timestamp-query profiler (degrades to no-op)
+src/                   — the PUBLISHED package's entries only (re-exports, no logic)
+  index.ts             — `@pmndrs/upscaler` → the three surface (back-compat)
+  three.ts             — `@pmndrs/upscaler/three`
+packages/
+  core/                — @pmndrs/upscaler-core (private): engine-free, GPUDevice-only.
+                         MUST NOT import three (or any engine).
+    src/index.ts       — public core surface (enums, config types, jitter/resolution math)
+    src/types.ts       — QualityMode, DebugView, UpscalerConfig, RuntimeSettings
+    src/math/          — halton, jitter sequencing, resolution presets (all unit-tested)
+    src/shaders/
+      common.ts        — shared WGSL chunks: FsrConstants UBO, color/depth/tonemap helpers, FLAG_* bits
+      wgsl.ts          — assembleShader() dedup concatenator (WGSL has no #include)
+      blit / easu / rcas / reconstruct / shadingChange / accumulate / luminancePyramid / generateReactive / debug .ts  — the passes
+      reconstructVariants.ts — bench-only: frozen pre-#67 cross-frame depth clip + its camera-compensated variant (never imported by the library)
+      README.md        — per-pass fidelity vs FidelityFX reference + debugging guide
+    src/internal/
+      ConstantsBuffer.ts — CPU writer for the FsrConstants UBO (layout MUST match common.ts)
+      ComputePass.ts   — thin compute-pipeline + bind-group wrapper
+      GpuTimer.ts      — timestamp-query profiler (degrades to no-op)
+  three/               — @pmndrs/upscaler-three (private): the three.js WebGPURenderer adapter
+    src/index.ts       — the three public surface (what `@pmndrs/upscaler` exports)
+    src/Upscaler.ts    — THE low-level API + pass orchestration (start here)
+    src/UpscalePass.ts — high-level public drop-in (MRT/jitter/present recipe; ex-UpscalePresenter)
+    src/UpscalerNode.ts — the same recipe as TSL nodes: upscale(color, depth, velocity, camera), upscaleScene(), upscaleSpatial()
+    src/types.ts       — three-texture dispatch/guide types; re-exports core's enums/config
+    src/math/viewOffset.ts — jitter ↔ camera.view composition
+    src/internal/threeWebGPU.ts — getDevice() / getGPUTexture(): the three-internals bridge
 bench/                 — Vite test bench (own vite.config.ts, own tsconfig include)
   src/main.ts          — boot, UI state, stats, render loop
   src/BenchPipeline.ts — render target + velocity MRT wiring, dispatch, present quad (THE integration reference)
@@ -179,20 +191,26 @@ docs/                  — maintained consumer/contributor docs (index: docs/REA
   archive/             — historical specs/handoffs/plans, NOT normative
 ```
 
-Read `Upscaler.ts` and `bench/src/BenchPipeline.ts` together first — the second is the canonical example of how the first is meant to be driven. `examples/shared/UpscalePresenter.ts` is the same recipe packaged as a reusable helper; `examples/06-screenspace-gi` is the reference for feeding FSR3 the output of a TSL post-processing graph (GTAO/SSR/SSGI) rendered at reduced resolution.
+**Packaging rules (the monorepo split, 2026-10; plan: core + three/babylon/pixi adapters):**
+- Workspace packages export TypeScript **source** (`exports: { ".": "./src/index.ts", "./*": "./src/*.ts" }`) — no per-package build. Cross-package imports use the package name (`@pmndrs/upscaler-core/shaders/rcas`), never a `../../packages/...` relative path.
+- The root build (`vite.config.ts` multi-entry + `rollup.dts.config.mjs`) bundles the private packages into `dist/` with one shared chunk, so every subpath sees the same classes. `scripts/verify-artifacts.mjs` fails the build if `dist/` names an `@pmndrs/upscaler-*` package (a consumer could not resolve it).
+- A new public subpath = a `src/<name>.ts` entry + `package.json` `exports` + both build configs' inputs + `tsconfig.json` `paths`.
+- `packages/core` must stay engine-free: anything that needs `three` belongs in `packages/three`.
+
+Read `packages/three/src/Upscaler.ts` and `bench/src/BenchPipeline.ts` together first — the second is the canonical example of how the first is meant to be driven. `examples/shared/UpscalePresenter.ts` is the same recipe packaged as a reusable helper; `examples/06-screenspace-gi` is the reference for feeding FSR3 the output of a TSL post-processing graph (GTAO/SSR/SSGI) rendered at reduced resolution.
 
 ---
 
 ## Architecture (the load-bearing decisions)
 
 - **Raw WebGPU on three's device.** We grab `renderer.backend.device` and dispatch our own compute passes on our own `GPUCommandEncoder`, submitted **between** three's scene render and the presentation draw. Queue ordering guarantees correctness with zero explicit sync. Not TSL — deliberately, so the WGSL reads like AMD's originals and we control performance.
-- **three internals we depend on** (all in `internal/threeWebGPU.ts`, verified against **three r184**, re-verified on **r186.1** 2026-10-02):
+- **three internals we depend on** (all in `packages/three/src/internal/threeWebGPU.ts`, verified against **three r184**, re-verified on **r186.1** 2026-10-02):
   - `renderer.backend.device` → the `GPUDevice`
   - `renderer.backend.get(texture).texture` → the raw `GPUTexture` behind a three texture
   - These are **private**. `threeWebGPU.ts` throws loudly if the shape changes. **If you bump three, re-verify these two accessors first** — they're the most likely thing to break on upgrade.
 - **Output is a three `StorageTexture`** — the upscaler writes into it, the caller samples it like any texture. Presenting is ordinary three code (a fullscreen quad).
 - **One shared 256-byte constants UBO** (`ConstantsBuffer` ↔ `WGSL_CONSTANTS` in `common.ts`), bound at `@group(0) @binding(0)` in every pass, written once per frame. **The two layouts must stay byte-for-byte in sync** — f32/u32 indices in `ConstantsBuffer.ts` map to documented byte offsets in the WGSL struct. If you add/reorder a field, change **both** or everything silently corrupts.
-- **Color spaces:** temporal accumulation happens in invertible-tonemap space (`c/(1+max(c))`, FSR2's firefly guard), then RCAS/blit reverse that conditioning and write `rgba16float` in the caller's linear/HDR domain. The upscaler never applies ACES, an output transfer function, or another presentation transform. EASU leaves its caller-provided input domain unchanged. Presentation belongs to the consuming renderer/post graph. **Spatial RCAS conditions too:** FSR1's limiter assumes [0,1], so on EASU's linear/HDR output `hitMax` disabled sharpening wherever the cross ring straddled 1.0 (and divides 0/0 on a flat 1.0 ring). Production RCAS conditions the spatial taps with the same invertible tonemap, then inverts once, anchored on the linear center and capped (see the lobe ceiling below). Raw input is unbounded, and without those two guards it clips at ~1000 and turns isolated peaks into ~1000× fireflies. See `src/shaders/README.md` → "RCAS load domain (spatial path)". **Temporal RCAS shares the gain cap (issue #32, 2026-10-02).** Pre-exposure does not bound a peaky history (first frame, reset, disocclusion, a sub-pixel emitter that only rasterizes on some jitter phases). The uncapped single inversion turned these into fireflies: 1754 from a lone 16 on the first frame, and 316 / 423 on converged Q1 / Q2 highlights whose neighbours read ~5 / ~11. 8-bit captures can't see this regression (everything above ~4 saturates white under ACES), so read back the rgba16float output. **Both caps are now one lobe ceiling (issue #50, 2026-10-03).** Below the firefly range, the single inversion still overshot converged HDR plateau edges by ~2×: a 64 plateau corner read 127 at sharpness 1, where linear RCAS reads 64–87 (≤ 1.36×). Post-#55 history: the fix reads 1.61–1.73× at sharpness 1 and 1.30× at 0.8. The conditioned limiter keeps the result below conditioned 1, which is linear infinity. Both paths now cap at the conditioned lobe applied in linear space against the darkest ring tap: `eLin + 4·|lobe|·rcpL·max(eLin − inv(mn4), 0)`. With a non-negative ring min it is never looser than the old `maxGain` cap, which it replaces. A uniform ring makes it exact linear RCAS; brighter ring taps loosen it. Bench Q0/Q1/Q2/Q12 change 35–2745 of 921,600 px per frame (≤ 22/255 presented) and stay bit-exact elsewhere; the cost is ~+5% RCAS (frame-paired). Don't swap it for a "renormalize HDR neighbourhoods to white 1" scheme. Auto-exposure puts ordinary highlights above exposed 1, so that scheme moved ~8% of pixels, and a history texel at ~1 inverted to f16 max (`bench/docs/NEXT-STEPS.md` §12).
+- **Color spaces:** temporal accumulation happens in invertible-tonemap space (`c/(1+max(c))`, FSR2's firefly guard), then RCAS/blit reverse that conditioning and write `rgba16float` in the caller's linear/HDR domain. The upscaler never applies ACES, an output transfer function, or another presentation transform. EASU leaves its caller-provided input domain unchanged. Presentation belongs to the consuming renderer/post graph. **Spatial RCAS conditions too:** FSR1's limiter assumes [0,1], so on EASU's linear/HDR output `hitMax` disabled sharpening wherever the cross ring straddled 1.0 (and divides 0/0 on a flat 1.0 ring). Production RCAS conditions the spatial taps with the same invertible tonemap, then inverts once, anchored on the linear center and capped (see the lobe ceiling below). Raw input is unbounded, and without those two guards it clips at ~1000 and turns isolated peaks into ~1000× fireflies. See `packages/core/src/shaders/README.md` → "RCAS load domain (spatial path)". **Temporal RCAS shares the gain cap (issue #32, 2026-10-02).** Pre-exposure does not bound a peaky history (first frame, reset, disocclusion, a sub-pixel emitter that only rasterizes on some jitter phases). The uncapped single inversion turned these into fireflies: 1754 from a lone 16 on the first frame, and 316 / 423 on converged Q1 / Q2 highlights whose neighbours read ~5 / ~11. 8-bit captures can't see this regression (everything above ~4 saturates white under ACES), so read back the rgba16float output. **Both caps are now one lobe ceiling (issue #50, 2026-10-03).** Below the firefly range, the single inversion still overshot converged HDR plateau edges by ~2×: a 64 plateau corner read 127 at sharpness 1, where linear RCAS reads 64–87 (≤ 1.36×). Post-#55 history: the fix reads 1.61–1.73× at sharpness 1 and 1.30× at 0.8. The conditioned limiter keeps the result below conditioned 1, which is linear infinity. Both paths now cap at the conditioned lobe applied in linear space against the darkest ring tap: `eLin + 4·|lobe|·rcpL·max(eLin − inv(mn4), 0)`. With a non-negative ring min it is never looser than the old `maxGain` cap, which it replaces. A uniform ring makes it exact linear RCAS; brighter ring taps loosen it. Bench Q0/Q1/Q2/Q12 change 35–2745 of 921,600 px per frame (≤ 22/255 presented) and stay bit-exact elsewhere; the cost is ~+5% RCAS (frame-paired). Don't swap it for a "renormalize HDR neighbourhoods to white 1" scheme. Auto-exposure puts ordinary highlights above exposed 1, so that scheme moved ~8% of pixels, and a history texel at ~1 inverted to f16 max (`bench/docs/NEXT-STEPS.md` §12).
 - **Jitter/velocity:** projection is jittered through the camera's view offset (same mechanism as three's TRAA). Motion vectors must be **jitter-free**, so the scene's `velocity` node gets `upscaler.unjitteredProjectionMatrix` (a stable Matrix4 instance whose contents refresh each `beginFrame`). **The jitter composes with an app-set view offset** (tiled/multi-screen: `math/viewOffset.ts` scales it by `view.width / renderWidth` so it stays one render pixel) and `endFrame` restores the pre-frame `camera.view` exactly — never `clearViewOffset()` unconditionally, and never `setViewOffset()` (it also overwrites a perspective camera's `aspect`). The unjittered matrix keeps the app's offset. (three's own TRAA/TAAU still clobber an app offset.) **The public `jitter` / `jitterPrevious` / `jitterPhase` getters (#68) are the single source for the constants UBO's `jitter`/`jitterPrev`** — `_writeConstants` reads them, so what an app reads and what the shaders reconcile against cannot disagree; keep it that way. `beginFrame` advances before applying, so a fresh history starts at phase 1 (don't "fix" this: it shifts every recorded capture's phase alignment). The TSL node mirrors the value into `jitterNode` (a `_`-prefixed uniform behind a getter, so three's child walk doesn't adopt it) in its before-pipeline hook.
 
 ---
@@ -244,7 +262,7 @@ These were discovered by reading three's source; they're non-obvious and easy to
 6. **Shading change** — black on a static steadily-lit scene; fires as clean single-frame spikes on light steps (moving specular, animating light). Lit everywhere while still ⇒ `SHADING_FLOOR_*` too low (see `shadingChange.ts`).
 7. **Reactivity** — the caller's reactive mask (white on flagged transparents/particles, black on opaque). Empty/misaligned ⇒ the mask isn't authored/passed right.
 
-Full guide in `src/shaders/README.md`.
+Full guide in `packages/core/src/shaders/README.md`.
 
 ---
 
@@ -311,8 +329,8 @@ opaque material resolves alpha to 1, and a full-screen present wants an overwrit
 composite.
 
 **Public surfaces** (both GPU-verified):
-- **`UpscalePass`** (`src/UpscalePass.ts`) — the imperative drop-in (graduated from `UpscalePresenter`, which is now a re-export shim). Bakes in the MRT/jitter/velocity/present recipe. Covers renderer-agnostic / non-graph use.
-- **TSL nodes** (`src/UpscalerNode.ts`, native TSL, no pmndrs dep) — "the future" surface. **One node, one code path** — modelled on three's own `FSR1Node` / `TAAUNode`:
+- **`UpscalePass`** (`packages/three/src/UpscalePass.ts`) — the imperative drop-in (graduated from `UpscalePresenter`, which is now a re-export shim). Bakes in the MRT/jitter/velocity/present recipe. Covers renderer-agnostic / non-graph use.
+- **TSL nodes** (`packages/three/src/UpscalerNode.ts`, native TSL, no pmndrs dep) — "the future" surface. **One node, one code path** — modelled on three's own `FSR1Node` / `TAAUNode`:
   - **`upscale(color, depth, velocity, camera, options)`** (`UpscalerNode`) — the composable node, consumes reduced-res texture nodes and outputs the upscaled result. **The key mechanism** (this is what a first attempt got wrong and rendered black): the inputs must be *graph dependencies* so three renders them in-graph, in dependency order, before this node's `updateBefore`. three discovers child nodes by walking the node's **own non-`_`-prefixed** properties (`Node._getChildren`) — our fields are `_`-prefixed, so `setup()` registers the inputs explicitly into `builder.getNodeProperties(this)` (exactly as `FSR1Node` does with `properties.textureNode`). With that, jitter (applied via the `onBeforeRenderPipeline` hook, like `TAAUNode`) lands because the inputs render *inside* the post render. The factory `convertToTexture`s the color (a no-op for texture/pass nodes, which is why reduced-res pass outputs keep their size — the caller controls input resolution). `UpscalerConfig` has `renderWidth`/`renderHeight` so the node matches an externally-sized input exactly.
   - **`upscaleScene(scene, camera, options)`** — a thin convenience, **not** a separate class: it builds `pass(scene, camera)` with a `{ output, velocity }` MRT at `1/ratio` and hands the texture nodes to `upscale(...)` — the same shape as three's `taau(pass.getTextureNode('output'), …)`. So the scene renders in-graph as an FSR3 input, jitter and all. `post.outputNode = upscaleScene(scene, camera)`. Examples `07-tsl-node`, `08-tsl-compose` (`.mul(vignette)`); the full SSGI/SSR stack is `09-kitchen-sink`.
   - **`upscaleSpatial(color, options)`** — color-only **spatial** (FSR1/EASU) node for inputs with no motion data: no depth/velocity/camera, no history, no reconstruction. A thin facade over `path: 'spatial'` with a stand-in camera (EASU reprojects nothing; `_writeConstants` still stages `near`/`far`, which the shader ignores, so any finite values keep NaN out of the UBO). It exists so the "I only have a color texture" case has a clean door instead of `upscale(color, null, null, camera, { path: 'spatial' })` — and so defaulting the *temporal* node to jitter-on isn't a trap.
@@ -408,4 +426,4 @@ Follow the existing style:
 
 ## Provenance / license
 
-MIT (`LICENSE`). The EASU/RCAS WGSL derives from AMD's MIT-licensed FidelityFX (`ffx_fsr1.h`); AMD's copyright notice is in `LICENSE`. Preserve it. If more FidelityFX stages are ever ported, keep the "faithful port vs. simplification" table in `src/shaders/README.md` honest.
+MIT (`LICENSE`). The EASU/RCAS WGSL derives from AMD's MIT-licensed FidelityFX (`ffx_fsr1.h`); AMD's copyright notice is in `LICENSE`. Preserve it. If more FidelityFX stages are ever ported, keep the "faithful port vs. simplification" table in `packages/core/src/shaders/README.md` honest.

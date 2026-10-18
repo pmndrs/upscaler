@@ -3,8 +3,28 @@
 How the library is put together, for contributors. Consumer-facing contracts are in
 [Inputs and contracts](inputs-and-contracts.md) and
 [Temporal guides](temporal-guides.md). The per-pass audit against FidelityFX is in
-[`src/shaders/README.md`](../src/shaders/README.md). Hard-won landmines and the
+[`packages/core/src/shaders/README.md`](../packages/core/src/shaders/README.md). Hard-won landmines and the
 rules a change must not break are in [`CLAUDE.md`](../CLAUDE.md).
+
+## Packages
+
+The repo is a pnpm workspace that publishes one package, `@pmndrs/upscaler` (the repo
+root). The code lives in private workspace packages, which the root build bundles in:
+
+| Package | Owns | Depends on |
+| --- | --- | --- |
+| `packages/core` (`@pmndrs/upscaler-core`) | WGSL passes, constants UBO, compute-pass wrapper, GPU timer, jitter/resolution math, config enums | a `GPUDevice` only, no engine |
+| `packages/three` (`@pmndrs/upscaler-three`) | `Upscaler`, `UpscalePass`, the TSL nodes, the three-internals bridge | core, `three` |
+
+| Published subpath | Entry |
+| --- | --- |
+| `@pmndrs/upscaler` | the three surface (unchanged since 0.5) |
+| `@pmndrs/upscaler/three` | the same three surface, by name |
+
+This is the first step of a split into an engine-agnostic core plus per-engine adapters:
+three today, with Babylon and pixi-3d to follow. Today `Upscaler` itself still lives in
+`packages/three`. Moving its device-only orchestration into core (and adding a
+`./core` subpath) is the next step.
 
 ## Layers
 
@@ -16,7 +36,7 @@ UpscalePass  ──────────────────────�
 (your own render loop)  ────────────────────────┘
 ```
 
-`Upscaler` ([`src/Upscaler.ts`](../src/Upscaler.ts)) is the only class that
+`Upscaler` ([`packages/three/src/Upscaler.ts`](../packages/three/src/Upscaler.ts)) is the only class that
 touches the GPU pipeline. Every other surface is a recipe around it:
 `UpscalePass` owns the render target, MRT and present quad; the TSL nodes own
 graph registration and the jitter hooks. `bench/src/BenchPipeline.ts` is the
@@ -27,7 +47,7 @@ canonical example of driving `Upscaler` by hand.
 The passes are hand-written WGSL, not TSL. That's deliberate: the shaders read like
 AMD's originals, and performance stays under direct control. `Upscaler` takes
 three's `GPUDevice` and the `GPUTexture`s behind three's textures
-([`src/internal/threeWebGPU.ts`](../src/internal/threeWebGPU.ts)). It encodes its
+([`packages/three/src/internal/threeWebGPU.ts`](../packages/three/src/internal/threeWebGPU.ts)). It encodes its
 passes on its own `GPUCommandEncoder` and submits them **between** three's scene render
 and the presentation draw. Queue ordering on the shared device makes that correct
 with no synchronization code.
@@ -118,16 +138,16 @@ encoding or any other presentation transform.
 
 Every pass binds one uniform buffer at `@group(0) @binding(0)`: the `FsrConstants`
 struct (96 bytes of payload, in a 256-byte buffer), written once per frame. The WGSL
-layout (`WGSL_CONSTANTS` in [`src/shaders/common.ts`](../src/shaders/common.ts)) and
-the CPU writer ([`src/internal/ConstantsBuffer.ts`](../src/internal/ConstantsBuffer.ts))
+layout (`WGSL_CONSTANTS` in [`packages/core/src/shaders/common.ts`](../packages/core/src/shaders/common.ts)) and
+the CPU writer ([`packages/core/src/internal/ConstantsBuffer.ts`](../packages/core/src/internal/ConstantsBuffer.ts))
 must stay byte-for-byte in sync. A field added or reordered on one side only silently
 corrupts every pass. `FLAG_*` bits in the same struct carry the per-frame feature
 switches.
 
 WGSL has no `#include`, so shared chunks are TypeScript strings deduplicated by
-`assembleShader()` ([`src/shaders/wgsl.ts`](../src/shaders/wgsl.ts)). Every pass uses
+`assembleShader()` ([`packages/core/src/shaders/wgsl.ts`](../packages/core/src/shaders/wgsl.ts)). Every pass uses
 8×8 workgroups, guards against grid overrun, and has the entry point `main`. The
-structural tests in `src/shaders/shaders.test.ts` enforce most of this without a GPU.
+structural tests in `packages/core/src/shaders/shaders.test.ts` enforce most of this without a GPU.
 
 ## Testing and evidence
 

@@ -2,7 +2,7 @@ import * as THREE from 'three/webgpu';
 import { mix, mrt, output, texture, uniform, velocity } from 'three/tsl';
 
 import { Upscaler } from './Upscaler';
-import { getQualityModeRatio } from './math/resolution';
+import { getQualityModeRatio } from '@pmndrs/upscaler-core/math/resolution';
 import { DebugView, QualityMode, type RuntimeSettings, type UpscalePath } from './types';
 
 /** Options for {@link UpscalePass.configure}. */

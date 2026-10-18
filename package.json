@@ -35,13 +35,16 @@
         ".": {
             "types": "./dist/index.d.ts",
             "import": "./dist/index.js"
+        },
+        "./three": {
+            "types": "./dist/three.d.ts",
+            "import": "./dist/three.js"
         }
     },
     "main": "./dist/index.js",
     "types": "./dist/index.d.ts",
     "files": [
-        "dist",
-        "src"
+        "dist"
     ],
     "scripts": {
         "dev": "vite --config bench/vite.config.ts",
@@ -51,7 +54,7 @@
         "bench:compare:rcas": "node scripts/compare-rcas.mjs",
         "examples": "vite --config examples/vite.config.ts",
         "examples:build": "vite build --config examples/vite.config.ts",
-        "build": "vite build && tsc --declaration --emitDeclarationOnly -p tsconfig.build.json && node scripts/verify-artifacts.mjs",
+        "build": "vite build && rollup -c rollup.dts.config.mjs && node scripts/verify-artifacts.mjs",
         "verify:packed-guides": "node scripts/verify-packed-guides.mjs --build-only",
         "verify:packed-guides:gpu": "node scripts/verify-packed-guides.mjs",
         "lint": "eslint .",
@@ -65,11 +68,15 @@
     },
     "devDependencies": {
         "@eslint/js": "^9.18.0",
+        "@pmndrs/upscaler-core": "workspace:*",
+        "@pmndrs/upscaler-three": "workspace:*",
         "@types/three": "^0.186.0",
         "@webgpu/types": "^0.1.64",
         "eslint": "^9.18.0",
         "globals": "^15.14.0",
         "lil-gui": "^0.20.0",
+        "rollup": "^4.62.2",
+        "rollup-plugin-dts": "^6.2.1",
         "three": "^0.186.1",
         "three-gpu-pathtracer": "https://codeload.github.com/gkjohnson/three-gpu-pathtracer/tar.gz/5f0ad5154a44224ae4b6c801b65778471dabf367",
         "three-mesh-bvh": "^0.9.15",

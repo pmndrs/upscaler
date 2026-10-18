@@ -9,7 +9,7 @@ import {
     createRcasNumericParityResolver,
     createSourceBundleResolver,
 } from '../benchmark/BenchmarkResolver';
-import { RCAS_PER_TAP_SHADER } from '../../../src/shaders/rcas';
+import { RCAS_PER_TAP_SHADER } from '@pmndrs/upscaler-core/shaders/rcas';
 import {
     DEBUG_SOURCE_FILTER_SHADER,
     DEBUG_SOURCE_RESOLVER_SHADER,

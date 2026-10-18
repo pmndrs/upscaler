@@ -32,7 +32,7 @@ import { browserExecutable } from './browser-executable.mjs';
  * Each is reported for the full frame and for every scenario ROI.
  *
  * The relax value is a WGSL constant, so this script does not change it.
- * Edit STILL_CLAMP_RELAX in src/shaders/accumulate.ts, then run once per
+ * Edit STILL_CLAMP_RELAX in packages/core/src/shaders/accumulate.ts, then run once per
  * value. The constant is read back from the source and recorded in the
  * summary.
  *
@@ -320,7 +320,7 @@ async function playRamp(client, view, onFrame) {
 async function main() {
     await rm(outputDirectory, { recursive: true, force: true });
     await mkdir(outputDirectory, { recursive: true });
-    const accumulateSource = await readFile(join(ROOT, 'src/shaders/accumulate.ts'), 'utf8');
+    const accumulateSource = await readFile(join(ROOT, 'packages/core/src/shaders/accumulate.ts'), 'utf8');
     const relax = Number(/const STILL_CLAMP_RELAX : f32 = ([\d.e+-]+);/.exec(accumulateSource)?.[1]);
 
     let viteServer = null;

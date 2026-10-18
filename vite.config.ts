@@ -14,18 +14,22 @@ export default defineConfig({
         // package.json `exports` → `dist/`, which doesn't exist before a build
         // (CI runs `pnpm test` first, so it failed there while passing locally
         // off a stale dist). Point it at the source, like bench/vite.config.ts.
-        alias: {
-            '@pmndrs/upscaler': resolve(__dirname, 'src/index.ts'),
-        },
+        alias: [{ find: /^@pmndrs\/upscaler$/, replacement: resolve(__dirname, 'src/index.ts') }],
     },
     build: {
+        // One entry per public subpath. The private workspace packages are
+        // bundled in; shared code lands in one chunk so every entry sees the
+        // same classes (an `instanceof` across subpaths must hold).
         lib: {
-            entry: resolve(__dirname, 'src/index.ts'),
+            entry: {
+                index: resolve(__dirname, 'src/index.ts'),
+                three: resolve(__dirname, 'src/three.ts'),
+            },
             formats: ['es'],
-            fileName: 'index',
         },
         rollupOptions: {
             external: ['three', 'three/tsl', 'three/webgpu'],
+            output: { chunkFileNames: 'chunks/upscaler-[hash].js' },
         },
     },
 });

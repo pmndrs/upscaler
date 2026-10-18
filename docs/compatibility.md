@@ -22,7 +22,7 @@ render-pipeline hooks and aren't affected.
 device, so it depends on two private internals: `renderer.backend.device` (the
 `GPUDevice`) and `renderer.backend.get(texture).texture` (the `GPUTexture` behind a
 three texture). They are isolated in
-[`src/internal/threeWebGPU.ts`](../src/internal/threeWebGPU.ts), which throws loudly
+[`packages/three/src/internal/threeWebGPU.ts`](../packages/three/src/internal/threeWebGPU.ts), which throws loudly
 if their shape changes, rather than limping along. They were verified on r184 and
 re-verified on r186.1.
 

@@ -16,7 +16,7 @@ import { Upscaler } from './Upscaler';
 import type { TemporalGuidesNode } from './TemporalGuidesNode';
 import { getGPUTexture } from './internal/threeWebGPU';
 import { getPipelineEvents, installRenderPipelineHooks } from './internal/renderPipelineHooks';
-import { getPassRenderResolution, getQualityModeRatio } from './math/resolution';
+import { getPassRenderResolution, getQualityModeRatio } from '@pmndrs/upscaler-core/math/resolution';
 import { QualityMode, type UpscalePath } from './types';
 
 // three's node base + its builder/frame carry incomplete TS types and expect a

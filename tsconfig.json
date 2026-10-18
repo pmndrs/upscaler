@@ -18,9 +18,10 @@
         "types": ["@webgpu/types", "vite/client"],
         "baseUrl": ".",
         "paths": {
-            "@pmndrs/upscaler": ["src/index.ts"]
+            "@pmndrs/upscaler": ["src/index.ts"],
+            "@pmndrs/upscaler/three": ["src/three.ts"]
         }
     },
-    "include": ["src", "bench/src", "examples", "test"],
+    "include": ["src", "packages/*/src", "bench/src", "examples", "test"],
     "exclude": ["node_modules", "dist", "examples/vite.config.ts"]
 }

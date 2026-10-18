@@ -3,7 +3,7 @@ import { PerspectiveCamera } from 'three';
 import type { WebGPURenderer } from 'three/webgpu';
 
 import { Upscaler } from './Upscaler';
-import { generateJitterSequence } from './math/halton';
+import { generateJitterSequence } from '@pmndrs/upscaler-core/math/halton';
 import type { UpscalePath } from './types';
 
 //* Mock Renderer — answers every create* call with a stub (shape of

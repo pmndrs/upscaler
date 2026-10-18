@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { SHADING_CHANGE_SHADER } from '../../../src/shaders/shadingChange';
+import { SHADING_CHANGE_SHADER } from '@pmndrs/upscaler-core/shaders/shadingChange';
 import {
     buildShadingRecurrenceShader,
     SHADING_CHANGE_FRAME_PAIR_SHADER,

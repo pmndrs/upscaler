@@ -8,7 +8,7 @@ them anyway, so it publishes its working set as the **temporal guides** bundle, 
 lets the frame run split so the geometry guides exist *before* the final color does.
 
 This page is the maintained contract for that bundle. The authoritative per-field
-documentation is the `TemporalGuides` type in [`src/types.ts`](../src/types.ts); this
+documentation is the `TemporalGuides` type in [`packages/three/src/types.ts`](../packages/three/src/types.ts); this
 page explains how the pieces fit and why. Live references are
 `examples/12-temporal-guides` (raw split dispatch) and `examples/13-guides-node`
 (TSL).

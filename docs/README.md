@@ -34,7 +34,7 @@ Maintained, for contributors:
 - [Windows audit and roadmap](windows-audit.md): async startup evidence, browser/demo coverage, native tooling gaps and prioritized follow-ups.
 - [Architecture](architecture.md): the layers, the pass graph, color domains and the
   shared constants buffer.
-- [`src/shaders/README.md`](../src/shaders/README.md): the per-pass audit against
+- [`packages/core/src/shaders/README.md`](../packages/core/src/shaders/README.md): the per-pass audit against
   FidelityFX FSR 3.1.5 and the operational notes for each pass.
 - [`bench/docs/BENCHMARKING.md`](../bench/docs/BENCHMARKING.md): how to run and read a
   benchmark.

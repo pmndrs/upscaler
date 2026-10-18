@@ -62,7 +62,7 @@ base render resolution, with the resulting size + base % shown in the HUD.
 ## Measuring performance
 
 The library already ships real per-pass GPU timing via WebGPU **`timestamp-query`**
-([`src/internal/GpuTimer.ts`](../src/internal/GpuTimer.ts)) — `upscaler.gpuTimings`
+([`packages/core/src/internal/GpuTimer.ts`](../packages/core/src/internal/GpuTimer.ts)) — `upscaler.gpuTimings`
 is a per-pass map of GPU milliseconds (reconstruct / exposure / shadingChange / accumulate / rcas / …),
 surfaced in the bench and `02` HUDs. It's **off by default** (it costs GPU time
 every frame), so a demo that reads it opts in with `gpuTiming: true` — the examples

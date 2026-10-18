@@ -3,7 +3,7 @@ import type { WebGPURenderer } from 'three/webgpu';
 import { describe, expect, it } from 'vitest';
 
 import { Upscaler } from '../Upscaler';
-import { JitterSequence } from './jitter';
+import { JitterSequence } from '@pmndrs/upscaler-core/math/jitter';
 import { applyJitterViewOffset, restoreViewOffset, type ViewOffsetCamera } from './viewOffset';
 
 const RENDER_W = 960;

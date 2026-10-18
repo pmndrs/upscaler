@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PerspectiveCamera, Texture } from 'three';
 import type { WebGPURenderer } from 'three/webgpu';
 import { Upscaler } from './Upscaler';
-import { UpscalerNotReadyError } from './initializationError';
+import { UpscalerNotReadyError } from '@pmndrs/upscaler-core/initializationError';
 import { MomentsPass } from './MomentsPass';
 import { DebugView } from './types';
 

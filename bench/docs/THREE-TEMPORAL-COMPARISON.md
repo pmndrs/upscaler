@@ -13,7 +13,7 @@ The local implementation facts in this document describe the code as it exists n
 
 ### Executive answer
 
-- **TRAA is not the general upscaling comparator.** It resolves at the input resolution, so it compares directly only with local `QualityMode.NativeAA` at a 1× ratio. See `../src/types.ts:12-24`.
+- **TRAA is not the general upscaling comparator.** It resolves at the input resolution, so it compares directly only with local `QualityMode.NativeAA` at a 1× ratio. See `../../packages/three/src/types.ts:12-24`.
 
 - **TAAU is the closest reduced-resolution comparator.** It expects low-resolution beauty, depth, and velocity, then reconstructs an output-resolution image. See `../node_modules/three/examples/jsm/tsl/display/TAAUNode.js:10-30`.
 
@@ -41,7 +41,7 @@ The files under `node_modules` are useful evidence for the installed package, bu
 
 A temporal resolver combines those differently positioned samples into a cleaner or higher-resolution result. Exactly **one final temporal resolver** should own this camera movement for a given render.
 
-This repository applies jitter with `camera.setViewOffset()`. The local frame lifecycle captures a stable projection first, applies jitter before rendering, and clears it afterward. See `../src/Upscaler.ts:260-297`.
+This repository applies jitter with `camera.setViewOffset()`. The local frame lifecycle captures a stable projection first, applies jitter before rendering, and clears it afterward. See `../../packages/three/src/Upscaler.ts:260-297`.
 
 ### Stochastic shader noise
 
@@ -71,7 +71,7 @@ It is a defense against stale history. If the old color lies far outside the ran
 
 A **reactive mask** identifies pixels where current color should dominate history.
 
-Transparent surfaces, particles, animated emissives, and additive effects often lack reliable depth or motion. Marking those pixels as reactive reduces ghost trails. The local API accepts a mask or can generate one from opaque-only versus final color. See `../src/types.ts:119-156` and `../src/Upscaler.ts:421-448`.
+Transparent surfaces, particles, animated emissives, and additive effects often lack reliable depth or motion. Marking those pixels as reactive reduces ghost trails. The local API accepts a mask or can generate one from opaque-only versus final color. See `../../packages/three/src/types.ts:119-156` and `../../packages/three/src/Upscaler.ts:421-448`.
 
 ### Why TRAA or TAAU must not run before the local resolver
 
@@ -89,12 +89,12 @@ Use one final AA/upscaling resolver per run: local Native AA, local temporal ups
 
 ### Local repository
 
-- Low-level compute orchestration and frame lifecycle: `../src/Upscaler.ts:42-63`, `../src/Upscaler.ts:139-205`, and `../src/Upscaler.ts:260-339`.
-- Composable graph node: `../src/UpscalerNode.ts:78-115` and `../src/UpscalerNode.ts:172-330`.
-- High-level imperative scene driver: `../src/UpscalePass.ts:21-36` and `../src/UpscalePass.ts:88-172`.
-- Jitter generation: `../src/math/halton.ts:1-41` and `../src/math/jitter.ts:3-68`.
-- Temporal shaders: `../src/shaders/reconstruct.ts:4-105`, `../src/shaders/accumulate.ts:4-291`, and `../src/shaders/luminancePyramid.ts:4-95`.
-- Output stages: `../src/shaders/rcas.ts:4-92`, `../src/shaders/blit.ts:4-46`, and `../src/shaders/common.ts:82-120`.
+- Low-level compute orchestration and frame lifecycle: `../../packages/three/src/Upscaler.ts:42-63`, `../../packages/three/src/Upscaler.ts:139-205`, and `../../packages/three/src/Upscaler.ts:260-339`.
+- Composable graph node: `../../packages/three/src/UpscalerNode.ts:78-115` and `../../packages/three/src/UpscalerNode.ts:172-330`.
+- High-level imperative scene driver: `../../packages/three/src/UpscalePass.ts:21-36` and `../../packages/three/src/UpscalePass.ts:88-172`.
+- Jitter generation: `../../packages/core/src/math/halton.ts:1-41` and `../../packages/core/src/math/jitter.ts:3-68`.
+- Temporal shaders: `../../packages/core/src/shaders/reconstruct.ts:4-105`, `../../packages/core/src/shaders/accumulate.ts:4-291`, and `../../packages/core/src/shaders/luminancePyramid.ts:4-95`.
+- Output stages: `../../packages/core/src/shaders/rcas.ts:4-92`, `../../packages/core/src/shaders/blit.ts:4-46`, and `../../packages/core/src/shaders/common.ts:82-120`.
 - Canonical bench integration: `./src/BenchPipeline.ts:14-22` and `./src/BenchPipeline.ts:125-162`.
 - Visual fixtures: `../examples/04-aliasing-torture/main.ts:11-14`, `../examples/05-transparency/main.ts:12-18`, `../examples/06-screenspace-gi/main.ts:27-32`, `../examples/09-kitchen-sink/main.ts:25-37`, and `../examples/10-ssgi-denoise/main.ts:27-52`.
 
@@ -119,13 +119,13 @@ Use one final AA/upscaling resolver per run: local Native AA, local temporal ups
 
 **Current implementation fact**
 
-The local sequence is centered Halton(2,3): each generated value subtracts `0.5`, producing offsets in render-pixel units around zero. See `../src/math/halton.ts:29-41`.
+The local sequence is centered Halton(2,3): each generated value subtracts `0.5`, producing offsets in render-pixel units around zero. See `../../packages/core/src/math/halton.ts:29-41`.
 
 The phase count adapts to the upscale ratio:
 
 `round(8 × ratio²)`
 
-with a minimum of one phase. See `../src/math/jitter.ts:3-17`.
+with a minimum of one phase. See `../../packages/core/src/math/jitter.ts:3-17`.
 
 Examples:
 
@@ -141,7 +141,7 @@ The upscaler:
 - reads the newly advanced sample;
 - applies it through `camera.setViewOffset()`.
 
-See `../src/Upscaler.ts:270-287`.
+See `../../packages/three/src/Upscaler.ts:270-287`.
 
 Because `advance()` occurs before `current` is read, the runtime order is a one-sample rotation of the generated array. This does not change the set of samples or cycle length, but it matters when comparing frame-by-frame sequences.
 
@@ -189,7 +189,7 @@ For a **diagnostic comparison**, a bench may inject one identical sequence into 
 
 #### Local
 
-The temporal path requires render-resolution color, depth, and velocity. Velocity is three's NDC delta, `current - previous`. Local multiplies it by `(0.5, -0.5)` to convert to UV delta and reprojects with `previousUV = uv - motion`. See `../src/types.ts:119-129`, `../src/Upscaler.ts:620-622`, and `../src/shaders/reconstruct.ts:86-100`.
+The temporal path requires render-resolution color, depth, and velocity. Velocity is three's NDC delta, `current - previous`. Local multiplies it by `(0.5, -0.5)` to convert to UV delta and reprojects with `previousUV = uv - motion`. See `../../packages/three/src/types.ts:119-129`, `../../packages/three/src/Upscaler.ts:620-622`, and `../../packages/core/src/shaders/reconstruct.ts:86-100`.
 
 **Pros**
 
@@ -201,7 +201,7 @@ The temporal path requires render-resolution color, depth, and velocity. Velocit
 
 - Requires correct raw texture access and WebGPU-only integration.
 - The current composable node mutates the shared three velocity singleton.
-- Public documentation is inconsistent: `UpscalerConfig.jitter` says composable `upscale()` defaults off, but the node constructor currently defaults it on. Compare `../src/types.ts:91-111` with `../src/UpscalerNode.ts:129-165`.
+- Public documentation is inconsistent: `UpscalerConfig.jitter` says composable `upscale()` defaults off, but the node constructor currently defaults it on. Compare `../../packages/three/src/types.ts:91-111` with `../../packages/three/src/UpscalerNode.ts:129-165`.
 
 #### three TRAA/TAAU
 
@@ -230,7 +230,7 @@ The motion convention is compatible. The ownership and lifecycle APIs are not. R
 
 #### Local
 
-Local fuses nearest-depth motion dilation and depth rejection into one render-resolution compute pass. It searches a 3×3 depth neighborhood, chooses the nearest sample, carries that sample's motion, and compares current versus reprojected previous linear depth. See `../src/shaders/reconstruct.ts:4-25` and `../src/shaders/reconstruct.ts:60-104`.
+Local fuses nearest-depth motion dilation and depth rejection into one render-resolution compute pass. It searches a 3×3 depth neighborhood, chooses the nearest sample, carries that sample's motion, and compares current versus reprojected previous linear depth. See `../../packages/core/src/shaders/reconstruct.ts:4-25` and `../../packages/core/src/shaders/reconstruct.ts:60-104`.
 
 Local explicitly supports:
 
@@ -239,7 +239,7 @@ Local explicitly supports:
 - perspective cameras;
 - orthographic cameras.
 
-See `../src/shaders/common.ts:122-140` and flag staging in `../src/Upscaler.ts:598-645`.
+See `../../packages/core/src/shaders/common.ts:122-140` and flag staging in `../../packages/three/src/Upscaler.ts:598-645`.
 
 **Pros**
 
@@ -295,8 +295,8 @@ TRAA remains safer where logarithmic depth is required. Local should not claim l
 
 The current frame is reconstructed with a jitter-aware separable Lanczos2 kernel over a 3×3 render-texel footprint. History uses five filtered Catmull-Rom fetches. See:
 
-- `../src/shaders/accumulate.ts:83-120`
-- `../src/shaders/accumulate.ts:149-201`
+- `../../packages/core/src/shaders/accumulate.ts:83-120`
+- `../../packages/core/src/shaders/accumulate.ts:149-201`
 
 **Pros**
 
@@ -346,7 +346,7 @@ Local:
 - ages history under disocclusion, heavy clipping, shading change, and reactivity;
 - lets stable thin-feature locks relax clipping and favor history.
 
-See `../src/shaders/accumulate.ts:204-290`.
+See `../../packages/core/src/shaders/accumulate.ts:204-290`.
 
 **Pros**
 
@@ -398,7 +398,7 @@ These are mostly local-only features:
 - automatic, fixed, or external exposure conditioning;
 - debug views for each major signal.
 
-See `../src/Upscaler.ts:394-553`, `../src/shaders/accumulate.ts:211-290`, and `../src/shaders/luminancePyramid.ts:4-30`.
+See `../../packages/three/src/Upscaler.ts:394-553`, `../../packages/core/src/shaders/accumulate.ts:211-290`, and `../../packages/core/src/shaders/luminancePyramid.ts:4-30`.
 
 **Pros**
 
@@ -487,7 +487,7 @@ A future local linear/HDR output option would remove one of the largest replacem
 
 #### Local
 
-Local has an explicit public `resetHistory()` and a per-dispatch `reset` input. Reconfiguration reallocates textures and schedules reset. See `../src/Upscaler.ts:173-205`, `../src/Upscaler.ts:249-258`, and `../src/types.ts:157-160`.
+Local has an explicit public `resetHistory()` and a per-dispatch `reset` input. Reconfiguration reallocates textures and schedules reset. See `../../packages/three/src/Upscaler.ts:173-205`, `../../packages/three/src/Upscaler.ts:249-258`, and `../../packages/three/src/types.ts:157-160`.
 
 **Pros**
 
@@ -532,7 +532,7 @@ The current API exposes:
 - eight diagnostic views;
 - per-compute-pass timing where timestamp queries exist.
 
-See `../src/types.ts:39-62`, `../src/Upscaler.ts:63-76`, and `../src/internal/GpuTimer.ts:1-24`.
+See `../../packages/three/src/types.ts:39-62`, `../../packages/three/src/Upscaler.ts:63-76`, and `../../packages/core/src/internal/GpuTimer.ts:1-24`.
 
 **Pros**
 
@@ -583,7 +583,7 @@ Compare:
 - local temporal at 1.5×, 2×, and 3×;
 - three `TAAUNode` at the same input and output dimensions.
 
-The local preset ratios are defined in `../src/math/resolution.ts:3-13`.
+The local preset ratios are defined in `../../packages/core/src/math/resolution.ts:3-13`.
 
 ### When local is a strong replacement
 
@@ -623,7 +623,7 @@ TRAA or TAAU may be preferable when the application:
 
 5. **A linear/HDR output option.** Keep direct display output as an explicit integration mode.
 
-6. **Renderer-state preservation in imperative helpers.** `UpscalePass.draw()` currently restores MRT and render target to `null`, not necessarily to the caller's previous state. See `../src/UpscalePass.ts:129-156`.
+6. **Renderer-state preservation in imperative helpers.** `UpscalePass.draw()` currently restores MRT and render target to `null`, not necessarily to the caller's previous state. See `../../packages/three/src/UpscalePass.ts:129-156`.
 
 7. **Mutable internal benchmark thresholds.** Make depth, weighting, and correction parameters adjustable in bench variants before deciding whether any deserve public API.
 
@@ -651,7 +651,7 @@ The default temporal path encodes four compute passes:
 3. accumulate;
 4. RCAS, or blit when sharpening is disabled.
 
-Generated reactivity adds a fifth pass. See `../src/Upscaler.ts:394-553`.
+Generated reactivity adds a fifth pass. See `../../packages/three/src/Upscaler.ts:394-553`.
 
 #### Exposure
 
@@ -661,7 +661,7 @@ The current exposure pass runs one 8×8 workgroup but only one invocation perfor
 - one previous-exposure load;
 - one external-exposure load.
 
-The 1,024 scene samples occur before the auto/manual/external selection, so they still run when fixed or external exposure is selected. See `../src/shaders/luminancePyramid.ts:42-94`.
+The 1,024 scene samples occur before the auto/manual/external selection, so they still run when fixed or external exposure is selected. See `../../packages/core/src/shaders/luminancePyramid.ts:42-94`.
 
 This is a fixed per-frame cost, not a per-output-pixel count.
 
@@ -673,7 +673,7 @@ Per render-resolution pixel, the visible source structure is approximately:
 - one velocity load;
 - up to four previous-depth loads for manual bilinear filtering.
 
-That is about **14 source texture operations per render pixel**, except offscreen reprojections can return before previous-depth sampling. See `../src/shaders/reconstruct.ts:44-57` and `../src/shaders/reconstruct.ts:66-104`.
+That is about **14 source texture operations per render pixel**, except offscreen reprojections can return before previous-depth sampling. See `../../packages/core/src/shaders/reconstruct.ts:44-57` and `../../packages/core/src/shaders/reconstruct.ts:66-104`.
 
 #### Accumulate
 
@@ -686,13 +686,13 @@ With default locks enabled and no reactive mask, the visible source structure is
 - five filtered history samples;
 - one lock-history sample.
 
-That is about **17 source texture operations per output pixel**. An active reactive input adds one more, for about 18. See `../src/shaders/accumulate.ts:131-178`, `../src/shaders/accumulate.ts:191-201`, and `../src/shaders/accumulate.ts:221-250`.
+That is about **17 source texture operations per output pixel**. An active reactive input adds one more, for about 18. See `../../packages/core/src/shaders/accumulate.ts:131-178`, `../../packages/core/src/shaders/accumulate.ts:191-201`, and `../../packages/core/src/shaders/accumulate.ts:221-250`.
 
 #### RCAS or blit
 
-RCAS visibly performs five input loads. Its helper also loads the same exposure texel per tap on the temporal path, giving ten source texture expressions. A compiler may hoist or merge the invariant exposure loads, so **five input plus one-to-five exposure operations** is the honest range. See `../src/shaders/rcas.ts:36-61`.
+RCAS visibly performs five input loads. Its helper also loads the same exposure texel per tap on the temporal path, giving ten source texture expressions. A compiler may hoist or merge the invariant exposure loads, so **five input plus one-to-five exposure operations** is the honest range. See `../../packages/core/src/shaders/rcas.ts:36-61`.
 
-Blit has one filtered input sample and one exposure load on the temporal path. See `../src/shaders/blit.ts:30-45`.
+Blit has one filtered input sample and one exposure load on the temporal path. See `../../packages/core/src/shaders/blit.ts:30-45`.
 
 #### Owned textures
 
@@ -708,7 +708,7 @@ The current temporal allocation owns **13 textures**, excluding caller inputs, s
 - one reactive dummy;
 - one generated-reactive target.
 
-This count follows `../src/Upscaler.ts:665-720`. Several are tiny or render-resolution resources; counting textures alone does not represent memory cost. The two display-resolution RGBA16F history textures and two display-resolution RGBA16F lock textures dominate this inventory.
+This count follows `../../packages/three/src/Upscaler.ts:665-720`. Several are tiny or render-resolution resources; counting textures alone does not represent memory cost. The two display-resolution RGBA16F history textures and two display-resolution RGBA16F lock textures dominate this inventory.
 
 ### TAAU structure
 
@@ -758,7 +758,7 @@ That does **not** prove it is slower:
 - filterable samples and explicit loads have different costs;
 - local and three currently produce different output domains and feature sets.
 
-Local `GpuTimer` measures only the compute passes encoded by `Upscaler`. It does not include the scene render, final present, TAAU/TRAA resolve, or their history/depth copies. See `../src/internal/GpuTimer.ts:45-98`.
+Local `GpuTimer` measures only the compute passes encoded by `Upscaler`. It does not include the scene render, final present, TAAU/TRAA resolve, or their history/depth copies. See `../../packages/core/src/internal/GpuTimer.ts:45-98`.
 
 Therefore, a local `gpuTimings` total is **not comparable** with an untimed three resolver.
 
@@ -886,7 +886,7 @@ The pipeline calls each scalar once around its graph render. See `../node_module
 
 These nodes assign those scalar properties directly:
 
-- local `UpscalerNode`: `../src/UpscalerNode.ts:206-217`;
+- local `UpscalerNode`: `../../packages/three/src/UpscalerNode.ts:206-217`;
 - TRAA: `../node_modules/three/examples/jsm/tsl/display/TRAANode.js:443-464`;
 - TAAU: `../node_modules/three/examples/jsm/tsl/display/TAAUNode.js:502-527`;
 - `TemporalReprojectNode`: `../node_modules/three/examples/jsm/tsl/display/TemporalReprojectNode.js:728-748`.
@@ -1237,7 +1237,7 @@ No winner should be declared from source operation counts alone.
 
 ### 1. Fix or document integration inconsistencies before benchmarking
 
-- Correct the `../src/types.ts:91-111` jitter-default text to match current `UpscalerNode` behavior, or intentionally change the behavior and document that decision.
+- Correct the `../../packages/three/src/types.ts:91-111` jitter-default text to match current `UpscalerNode` behavior, or intentionally change the behavior and document that decision.
 - Verify installed TAAU lock persistence on GPU.
 - Characterize scalar hook overwrite and velocity clearing in example 10.
 

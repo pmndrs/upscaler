@@ -24,7 +24,7 @@ Check them in this order:
 | 7 | `Reactivity` | White on flagged transparents/particles, black on opaque geometry. | Empty or misaligned: the mask isn't authored, isn't passed, or isn't rendered under the same jitter as `color`. |
 
 The per-pass reference for what each internal means is
-[`src/shaders/README.md`](../src/shaders/README.md#debugging).
+[`packages/core/src/shaders/README.md`](../packages/core/src/shaders/README.md#debugging).
 
 ### Reading debug values
 

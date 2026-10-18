@@ -2,7 +2,7 @@
 //* subgrid, the sample point of every phase so far, and the current one.
 // Coordinates are render pixels with y pointing down (texel space): the camera
 // view offset (jx, jy) makes render texel i hold the scene at i + 0.5 + j, so
-// that is where each dot sits (src/shaders/README.md, "Jitter").
+// that is where each dot sits (packages/core/src/shaders/README.md, "Jitter").
 
 const BLOCK = 2; // render pixels per side
 
