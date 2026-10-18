@@ -1,0 +1,6 @@
+packages:
+    - .
+
+# pnpm 10 blocks dependency lifecycle scripts unless listed here.
+onlyBuiltDependencies:
+    - esbuild

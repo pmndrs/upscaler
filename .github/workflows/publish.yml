@@ -78,10 +78,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # all tags + history, for the version, the guards and the notes
+      # pnpm installs and runs the prepublishOnly gate; npm still versions and
+      # publishes (Trusted Publishing is npm-CLI OIDC).
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
+          cache: pnpm
           registry-url: https://registry.npmjs.org
       # Trusted Publishing needs npm >= 11.5.1; Node 22 bundles npm 10.x.
       # Pinned to a major, not @latest: npm 12 changed `npm pack --json`'s shape
@@ -327,7 +330,7 @@ jobs:
 
       - name: Install dependencies
         if: steps.npm.outputs.published == 'false'
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Publish to npm
         if: steps.npm.outputs.published == 'false'

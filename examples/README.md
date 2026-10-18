@@ -5,8 +5,8 @@ expensive screen-space effect rendered small and upscaled. WebGPU-only — open 
 Chrome/Edge 113+.
 
 ```bash
-npm install
-npm run examples     # http://localhost:5300  (landing page links every demo)
+pnpm install
+pnpm examples        # http://localhost:5300  (landing page links every demo)
 ```
 
 The library is consumed straight from `../src` (aliased as `@pmndrs/upscaler`), so

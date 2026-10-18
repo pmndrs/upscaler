@@ -131,7 +131,7 @@ structural tests in `src/shaders/shaders.test.ts` enforce most of this without a
 
 ## Testing and evidence
 
-- `npm test` is GPU-free on purpose, because CI has no GPU. It covers jitter math,
+- `pnpm test` is GPU-free on purpose, because CI has no GPU. It covers jitter math,
   quality presets, shader-module structure and shader fingerprints. Keep new tests
   device-free.
 - Real-GPU verification (bench, headless Chrome over CDP, convergence meters) is

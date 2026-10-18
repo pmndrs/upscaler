@@ -58,8 +58,8 @@ headlessly (no Playwright): launch Chrome with `--headless=new --enable-unsafe-w
 `<select>` elements you can set + dispatch `change` on to flip modes/debug views.
 
 ```bash
-npm install
-npm run dev        # http://localhost:5199 — open in Chrome/Edge 113+ (real WebGPU)
+pnpm install
+pnpm dev           # http://localhost:5199 — open in Chrome/Edge 113+ (real WebGPU)
 ```
 
 When something breaks after an edit, expect failures in this order of likelihood:
@@ -83,12 +83,16 @@ worktree isn't matched by the root `.gitignore`'s `node_modules/` pattern
 ## Commands
 
 ```bash
-npm run dev        # interactive bench (Vite, port 5199)
-npm run examples   # standalone example gallery (Vite, port 5300)
-npm test           # vitest — jitter math, quality presets, WGSL module assembly
-npm run typecheck  # tsc --noEmit
-npm run lint       # eslint
-npm run build      # library build → dist/ (vite lib + tsc declarations)
+pnpm dev           # interactive bench (Vite, port 5199)
+pnpm examples      # standalone example gallery (Vite, port 5300)
+pnpm test          # vitest — jitter math, quality presets, WGSL module assembly
+pnpm typecheck     # tsc --noEmit
+pnpm lint          # eslint
+pnpm build         # library build → dist/ (vite lib + tsc declarations)
+
+# pnpm installs and runs (strict node_modules: an undeclared import fails). The
+# npm CLI still packs, versions and publishes (Trusted Publishing is npm OIDC);
+# scripts reach it through scripts/npm-command.mjs, never via npm_execpath under pnpm.
 
 # Releasing (docs/releasing.md). Merges to main NEVER publish. Releases need no
 # local step: Actions → Publish to npm → Run workflow (version: auto | patch |
