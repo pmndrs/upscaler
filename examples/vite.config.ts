@@ -38,7 +38,7 @@ export default defineConfig(({ mode }) => {
                 ? { '@pmndrs/upscaler': packageEntry }
                 : [
                       { find: /^@pmndrs\/upscaler$/, replacement: resolve(root, '../src/index.ts') },
-                      { find: /^@pmndrs\/upscaler\/(core|three)$/, replacement: resolve(root, '../src/$1.ts') },
+                      { find: /^@pmndrs\/upscaler\/(core|three|babylon)$/, replacement: resolve(root, '../src/$1.ts') },
                   ],
         },
         // Top-level await (renderer.init) needs a modern target.
@@ -68,6 +68,7 @@ export default defineConfig(({ mode }) => {
                           transparentcanvas: resolve(root, '15-transparent-canvas/index.html'),
                           spatialnode: resolve(root, '16-spatial-node/index.html'),
                           webgpuhello: resolve(root, 'webgpu/hello/index.html'),
+                          babylonhello: resolve(root, 'babylon/hello/index.html'),
                           s1reinvest: resolve(root, 's1-reinvest/index.html'),
                           s2fractal: resolve(root, 's2-fractal/index.html'),
                           s3howlow: resolve(root, 's3-how-low/index.html'),

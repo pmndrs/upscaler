@@ -43,6 +43,10 @@
         "./core": {
             "types": "./dist/core.d.ts",
             "import": "./dist/core.js"
+        },
+        "./babylon": {
+            "types": "./dist/babylon.d.ts",
+            "import": "./dist/babylon.js"
         }
     },
     "main": "./dist/index.js",
@@ -68,10 +72,21 @@
         "prepublishOnly": "pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run build"
     },
     "peerDependencies": {
+        "@babylonjs/core": ">=9.31.0 <10",
         "three": ">=0.184.0"
     },
+    "peerDependenciesMeta": {
+        "@babylonjs/core": {
+            "optional": true
+        },
+        "three": {
+            "optional": true
+        }
+    },
     "devDependencies": {
+        "@babylonjs/core": "9.31.0",
         "@eslint/js": "^9.18.0",
+        "@pmndrs/upscaler-babylon": "workspace:*",
         "@pmndrs/upscaler-core": "workspace:*",
         "@pmndrs/upscaler-three": "workspace:*",
         "@types/three": "^0.186.0",

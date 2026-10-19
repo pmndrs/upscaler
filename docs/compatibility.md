@@ -26,6 +26,19 @@ three texture). They are isolated in
 if their shape changes, rather than limping along. They were verified on r184 and
 re-verified on r186.1.
 
+## Babylon.js versions
+
+The Babylon adapter (`@pmndrs/upscaler/babylon`) is **experimental** and verified on
+`@babylonjs/core` 9.31 (peer range `>=9.31.0 <10`), on a `WebGPUEngine` only. It
+depends on two private Babylon fields (`engine._device`,
+`internalTexture._hardwareTexture.underlyingResource`) and on Babylon drawing render
+targets Y-flipped; see [Babylon.js adapter](babylon.md#babylon-internals-the-adapter-depends-on)
+for what to re-verify on an upgrade.
+
+Both engines are optional peer dependencies of `@pmndrs/upscaler`: install the one
+whose subpath you import (`three` for the root and `/three`, `@babylonjs/core` for
+`/babylon`). `/core` needs neither.
+
 ## WebGPU
 
 - **WebGPU backend required.** There is no WebGL fallback, and none is planned: the

@@ -366,10 +366,10 @@
                     <span class="tag">integration</span>
                 </a>
             </div>
-            <h2 class="section-head">No engine</h2>
+            <h2 class="section-head">Other engines</h2>
             <p class="section-sub">
                 <code>@pmndrs/upscaler/core</code> on a bare <code>GPUDevice</code> — the contract every
-                engine adapter is written against.
+                engine adapter is written against — and the adapters built on it.
             </p>
             <div class="grid">
                 <a class="card" href="webgpu/hello/">
@@ -381,6 +381,16 @@
                         command encoder — scene, upscale and present in one submit.
                     </div>
                     <span class="tag">integration</span>
+                </a>
+                <a class="card" href="babylon/hello/">
+                    <div class="num">B1</div>
+                    <div class="title">Babylon.js</div>
+                    <div class="desc">
+                        The experimental Babylon adapter in a frame graph: geometry renderer → upscale
+                        task → image processing, jittered through Babylon's own TAA material plugin so
+                        the velocity buffer stays jitter-free.
+                    </div>
+                    <span class="tag">experimental</span>
                 </a>
             </div>
             <footer class="foot">

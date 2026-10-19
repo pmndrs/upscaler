@@ -8,9 +8,15 @@ importers:
 
   .:
     devDependencies:
+      '@babylonjs/core':
+        specifier: 9.31.0
+        version: 9.31.0
       '@eslint/js':
         specifier: ^9.18.0
         version: 9.39.4
+      '@pmndrs/upscaler-babylon':
+        specifier: workspace:*
+        version: link:packages/babylon
       '@pmndrs/upscaler-core':
         specifier: workspace:*
         version: link:packages/core
@@ -60,6 +66,16 @@ importers:
         specifier: ^3.0.0
         version: 3.2.7
 
+  packages/babylon:
+    dependencies:
+      '@pmndrs/upscaler-core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@babylonjs/core':
+        specifier: 9.31.0
+        version: 9.31.0
+
   packages/core: {}
 
   packages/three:
@@ -84,6 +100,9 @@ packages:
   '@babel/helper-validator-identifier@8.0.6':
     resolution: {integrity: sha512-HYx0YmuchRxRSpnjvcNffnPS8DCauKNmnumIuHG3jnQAVewRA7kfJGwF13ayEpSZs7s4R/oBH4eppuXcAQd5JQ==}
     engines: {node: ^22.18.0 || >=24.11.0}
+
+  '@babylonjs/core@9.31.0':
+    resolution: {integrity: sha512-CqtzNFa6BrL2Wv/AoB3BoMZaAFh+52I+xY8c5a7v+/sh/T5lXJHqLTdvSXMONeLYJUTV6sHJUCT7nwSzMDrSsQ==}
 
   '@dimforge/rapier3d-compat@0.12.0':
     resolution: {integrity: sha512-uekIGetywIgopfD97oDL5PfeezkFpNhwlzlaEYNOA0N6ghdsOvh/HYjSMek5Q2O1PYvRSDFcqFVJl4r4ZBwOow==}
@@ -1149,6 +1168,8 @@ snapshots:
 
   '@babel/helper-validator-identifier@8.0.6':
     optional: true
+
+  '@babylonjs/core@9.31.0': {}
 
   '@dimforge/rapier3d-compat@0.12.0': {}
 

@@ -25,6 +25,9 @@ Maintained, normative, for anyone integrating `@pmndrs/upscaler`:
   (`@pmndrs/upscaler/core`) from raw WebGPU or a new engine adapter: device,
   inputs, `FrameCamera`, jitter and motion conventions, the texture allocator, and
   submit ordering.
+- [Babylon.js adapter](babylon.md) (experimental): `@pmndrs/upscaler/babylon` on a
+  `WebGPUEngine`: the frame-graph task, inputs, how jitter and orientation map
+  onto Babylon, and the Babylon internals it depends on.
 
 The [examples](../examples/README.md) are the executable references; each guide links
 the ones for its integration path.

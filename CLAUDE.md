@@ -182,6 +182,13 @@ packages/
     src/math/viewOffset.ts — jitter ↔ camera.view composition
     src/internal/threeWebGPU.ts — getDevice() / getGPUTexture(): the three-internals bridge
     src/internal/textureAllocator.ts — the core's allocator for three (StorageTexture + initTexture)
+  babylon/             — @pmndrs/upscaler-babylon (private, EXPERIMENTAL): Babylon.js WebGPUEngine adapter
+    src/Upscaler.ts    — wraps UpscalerCore: InternalTexture lookup, jitter via Babylon's TAAMaterialManager
+                         (clip-space plugin → camera + velocity stay jitter-free), flushFramebuffer() before each submit
+    src/FrameGraphUpscaleTask.ts — the frame-graph task (owns the jitter window; declares inputs as task dependencies)
+    src/internal/babylonWebGPU.ts — the two private Babylon fields (engine._device, _hardwareTexture.underlyingResource)
+    src/internal/conventions.ts — flipped-RTT jitter sign + motionScale [-1,-1] + FrameCamera (docs/babylon.md)
+    src/internal/textureAllocator.ts — wrapWebGPUTexture + updateWrappedWebGPUTexture (the wrap alone has no sampling view)
 bench/                 — Vite test bench (own vite.config.ts, own tsconfig include)
   src/main.ts          — boot, UI state, stats, render loop
   src/BenchPipeline.ts — render target + velocity MRT wiring, dispatch, present quad (THE integration reference)
@@ -196,6 +203,7 @@ examples/              — standalone example gallery (own vite.config.ts, port 
                          upscaleSpatial().
   webgpu/hello         — no engine: `@pmndrs/upscaler/core` on a bare GPUDevice (one-submit encode);
                          the executable reference for docs/engine-contract.md
+  babylon/hello        — the Babylon adapter in a frame graph (geometry renderer → FrameGraphUpscaleTask → image processing)
 docs/                  — maintained consumer/contributor docs (index: docs/README.md);
   research/            — live research (PARITY.md, PAPER-NOTES.md)
   archive/             — historical specs/handoffs/plans, NOT normative
@@ -207,6 +215,7 @@ docs/                  — maintained consumer/contributor docs (index: docs/REA
 - A new public subpath = a `src/<name>.ts` entry + `package.json` `exports` + both build configs' inputs + `tsconfig.json` `paths`.
 - `packages/core` must stay engine-free: anything that needs `three` belongs in `packages/three`. An eslint `no-restricted-imports` rule fails on three/Babylon/pixi (or another workspace package) imported from core.
 - `docs/engine-contract.md` is the core's contract for any driver (device, inputs, `FrameCamera`, jitter + motion conventions, allocator, submit order); a change to any of those updates it. GPU-verified on `examples/webgpu/hello` 2026-10-19 (all four modes + debug views clean; jitter sign A/B'd against native: the documented sign 13.6 mean-abs vs native, flipped 16.7 ≈ bilinear 16.2).
+- **Babylon adapter (experimental, 2026-10-19, `docs/babylon.md`):** inputs stay in Babylon's Y-flipped render-target layout (no flip pass) — the jitter clip offset is `(−2x/w, −2y/h)` and `motionScale` is `[-1, -1]` for Babylon's LINEAR velocity (`0.5·(prev − cur)` NDC). Both signs are GPU-verified (jitter A/B vs native: 14.2 mean-abs, flipped 16.7, bilinear 15.1; motion: disocclusion thin trailing edges under orbit). If Babylon ever stops flipping RTTs (`_ubInvertY`), both invert. Jitter goes through `TAAMaterialManager` (never the camera — a projection jitter leaks into Babylon's velocity, which uses the jittered `scene.getTransformMatrix()` for both endpoints). `@babylonjs/core` and `three` are optional peers of the facade.
 - Adapters are thin: an engine's `Upscaler` resolves its textures to `GPUTexture`s, fills a `FrameCamera`, applies `core.beginFrame()`'s jitter to its camera, and passes an allocator. Logic that doesn't need the engine goes in core. Bench-only knobs (`_rcasShader`, `_crossFrameReconstruct`, …) stay `_`-prefixed internal options on both layers and are never exported from an index.
 
 Read `packages/core/src/UpscalerCore.ts`, `packages/three/src/Upscaler.ts` and `bench/src/BenchPipeline.ts` together first — the last is the canonical example of how the three `Upscaler` (a thin wrapper over the core) is meant to be driven. `examples/shared/UpscalePresenter.ts` is the same recipe packaged as a reusable helper; `examples/06-screenspace-gi` is the reference for feeding FSR3 the output of a TSL post-processing graph (GTAO/SSR/SSGI) rendered at reduced resolution.

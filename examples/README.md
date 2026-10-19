@@ -10,7 +10,7 @@ pnpm examples        # http://localhost:5300  (landing page links every demo)
 ```
 
 The library is consumed straight from `../src` (aliased as `@pmndrs/upscaler` and its
-`/core` and `/three` subpaths), so
+`/core`, `/three` and `/babylon` subpaths), so
 shader/pipeline edits hot-reload here just like in the bench.
 
 ## Showcases
@@ -56,6 +56,14 @@ WebGPU apps and for anyone writing an engine adapter against
 | # | Demo | Shows |
 |---|------|-------|
 | W1 | **Raw WebGPU** (`webgpu/hello`) | A hand-written WebGPU scene (generated cubes over an aliasing grid floor) renders linear color, depth and jitter-free motion, offsets its own projection by `core.beginFrame()`'s jitter, and `core.encode()`s the upscale into its own command encoder — scene, upscale and present in one submit. Keys switch temporal / spatial / bilinear / native and cycle the debug views. |
+
+## Babylon.js
+
+The experimental Babylon adapter, `@pmndrs/upscaler/babylon` ([`docs/babylon.md`](../docs/babylon.md)).
+
+| # | Demo | Shows |
+|---|------|-------|
+| B1 | **Babylon.js** (`babylon/hello`) | A Babylon frame graph: a geometry renderer writes linear HDR color, depth and linear velocity at render resolution, `FrameGraphUpscaleTask` upscales them on Babylon's device (jittered through `TAAMaterialManager`, so velocity stays jitter-free), and image processing presents the output. The same scene and keys as W1. |
 
 Most interactive demos have a **render scale ×** slider (1.0×–3.0×) that sweeps the
 base render resolution, with the resulting size + base % shown in the HUD.

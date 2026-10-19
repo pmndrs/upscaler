@@ -1,0 +1,22 @@
+{
+    "name": "@pmndrs/upscaler-babylon",
+    "version": "0.0.0",
+    "private": true,
+    "description": "Babylon.js WebGPUEngine adapter for @pmndrs/upscaler (experimental). Bundled into the published package; never published on its own.",
+    "license": "MIT",
+    "type": "module",
+    "sideEffects": false,
+    "exports": {
+        ".": "./src/index.ts",
+        "./*": "./src/*.ts"
+    },
+    "dependencies": {
+        "@pmndrs/upscaler-core": "workspace:*"
+    },
+    "peerDependencies": {
+        "@babylonjs/core": ">=9.31.0 <10"
+    },
+    "devDependencies": {
+        "@babylonjs/core": "9.31.0"
+    }
+}

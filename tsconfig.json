@@ -20,7 +20,8 @@
         "paths": {
             "@pmndrs/upscaler": ["src/index.ts"],
             "@pmndrs/upscaler/three": ["src/three.ts"],
-            "@pmndrs/upscaler/core": ["src/core.ts"]
+            "@pmndrs/upscaler/core": ["src/core.ts"],
+            "@pmndrs/upscaler/babylon": ["src/babylon.ts"]
         }
     },
     "include": ["src", "packages/*/src", "bench/src", "examples", "test"],
