@@ -28,6 +28,9 @@ Maintained, normative, for anyone integrating `@pmndrs/upscaler`:
 - [Babylon.js adapter](babylon.md) (experimental): `@pmndrs/upscaler/babylon` on a
   `WebGPUEngine`: the frame-graph task, inputs, how jitter and orientation map
   onto Babylon, and the Babylon internals it depends on.
+- [pixi.js adapter](pixi.md) (experimental): `@pmndrs/upscaler/pixi` on pixi v8's
+  `WebGPURenderer`: the spatial path between renders, `encode()` inside a render,
+  3D layers, and what the temporal path still needs.
 
 The [examples](../examples/README.md) are the executable references; each guide links
 the ones for its integration path.

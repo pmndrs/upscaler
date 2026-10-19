@@ -10,7 +10,7 @@ pnpm examples        # http://localhost:5300  (landing page links every demo)
 ```
 
 The library is consumed straight from `../src` (aliased as `@pmndrs/upscaler` and its
-`/core`, `/three` and `/babylon` subpaths), so
+`/core`, `/three`, `/babylon` and `/pixi` subpaths), so
 shader/pipeline edits hot-reload here just like in the bench.
 
 ## Showcases
@@ -64,6 +64,14 @@ The experimental Babylon adapter, `@pmndrs/upscaler/babylon` ([`docs/babylon.md`
 | # | Demo | Shows |
 |---|------|-------|
 | B1 | **Babylon.js** (`babylon/hello`) | A Babylon frame graph: a geometry renderer writes linear HDR color, depth and linear velocity at render resolution, `FrameGraphUpscaleTask` upscales them on Babylon's device (jittered through `TAAMaterialManager`, so velocity stays jitter-free), and image processing presents the output. The same scene and keys as W1. |
+
+## pixi.js
+
+The experimental pixi adapter, `@pmndrs/upscaler/pixi` ([`docs/pixi.md`](../docs/pixi.md)).
+
+| # | Demo | Shows |
+|---|------|-------|
+| P1 | **pixi.js** (`pixi/hello`) | A pixi stage (thin strokes, small type) rendered anti-aliased at half resolution into a `RenderTexture`, upscaled by the spatial path (FSR1) between pixi renders, and presented on a `Sprite`. Keys switch spatial / bilinear / native. |
 
 Most interactive demos have a **render scale ×** slider (1.0×–3.0×) that sweeps the
 base render resolution, with the resulting size + base % shown in the HUD.

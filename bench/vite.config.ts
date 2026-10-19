@@ -14,7 +14,7 @@ export default defineConfig({
         // Exact-match per subpath (a string key is a prefix alias).
         alias: [
             { find: /^@pmndrs\/upscaler$/, replacement: resolve(__dirname, '../src/index.ts') },
-            { find: /^@pmndrs\/upscaler\/(core|three|babylon)$/, replacement: resolve(__dirname, '../src/$1.ts') },
+            { find: /^@pmndrs\/upscaler\/(core|three|babylon|pixi)$/, replacement: resolve(__dirname, '../src/$1.ts') },
         ],
     },
     // Top-level await (renderer.init) needs a modern target.

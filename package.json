@@ -47,6 +47,10 @@
         "./babylon": {
             "types": "./dist/babylon.d.ts",
             "import": "./dist/babylon.js"
+        },
+        "./pixi": {
+            "types": "./dist/pixi.d.ts",
+            "import": "./dist/pixi.js"
         }
     },
     "main": "./dist/index.js",
@@ -73,10 +77,14 @@
     },
     "peerDependencies": {
         "@babylonjs/core": ">=9.31.0 <10",
+        "pixi.js": ">=8.22.0 <9",
         "three": ">=0.184.0"
     },
     "peerDependenciesMeta": {
         "@babylonjs/core": {
+            "optional": true
+        },
+        "pixi.js": {
             "optional": true
         },
         "three": {
@@ -88,12 +96,14 @@
         "@eslint/js": "^9.18.0",
         "@pmndrs/upscaler-babylon": "workspace:*",
         "@pmndrs/upscaler-core": "workspace:*",
+        "@pmndrs/upscaler-pixi": "workspace:*",
         "@pmndrs/upscaler-three": "workspace:*",
         "@types/three": "^0.186.0",
         "@webgpu/types": "^0.1.64",
         "eslint": "^9.18.0",
         "globals": "^15.14.0",
         "lil-gui": "^0.20.0",
+        "pixi.js": "8.22.0",
         "rollup": "^4.62.2",
         "rollup-plugin-dts": "^6.2.1",
         "three": "^0.186.1",

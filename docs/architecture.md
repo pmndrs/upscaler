@@ -16,6 +16,7 @@ root). The code lives in private workspace packages, which the root build bundle
 | `packages/core` (`@pmndrs/upscaler-core`) | `UpscalerCore` (the pass orchestration), `MomentsCore`, WGSL passes, constants UBO, compute-pass wrapper, GPU timer, jitter/resolution math, config enums | a `GPUDevice` only, no engine |
 | `packages/three` (`@pmndrs/upscaler-three`) | `Upscaler` (wraps the core), `UpscalePass`, the TSL nodes, the three-internals bridge and texture allocator | core, `three` |
 | `packages/babylon` (`@pmndrs/upscaler-babylon`) | `Upscaler` (wraps the core), `FrameGraphUpscaleTask`, the Babylon-internals bridge and texture allocator; experimental | core, `@babylonjs/core` |
+| `packages/pixi` (`@pmndrs/upscaler-pixi`) | `Upscaler` (wraps the core), the pixi texture bridge and allocator; experimental, spatial path verified | core, `pixi.js` |
 
 | Published subpath | Entry |
 | --- | --- |
@@ -23,6 +24,7 @@ root). The code lives in private workspace packages, which the root build bundle
 | `@pmndrs/upscaler/three` | the same three surface, by name |
 | `@pmndrs/upscaler/core` | `UpscalerCore` and `MomentsCore` on a bare `GPUDevice`, plus the config types and math |
 | `@pmndrs/upscaler/babylon` | the Babylon.js `WebGPUEngine` adapter (experimental, [Babylon.js adapter](babylon.md)) |
+| `@pmndrs/upscaler/pixi` | the pixi.js v8 `WebGPURenderer` adapter (experimental, [pixi.js adapter](pixi.md)) |
 
 The split is an engine-agnostic core plus per-engine adapters: three today, with
 Babylon and pixi-3d to follow.

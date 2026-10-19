@@ -60,4 +60,15 @@ export default tseslint.config(
             }],
         },
     },
+    {
+        files: ['packages/pixi/**/*.ts'],
+        rules: {
+            'no-restricted-imports': ['error', {
+                patterns: [{
+                    group: ['three', 'three/*', '@babylonjs/*', '@pmndrs/upscaler-three*', '@pmndrs/upscaler-babylon*'],
+                    message: 'packages/pixi may import only pixi.js and @pmndrs/upscaler-core.',
+                }],
+            }],
+        },
+    },
 );

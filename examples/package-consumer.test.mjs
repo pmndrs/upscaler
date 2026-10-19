@@ -47,6 +47,6 @@ test('ordinary modes ignore the package entry and resolve source', async () => {
 
     expect(resolvedConfig.resolve?.alias).toEqual([
         { find: /^@pmndrs\/upscaler$/, replacement: resolve(import.meta.dirname, '../src/index.ts') },
-        { find: /^@pmndrs\/upscaler\/(core|three|babylon)$/, replacement: resolve(import.meta.dirname, '../src/$1.ts') },
+        { find: /^@pmndrs\/upscaler\/(core|three|babylon|pixi)$/, replacement: resolve(import.meta.dirname, '../src/$1.ts') },
     ]);
 });

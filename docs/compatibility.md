@@ -35,9 +35,15 @@ depends on two private Babylon fields (`engine._device`,
 targets Y-flipped; see [Babylon.js adapter](babylon.md#babylon-internals-the-adapter-depends-on)
 for what to re-verify on an upgrade.
 
-Both engines are optional peer dependencies of `@pmndrs/upscaler`: install the one
+## pixi.js versions
+
+The pixi adapter (`@pmndrs/upscaler/pixi`) is **experimental**, verified on pixi.js
+8.22 (peer range `>=8.22.0 <9`) with the WebGPU renderer, spatial path only. It uses
+public pixi API throughout ([pixi.js adapter](pixi.md)).
+
+Every engine is an optional peer dependency of `@pmndrs/upscaler`: install the one
 whose subpath you import (`three` for the root and `/three`, `@babylonjs/core` for
-`/babylon`). `/core` needs neither.
+`/babylon`, `pixi.js` for `/pixi`). `/core` needs none.
 
 ## WebGPU
 

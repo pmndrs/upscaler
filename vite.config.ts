@@ -26,11 +26,12 @@ export default defineConfig({
                 three: resolve(__dirname, 'src/three.ts'),
                 core: resolve(__dirname, 'src/core.ts'),
                 babylon: resolve(__dirname, 'src/babylon.ts'),
+                pixi: resolve(__dirname, 'src/pixi.ts'),
             },
             formats: ['es'],
         },
         rollupOptions: {
-            external: ['three', 'three/tsl', 'three/webgpu', /^@babylonjs\/core(\/|$)/],
+            external: ['three', 'three/tsl', 'three/webgpu', /^@babylonjs\/core(\/|$)/, /^pixi\.js(\/|$)/],
             output: { chunkFileNames: 'chunks/upscaler-[hash].js' },
         },
     },
