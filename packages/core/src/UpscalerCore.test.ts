@@ -102,6 +102,23 @@ describe('UpscalerCore without an engine', () => {
         expect(lastFlags(writes) & (FLAG_PERSPECTIVE | FLAG_REVERSED_DEPTH | FLAG_RESET)).toBe(0);
     });
 
+    it("reads the projection type from a denoiser-style camera's matrix", async () => {
+        const { device, writes, gpu } = mockDevice();
+        const core = new UpscalerCore({ device: device as unknown as GPUDevice });
+        core.configure({ displayWidth: 64, displayHeight: 32, path: 'spatial' });
+        await core.prepare();
+        const perspective = new Float32Array(16);
+        perspective[11] = -1; // w = −z
+        const orthographic = new Float32Array(16);
+        orthographic[15] = 1;
+
+        core.dispatch({ color: gpu('color') }, { near: 0.1, far: 100, projection: perspective });
+        expect(lastFlags(writes) & FLAG_PERSPECTIVE).toBe(FLAG_PERSPECTIVE);
+        core.dispatch({ color: gpu('color') }, { near: 0.1, far: 100, projection: orthographic });
+        expect(lastFlags(writes) & FLAG_PERSPECTIVE).toBe(0);
+        expect(() => core.dispatch({ color: gpu('color') }, { near: 0.1, far: 100 })).toThrow(/perspective/);
+    });
+
     it('encodes into a host encoder without submitting', async () => {
         const { device, encoder, gpu } = mockDevice();
         const core = new UpscalerCore({ device: device as unknown as GPUDevice });

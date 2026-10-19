@@ -332,15 +332,26 @@ export interface TemporalGuides<TTexture = GPUTexture> {
 
 /**
  * The camera facts the passes need each frame, in plain data so any engine
- * can supply them (conventions: docs/engine-contract.md).
+ * can supply them (conventions: docs/engine-contract.md). A superset of
+ * @pmndrs/denoiser's `FrameCamera` fields the passes read, so one camera
+ * object can feed denoise and upscale.
  */
 export interface FrameCamera {
     /** Near clip distance (positive, view units). */
     near: number;
     /** Far clip distance (positive, view units). */
     far: number;
-    /** Perspective projection; `false` for orthographic. */
-    perspective: boolean;
+    /**
+     * Perspective projection; `false` for orthographic. When omitted it is
+     * read from {@link projection}; one of the two is required.
+     */
+    perspective?: boolean;
+    /**
+     * The (unjittered) projection matrix, column-major. Only consulted for
+     * the projection type when {@link perspective} is omitted — the shape
+     * @pmndrs/denoiser's `FrameCamera` already carries.
+     */
+    projection?: ArrayLike<number>;
     /** The depth input is reversed-Z (1 = near). Defaults to `false`. */
     reversedDepth?: boolean;
 }

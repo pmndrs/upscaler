@@ -89,13 +89,15 @@ and `spatial` read only `color`. `deltaTime` (seconds) drives exposure adaptatio
 Each dispatch takes the camera facts the passes need, as plain data:
 
 ```ts
-{ near: number; far: number; perspective: boolean; reversedDepth?: boolean }
+{ near: number; far: number; perspective?: boolean; projection?: Mat4; reversedDepth?: boolean }
 ```
 
 - **`near` / `far`** are positive view-space distances. The core linearizes depth
   with them, so they must match the projection that rendered `depth`. An infinite
   far plane isn't supported. Pass a finite `far`.
-- **`perspective`**: `false` for orthographic.
+- **`perspective`**: `false` for orthographic. When it's omitted, the projection
+  type is read from **`projection`** (the unjittered matrix, column-major: element
+  15 is 0 for perspective and 1 for orthographic). One of the two is required.
 - **Depth convention.** WebGPU depth, in `[0, 1]`. Standard: 0 at near, 1 at far
   (`depthCompare: 'less'`, cleared to 1). Reversed (`reversedDepth: true`): 1 at
   near, 0 at far. Logarithmic depth, or depth written to a color texture, is not
@@ -211,6 +213,27 @@ whatever samples the output.
   engine that keeps a render pass open across its frame (Babylon, for one) must
   close it before handing over its encoder, or dispatch on its own encoder after
   flushing the engine's.
+
+## Alignment with @pmndrs/denoiser
+
+The Denoiser's temporal API (`TemporalDenoiser`, `@pmndrs/denoiser-core`) follows
+the same conventions, so denoise → upscale composes on one device with one camera
+object:
+
+| | Denoiser | Upscaler core |
+| --- | --- | --- |
+| Device | caller's `GPUDevice`, never destroyed | same |
+| Lifecycle | `configure` / `dispatch` / `resetHistory` / `dispose`, `gpuTimings` | same, plus `prepare()` (async compile) |
+| Submission | `dispatch()` records and submits its own encoder; queue order | same; `encode*()` additionally records into a host encoder |
+| Motion | NDC delta, current − previous (three's `velocity`) | same (`motionScale` for other conventions) |
+| Depth | hardware depth or r32float device depth; `reversedDepth` | hardware depth only; `reversedDepth` |
+| Camera | `FrameCamera` with `view`, `projection`, previous matrices, `jitter`, `near`, `far`, `reversedDepth` | reads `near`, `far`, `reversedDepth` and `perspective`, or derives it from `projection` |
+| Output | returned `GPUTexture`, owned by the denoiser | `output` getter, allocated through `TextureAllocator` |
+
+A Denoiser `FrameCamera` passes straight into `UpscalerCore.dispatch()`. Its
+`jitter` tuple isn't read: the upscaler is the jitter source, and its `jitter`
+getter is the one value to render with. When the Denoiser needs the jitter, it
+should take the upscaler's value and sign convention ([Jitter](#jitter)).
 
 ## Adding an engine adapter
 

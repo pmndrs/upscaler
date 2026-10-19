@@ -41,6 +41,14 @@ import { createDeviceTextureAllocator, type CoreTexture, type CoreTextureFormat,
 
 const EMPTY_TIMINGS: ReadonlyMap<string, number> = new Map();
 
+// A projection matrix's w row is (0, 0, -1, 0) for perspective and
+// (0, 0, 0, 1) for orthographic, so element 15 tells them apart.
+function isPerspective(camera: FrameCamera): boolean {
+    if (camera.perspective !== undefined) return camera.perspective;
+    if (camera.projection) return camera.projection[15] === 0;
+    throw new Error('@pmndrs/upscaler: FrameCamera needs `perspective` or a `projection` matrix.');
+}
+
 /** Construction options for {@link UpscalerCore}. */
 export interface UpscalerCoreOptions<THandle = GPUTexture> {
     /**
@@ -1371,7 +1379,7 @@ export class UpscalerCore<THandle = GPUTexture> {
             this._pendingReset = true;
             flags |= FLAG_RESET;
         }
-        if (camera.perspective) flags |= FLAG_PERSPECTIVE;
+        if (isPerspective(camera)) flags |= FLAG_PERSPECTIVE;
         if (this._path === 'temporal') flags |= FLAG_INPUT_REINHARD;
         if (this._effectiveSettings.lockThinFeatures) flags |= FLAG_LOCKS;
         if (this._effectiveSettings.autoExposure) flags |= FLAG_AUTO_EXPOSURE;
