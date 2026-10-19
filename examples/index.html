@@ -109,6 +109,9 @@
             section {
                 margin-bottom: 44px;
             }
+            .grid + .section-head {
+                margin-top: 44px;
+            }
             /* Showcases land one PR at a time; an empty section stays hidden. */
             section.showcases:not(:has(.card)) {
                 display: none;
@@ -359,6 +362,23 @@
                         <code>upscaleSpatial(color)</code> for inputs with no depth or motion: an
                         in-graph <code>pass()</code> or an external texture, with RCAS sharpness and
                         denoise controls and HDR highlights sharpened in conditioned space.
+                    </div>
+                    <span class="tag">integration</span>
+                </a>
+            </div>
+            <h2 class="section-head">No engine</h2>
+            <p class="section-sub">
+                <code>@pmndrs/upscaler/core</code> on a bare <code>GPUDevice</code> — the contract every
+                engine adapter is written against.
+            </p>
+            <div class="grid">
+                <a class="card" href="webgpu/hello/">
+                    <div class="num">W1</div>
+                    <div class="title">Raw WebGPU</div>
+                    <div class="desc">
+                        No three.js: a hand-written WebGPU scene renders color, depth and motion, applies
+                        the core's jitter to its own projection, and encodes the upscale into its own
+                        command encoder — scene, upscale and present in one submit.
                     </div>
                     <span class="tag">integration</span>
                 </a>

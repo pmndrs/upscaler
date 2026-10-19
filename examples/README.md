@@ -9,7 +9,8 @@ pnpm install
 pnpm examples        # http://localhost:5300  (landing page links every demo)
 ```
 
-The library is consumed straight from `../src` (aliased as `@pmndrs/upscaler`), so
+The library is consumed straight from `../src` (aliased as `@pmndrs/upscaler` and its
+`/core` and `/three` subpaths), so
 shader/pipeline edits hot-reload here just like in the bench.
 
 ## Showcases
@@ -45,6 +46,16 @@ number so they sort apart from the single-purpose demos.
 | 14 | **Path tracer · alpha** (`14-pathtracer-alpha`) | A transparent canvas over page content: `three-gpu-pathtracer`'s WebGPU renderer accumulates at half resolution with a zero-alpha background, and the FSR1 spatial path upscales coverage along with color (issue #15). Needs network — model/HDRI and the Draco decoder are streamed. |
 | 15 | **Transparent canvas** (`15-transparent-canvas`) | Alpha on the *temporal* path — coverage reconstructed from jitter, not interpolated. The acceptance demo for temporal RGBA; toggles temporal/spatial on sub-texel wires. |
 | 16 | **Spatial node** (`16-spatial-node`) | `upscaleSpatial(color)`, the color-only FSR1 node, in a `RenderPipeline`: fed by an in-graph reduced-res `pass()` or an externally filled `texture()`. RCAS sharpness / `rcasDenoise` controls, an input-grain slider for the denoise to act on, and HDR neon (well above 1.0) to show RCAS sharpening highlight edges in conditioned space (#30). |
+
+## No engine
+
+`@pmndrs/upscaler/core` on a bare `GPUDevice` — no three.js. The reference for raw
+WebGPU apps and for anyone writing an engine adapter against
+[`docs/engine-contract.md`](../docs/engine-contract.md).
+
+| # | Demo | Shows |
+|---|------|-------|
+| W1 | **Raw WebGPU** (`webgpu/hello`) | A hand-written WebGPU scene (generated cubes over an aliasing grid floor) renders linear color, depth and jitter-free motion, offsets its own projection by `core.beginFrame()`'s jitter, and `core.encode()`s the upscale into its own command encoder — scene, upscale and present in one submit. Keys switch temporal / spatial / bilinear / native and cycle the debug views. |
 
 Most interactive demos have a **render scale ×** slider (1.0×–3.0×) that sweeps the
 base render resolution, with the resulting size + base % shown in the HUD.

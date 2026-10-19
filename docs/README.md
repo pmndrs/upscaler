@@ -21,6 +21,10 @@ Maintained, normative, for anyone integrating `@pmndrs/upscaler`:
   verifying on a real GPU.
 - [Compatibility and limitations](compatibility.md): supported three.js versions,
   WebGPU requirements, and what is out of scope.
+- [Engine contract](engine-contract.md): driving `UpscalerCore`
+  (`@pmndrs/upscaler/core`) from raw WebGPU or a new engine adapter: device,
+  inputs, `FrameCamera`, jitter and motion conventions, the texture allocator, and
+  submit ordering.
 
 The [examples](../examples/README.md) are the executable references; each guide links
 the ones for its integration path.

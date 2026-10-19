@@ -194,6 +194,8 @@ examples/              — standalone example gallery (own vite.config.ts, port 
                          07/08 = the upscaleScene() node; 09 = the composable upscale()
                          node driving a full SSGI+SSR stack in one post graph; 16 =
                          upscaleSpatial().
+  webgpu/hello         — no engine: `@pmndrs/upscaler/core` on a bare GPUDevice (one-submit encode);
+                         the executable reference for docs/engine-contract.md
 docs/                  — maintained consumer/contributor docs (index: docs/README.md);
   research/            — live research (PARITY.md, PAPER-NOTES.md)
   archive/             — historical specs/handoffs/plans, NOT normative
@@ -204,6 +206,7 @@ docs/                  — maintained consumer/contributor docs (index: docs/REA
 - The root build (`vite.config.ts` multi-entry + `rollup.dts.config.mjs`) bundles the private packages into `dist/` with one shared chunk, so every subpath sees the same classes. `scripts/verify-artifacts.mjs` fails the build if `dist/` names an `@pmndrs/upscaler-*` package (a consumer could not resolve it).
 - A new public subpath = a `src/<name>.ts` entry + `package.json` `exports` + both build configs' inputs + `tsconfig.json` `paths`.
 - `packages/core` must stay engine-free: anything that needs `three` belongs in `packages/three`. An eslint `no-restricted-imports` rule fails on three/Babylon/pixi (or another workspace package) imported from core.
+- `docs/engine-contract.md` is the core's contract for any driver (device, inputs, `FrameCamera`, jitter + motion conventions, allocator, submit order); a change to any of those updates it. GPU-verified on `examples/webgpu/hello` 2026-10-19 (all four modes + debug views clean; jitter sign A/B'd against native: the documented sign 13.6 mean-abs vs native, flipped 16.7 ≈ bilinear 16.2).
 - Adapters are thin: an engine's `Upscaler` resolves its textures to `GPUTexture`s, fills a `FrameCamera`, applies `core.beginFrame()`'s jitter to its camera, and passes an allocator. Logic that doesn't need the engine goes in core. Bench-only knobs (`_rcasShader`, `_crossFrameReconstruct`, …) stay `_`-prefixed internal options on both layers and are never exported from an index.
 
 Read `packages/core/src/UpscalerCore.ts`, `packages/three/src/Upscaler.ts` and `bench/src/BenchPipeline.ts` together first — the last is the canonical example of how the three `Upscaler` (a thin wrapper over the core) is meant to be driven. `examples/shared/UpscalePresenter.ts` is the same recipe packaged as a reusable helper; `examples/06-screenspace-gi` is the reference for feeding FSR3 the output of a TSL post-processing graph (GTAO/SSR/SSGI) rendered at reduced resolution.

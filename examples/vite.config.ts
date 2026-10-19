@@ -31,11 +31,15 @@ export default defineConfig(({ mode }) => {
         // resolve correctly under either base.
         base: process.env.PAGES_BASE ?? '/',
         resolve: {
-            alias: {
-                '@pmndrs/upscaler': packageConsumer
-                    ? packageEntry
-                    : resolve(root, '../src/index.ts'),
-            },
+            // Exact-match entries per public subpath: a plain '@pmndrs/upscaler'
+            // key is a prefix alias and would send '@pmndrs/upscaler/core' to
+            // 'src/index.ts/core'.
+            alias: packageConsumer
+                ? { '@pmndrs/upscaler': packageEntry }
+                : [
+                      { find: /^@pmndrs\/upscaler$/, replacement: resolve(root, '../src/index.ts') },
+                      { find: /^@pmndrs\/upscaler\/(core|three)$/, replacement: resolve(root, '../src/$1.ts') },
+                  ],
         },
         // Top-level await (renderer.init) needs a modern target.
         build: {
@@ -63,6 +67,7 @@ export default defineConfig(({ mode }) => {
                           pathtraceralpha: resolve(root, '14-pathtracer-alpha/index.html'),
                           transparentcanvas: resolve(root, '15-transparent-canvas/index.html'),
                           spatialnode: resolve(root, '16-spatial-node/index.html'),
+                          webgpuhello: resolve(root, 'webgpu/hello/index.html'),
                           s1reinvest: resolve(root, 's1-reinvest/index.html'),
                           s2fractal: resolve(root, 's2-fractal/index.html'),
                           s3howlow: resolve(root, 's3-how-low/index.html'),

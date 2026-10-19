@@ -852,7 +852,7 @@ export class UpscalerCore<THandle = GPUTexture> {
     }
 
     private _stageUpscale(inputs: DispatchInputs, camera: FrameCamera): void {
-        if (!this.isReady) throw new Error("@pmndrs/upscaler: await init() before dispatchUpscale().");
+        if (!this.isReady) throw new Error("@pmndrs/upscaler: await init() (or prepare()) before dispatchUpscale().");
         if (this._path !== 'temporal') {
             throw new Error(
                 `@pmndrs/upscaler: dispatchUpscale() requires the temporal path (got '${this._path}').`,

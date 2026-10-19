@@ -45,7 +45,9 @@ split-frame bookkeeping. Besides `dispatch*()`, which submits its own encoder, i
 `encode*()` variants that write into a host encoder without submitting. Those are not
 GPU-timed. The three `Upscaler` does exactly this and nothing more: texture lookup,
 the camera jitter and view-offset restore, the three allocator, and `FrameCamera`
-from the camera and `renderer.reversedDepthBuffer`.
+from the camera and `renderer.reversedDepthBuffer`. The contract an adapter (or a raw
+WebGPU app) must honour is [Engine contract](engine-contract.md); `examples/webgpu/hello`
+drives the core with no engine at all.
 
 ## Layers
 
