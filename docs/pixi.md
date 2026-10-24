@@ -114,6 +114,33 @@ A 3D layer that adds these can drive the temporal path through this adapter.
 Without them, the temporal path throws when it gets no camera rather than
 guessing.
 
+### What pixi-3d still needs
+
+Checked against the `@pixi/3d` beta source on 2026-10-24 (beta.2). The camera
+facts are there and depth is close; jitter and motion vectors need pixi-3d
+changes.
+
+| Input | pixi-3d today | Gap |
+| --- | --- | --- |
+| Camera facts | `Camera3D` has public `near`, `far` and `mode` (`'perspective'`/`'orthographic'`); depth is standard (`less`), not reversed | none |
+| Depth | the render graph keeps scene depth (`depth24plus-stencil8`) and hands a `Pass3D` an `opaqueDepth` copy | no public way to reach its `GPUTexture` from app code; the core already takes stencil formats (it binds a depth-only view) |
+| Jitter | — | `buildProjection()` rebuilds `camera.projection` from the camera's settings on every render, with no hook for a sub-pixel offset afterwards |
+| Motion vectors | — | no previous-frame model or view-projection matrices, and no velocity output. Skinned, morphed and particle meshes need their own previous-frame data |
+
+Once pixi-3d has a jitter hook and a velocity output, our side is small: the
+adapter already takes depth, motion and a `FrameCamera`. What's left is an
+example plus GPU checks of the jitter sign and the motion convention
+(`motionScale`), A/B'd against native the way the Babylon adapter was. Two
+settings change for temporal input: `View3D({ toneMapping: 'none' })` into an
+`rgba16float` target (the upscaler accumulates linear HDR, so tone-map after it),
+and `antialias: false`, because the temporal path is the anti-aliaser.
+
+A camera-viewport shift could fake the jitter today: `buildProjection()` keeps
+every pixel in place when the viewport rect moves, so a sub-pixel move of
+`camera.viewport` would shift the image by that amount. It's untested, and it
+clips a sub-pixel strip at one edge each frame. It still leaves motion vectors
+missing, so it isn't a path to temporal on its own.
+
 ## pixi APIs the adapter depends on
 
 All public `WebGPURenderer` API:
