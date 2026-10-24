@@ -45,7 +45,9 @@ test('ordinary modes ignore the package entry and resolve source', async () => {
               })
             : config;
 
-    expect(resolvedConfig.resolve?.alias).toEqual([
+    // A local pixi-3d beta (examples/pixi3d/vendor) adds its own entries; the upscaler's must be there either way.
+    const upscalerAliases = resolvedConfig.resolve?.alias.filter(({ find }) => String(find).includes('pmndrs'));
+    expect(upscalerAliases).toEqual([
         { find: /^@pmndrs\/upscaler$/, replacement: resolve(import.meta.dirname, '../src/index.ts') },
         { find: /^@pmndrs\/upscaler\/(core|three|babylon|pixi)$/, replacement: resolve(import.meta.dirname, '../src/$1.ts') },
     ]);

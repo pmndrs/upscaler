@@ -1,0 +1,15 @@
+{
+    // The root typecheck skips the pixi-3d examples (CI has no beta). With the
+    // tarball unpacked into vendor/: pnpm exec tsc -p examples/pixi3d
+    "extends": "../../tsconfig.json",
+    "compilerOptions": {
+        "baseUrl": "../..",
+        "paths": {
+            "@pmndrs/upscaler/pixi": ["src/pixi.ts"],
+            "@pixi/3d": ["examples/pixi3d/vendor/dist/index.d.ts"],
+            "@pixi/3d/extras": ["examples/pixi3d/vendor/dist/extras/index.d.ts"]
+        }
+    },
+    "include": ["hello", "unavailable.ts", "../../packages/*/src"],
+    "exclude": ["vendor"]
+}

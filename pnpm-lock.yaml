@@ -41,6 +41,9 @@ importers:
       lil-gui:
         specifier: ^0.20.0
         version: 0.20.0
+      meshoptimizer:
+        specifier: ^1.3.0
+        version: 1.3.0
       pixi.js:
         specifier: 8.22.0
         version: 8.22.0
@@ -917,6 +920,9 @@ packages:
 
   meshoptimizer@1.1.1:
     resolution: {integrity: sha512-oRFNWJRDA/WTrVj7NWvqa5HqE1t9MYDj2VaWirQCzCCrAd2GHrqR/sQezCxiWATPNlKTcRaPRHPJwIRoPBAp5g==}
+
+  meshoptimizer@1.3.0:
+    resolution: {integrity: sha512-2oZqMAcEEiCtXWUjIGtZ71oPx1B0ZxYGTqIKsXB1wzWFhleNsCFxQuUJzgCV706bRcwPWtMGf1odmQvAcqKkIw==}
 
   minimatch@10.2.5:
     resolution: {integrity: sha512-MULkVLfKGYDFYejP07QOurDLLQpcjk7Fw+7jXS2R2czRQzR56yHRveU5NDJEOviH+hETZKSkIk5c+T23GjFUMg==}
@@ -1923,6 +1929,8 @@ snapshots:
       '@jridgewell/sourcemap-codec': 1.5.5
 
   meshoptimizer@1.1.1: {}
+
+  meshoptimizer@1.3.0: {}
 
   minimatch@10.2.5:
     dependencies:
