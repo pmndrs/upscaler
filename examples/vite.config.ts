@@ -15,6 +15,19 @@ export default defineConfig(({ mode }) => {
         root,
         optimizeDeps: { exclude: ['three-gpu-pathtracer/webgpu'] },
         plugins: [{
+            // Every example page gets the gallery nav (back link, title, source);
+            // the gallery itself doesn't. Injected here so examples stay standalone
+            // and a new example can't forget it.
+            name: 'example-nav',
+            // 'pre', so the build bundles the injected script like a written one.
+            transformIndexHtml: {
+                order: 'pre' as const,
+                handler(_html: string, ctx: { path: string }) {
+                    if (ctx.path === '/index.html') return;
+                    return [{ tag: 'script', attrs: { type: 'module', src: '/shared/nav.ts' }, injectTo: 'body' as const }];
+                },
+            },
+        }, {
             name: 'pathtracer-texture-source-compat',
             transform(code: string, id: string) {
                 if (!id.split('?')[0].replaceAll('\\', '/').endsWith('/three-gpu-pathtracer/src/uniforms/EquirectHdrInfoUniform.js')) return;

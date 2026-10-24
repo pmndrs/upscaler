@@ -123,6 +123,12 @@ the recipe inside the post graph. New imperative demos should reuse the presente
 rather than re-deriving the wiring; new graph demos should start from `07`.
 The integration guides these demos illustrate live in [`docs/`](../docs/README.md).
 
+Every page except the gallery gets a small top-centre nav (back to the gallery, the
+title, the source on GitHub) from [`shared/nav.ts`](shared/nav.ts). `vite.config.ts`
+injects it, so an example never imports it and a new one gets it for free. A page
+whose own UI sits at the top centre moves it down with
+`<meta name="example-nav-top" content="64px">` (S1 and S4 do).
+
 ### The `06` pattern (TSL effect graph → FSR3)
 
 FSR3 is a raw compute pipeline that owns the final present, while three's
