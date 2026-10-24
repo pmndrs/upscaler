@@ -12,6 +12,10 @@ FSR1, and shows the output on a `Sprite`.
 
 ## Requirements
 
+```bash
+npm install @pmndrs/upscaler pixi.js
+```
+
 - `pixi.js` `>=8.22.0 <9` (an optional peer dependency of `@pmndrs/upscaler`), with
   the **WebGPU** renderer (`preference: 'webgpu'`). A WebGL renderer is rejected.
 - A color input at render resolution, exactly `upscaler.renderWidth ×

@@ -21,6 +21,12 @@ integration, because most upscaler bugs are input bugs.
 npm install @pmndrs/upscaler three
 ```
 
+This guide is the three.js integration (`@pmndrs/upscaler`, also available as
+`@pmndrs/upscaler/three`). Other engines have their own guides:
+[Babylon.js](babylon.md) and [pixi.js](pixi.md) (both experimental), and
+[Engine contract](engine-contract.md) for raw WebGPU or a new adapter through
+`@pmndrs/upscaler/core`.
+
 ## Choose an integration
 
 All four surfaces run the same `Upscaler` underneath. They differ only in who renders

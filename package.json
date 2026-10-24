@@ -69,6 +69,7 @@
         "build": "vite build && rollup -c rollup.dts.config.mjs && node scripts/verify-artifacts.mjs",
         "verify:packed-guides": "node scripts/verify-packed-guides.mjs --build-only",
         "verify:packed-guides:gpu": "node scripts/verify-packed-guides.mjs",
+        "verify:packed-subpaths": "node scripts/verify-packed-subpaths.mjs",
         "lint": "eslint .",
         "typecheck": "tsc --noEmit",
         "test": "vitest run",

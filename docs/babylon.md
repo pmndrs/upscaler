@@ -13,6 +13,10 @@ processing.
 
 ## Requirements
 
+```bash
+npm install @pmndrs/upscaler @babylonjs/core
+```
+
 - `@babylonjs/core` `>=9.31.0 <10` (an optional peer dependency of
   `@pmndrs/upscaler`), on a **`WebGPUEngine`** after `await engine.initAsync()`.
   WebGL engines are rejected.

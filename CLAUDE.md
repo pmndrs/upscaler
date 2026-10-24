@@ -89,6 +89,7 @@ pnpm test          # vitest — jitter math, quality presets, WGSL module assemb
 pnpm typecheck     # tsc --noEmit
 pnpm lint          # eslint
 pnpm build         # library build → dist/ (vite lib + tsc declarations)
+pnpm verify:packed-subpaths   # packed tarball: per-subpath engine isolation + one consumer per engine (GPU-free)
 
 # pnpm installs and runs (strict node_modules: an undeclared import fails). The
 # npm CLI still packs, versions and publishes (Trusted Publishing is npm OIDC);
@@ -137,7 +138,7 @@ node scripts/measure-receding-disocclusion.mjs --variants baseline,reconstruct-c
 node scripts/measure-emitter-retention.mjs --settings '{"autoExposure":false}'
 ```
 
-CI (`.github/workflows/ci.yml`) runs lint → typecheck → test → build → `verify:packed-guides` (build-only) on push/PR. No GPU in CI, so tests are deliberately GPU-free (pure math + shader-string structure). **Keep it that way** — don't add tests that need a device to CI; they'll hang or fail.
+CI (`.github/workflows/ci.yml`) runs lint → typecheck → test → build → `verify:packed-guides` (build-only) → `verify:packed-subpaths` on push/PR. The last one packs the tarball, checks each subpath's JS + `.d.ts` import graph names only its own engine (`/core`: none), and typechecks + bundles a fresh consumer per engine with **only** that engine installed — so an engine import leaking into another subpath (e.g. three into the shared chunk) fails CI. No GPU in CI, so tests are deliberately GPU-free (pure math + shader-string structure). **Keep it that way** — don't add tests that need a device to CI; they'll hang or fail.
 
 ---
 

@@ -14,6 +14,10 @@ plain WebGPU (no engine) that render a scene and run every path through the core
 
 ## The shape of an integration
 
+```bash
+npm install @pmndrs/upscaler   # no engine dependency for /core
+```
+
 ```ts
 import { UpscalerCore, QualityMode } from '@pmndrs/upscaler/core';
 

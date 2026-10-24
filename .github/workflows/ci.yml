@@ -30,3 +30,5 @@ jobs:
             - run: pnpm test
             - run: pnpm build
             - run: pnpm verify:packed-guides
+            # Each subpath from the packed tarball, with only its own engine installed.
+            - run: pnpm verify:packed-subpaths --skip-build

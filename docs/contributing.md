@@ -20,6 +20,7 @@ pnpm test          # unit tests (GPU-free)
 pnpm typecheck     # tsc --noEmit
 pnpm lint          # eslint
 pnpm build         # library build → dist/
+pnpm verify:packed-subpaths   # each subpath from the packed tarball, only its own engine installed
 ```
 
 The bench (in [`bench/`](../bench/README.md)) renders an aliasing-hostile scene and
