@@ -6,7 +6,7 @@ import {
     RECONSTRUCT_CAMERA_SHADER,
     RECONSTRUCT_CROSS_FRAME_SHADER,
     buildDepthClipVariant,
-} from '../../../src/shaders/reconstructVariants';
+} from '@pmndrs/upscaler-core/shaders/reconstructVariants';
 
 type CrossFrameReconstruct = { shader: string; cameraCompensated: boolean };
 import { CandidateUpscaler } from '../candidates/CandidateUpscaler';
@@ -20,7 +20,7 @@ import {
     RCAS_PER_TAP_SHADER,
     RCAS_SHADER,
     RCAS_TONEMAP_SPACE_SHADER,
-} from '../../../src/shaders/rcas';
+} from '@pmndrs/upscaler-core/shaders/rcas';
 
 interface BenchmarkTimerBridge {
     readonly enabled: boolean;
@@ -380,7 +380,7 @@ export function createShadingMemoryResolver(
  * Creates an issue #67 depth-clip identity: the `baseline` pipeline (same
  * frozen temporal RCAS, production spatial RCAS) with the reconstruct stage
  * swapped for the pre-#67 cross-frame form or its camera-compensated variant
- * (see src/shaders/reconstructVariants.ts).
+ * (see packages/core/src/shaders/reconstructVariants.ts).
  * @param renderer - Initialized three WebGPU renderer
  * @param metadata - Registry metadata carrying the experiment identity
  * @returns One experiment resolver instance

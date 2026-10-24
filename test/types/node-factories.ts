@@ -1,5 +1,5 @@
 // Type-level regression test for the TSL node factories — compiled by
-// `npm run typecheck` (tsconfig.json includes `test/`), never executed, so it
+// `pnpm typecheck` (tsconfig.json includes `test/`), never executed, so it
 // stays GPU-free. It fails the build if a factory's return type degrades to
 // `unknown`/`any` again: the 0.3 factories returned
 // `ReturnType<typeof nodeObject>`, which resolves `nodeObject`'s generic to

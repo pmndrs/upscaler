@@ -3,8 +3,55 @@
 How the library is put together, for contributors. Consumer-facing contracts are in
 [Inputs and contracts](inputs-and-contracts.md) and
 [Temporal guides](temporal-guides.md). The per-pass audit against FidelityFX is in
-[`src/shaders/README.md`](../src/shaders/README.md). Hard-won landmines and the
+[`packages/core/src/shaders/README.md`](../packages/core/src/shaders/README.md). Hard-won landmines and the
 rules a change must not break are in [`CLAUDE.md`](../CLAUDE.md).
+
+## Packages
+
+The repo is a pnpm workspace that publishes one package, `@pmndrs/upscaler` (the repo
+root). The code lives in private workspace packages, which the root build bundles in:
+
+| Package | Owns | Depends on |
+| --- | --- | --- |
+| `packages/core` (`@pmndrs/upscaler-core`) | `UpscalerCore` (the pass orchestration), `MomentsCore`, WGSL passes, constants UBO, compute-pass wrapper, GPU timer, jitter/resolution math, config enums | a `GPUDevice` only, no engine |
+| `packages/three` (`@pmndrs/upscaler-three`) | `Upscaler` (wraps the core), `UpscalePass`, the TSL nodes, the three-internals bridge and texture allocator | core, `three` |
+| `packages/babylon` (`@pmndrs/upscaler-babylon`) | `Upscaler` (wraps the core), `FrameGraphUpscaleTask`, the Babylon-internals bridge and texture allocator; experimental | core, `@babylonjs/core` |
+| `packages/pixi` (`@pmndrs/upscaler-pixi`) | `Upscaler` (wraps the core), the pixi texture bridge and allocator; experimental, spatial path verified | core, `pixi.js` |
+
+| Published subpath | Entry |
+| --- | --- |
+| `@pmndrs/upscaler` | the three surface (unchanged since 0.5) |
+| `@pmndrs/upscaler/three` | the same three surface, by name |
+| `@pmndrs/upscaler/core` | `UpscalerCore` and `MomentsCore` on a bare `GPUDevice`, plus the config types and math |
+| `@pmndrs/upscaler/babylon` | the Babylon.js `WebGPUEngine` adapter (experimental, [Babylon.js adapter](babylon.md)) |
+| `@pmndrs/upscaler/pixi` | the pixi.js v8 `WebGPURenderer` adapter (experimental, [pixi.js adapter](pixi.md)) |
+
+The split is an engine-agnostic core plus per-engine adapters: three today, with
+Babylon and pixi-3d to follow.
+
+### The engine seam
+
+`UpscalerCore` takes everything it needs as plain WebGPU or plain data:
+
+- **a `GPUDevice`**: the engine's own, so the passes share its queue. The core never
+  creates or destroys it.
+- **inputs as `GPUTexture`s**: the adapter resolves its engine's textures.
+- **a `FrameCamera`** per dispatch: near, far, perspective or orthographic, and
+  reversed depth.
+- **a `TextureAllocator`**: the output and guide textures are allocated by the engine,
+  so it can sample them as its own textures. A `CoreTexture` pairs the `GPUTexture` the
+  passes bind with the engine handle consumers sample. The default allocator uses
+  `device.createTexture()` and returns the `GPUTexture` itself.
+
+The core advances the jitter (`beginFrame()` returns this frame's offset); the adapter
+applies it to the engine's camera. The core still owns ping-pong rotation and the
+split-frame bookkeeping. Besides `dispatch*()`, which submits its own encoder, it has
+`encode*()` variants that write into a host encoder without submitting. Those are not
+GPU-timed. The three `Upscaler` does exactly this and nothing more: texture lookup,
+the camera jitter and view-offset restore, the three allocator, and `FrameCamera`
+from the camera and `renderer.reversedDepthBuffer`. The contract an adapter (or a raw
+WebGPU app) must honour is [Engine contract](engine-contract.md); `examples/webgpu/hello`
+drives the core with no engine at all.
 
 ## Layers
 
@@ -12,12 +59,15 @@ rules a change must not break are in [`CLAUDE.md`](../CLAUDE.md).
 upscaleScene()  ──►  upscale() / UpscalerNode  ─┐
 upscaleSpatial() ─►  upscale(path: 'spatial')  ─┤
 temporalGuides() / TemporalGuidesNode  ─────────┤
-UpscalePass  ───────────────────────────────────┼──►  Upscaler  ──►  WGSL compute passes
-(your own render loop)  ────────────────────────┘
+UpscalePass  ───────────────────────────────────┼──►  Upscaler  ──►  UpscalerCore  ──►  WGSL compute passes
+(your own render loop)  ────────────────────────┘                     ▲
+raw WebGPU / another engine adapter  ─────────────────────────────────┘
 ```
 
-`Upscaler` ([`src/Upscaler.ts`](../src/Upscaler.ts)) is the only class that
-touches the GPU pipeline. Every other surface is a recipe around it:
+`UpscalerCore` ([`packages/core/src/UpscalerCore.ts`](../packages/core/src/UpscalerCore.ts)) is the only class
+that touches the GPU pipeline, and the three `Upscaler`
+([`packages/three/src/Upscaler.ts`](../packages/three/src/Upscaler.ts)) is its three adapter. Every
+other three surface is a recipe around `Upscaler`:
 `UpscalePass` owns the render target, MRT and present quad; the TSL nodes own
 graph registration and the jitter hooks. `bench/src/BenchPipeline.ts` is the
 canonical example of driving `Upscaler` by hand.
@@ -27,12 +77,14 @@ canonical example of driving `Upscaler` by hand.
 The passes are hand-written WGSL, not TSL. That's deliberate: the shaders read like
 AMD's originals, and performance stays under direct control. `Upscaler` takes
 three's `GPUDevice` and the `GPUTexture`s behind three's textures
-([`src/internal/threeWebGPU.ts`](../src/internal/threeWebGPU.ts)). It encodes its
+([`packages/three/src/internal/threeWebGPU.ts`](../packages/three/src/internal/threeWebGPU.ts)). It encodes its
 passes on its own `GPUCommandEncoder` and submits them **between** three's scene render
 and the presentation draw. Queue ordering on the shared device makes that correct
 with no synchronization code.
 
-Outputs and published guides are allocated as three `StorageTexture`s, then
+Through the three allocator
+([`packages/three/src/internal/textureAllocator.ts`](../packages/three/src/internal/textureAllocator.ts)),
+outputs and published guides are allocated as three `StorageTexture`s, then
 `renderer.initTexture()` is called and the raw handle is fetched back. Passes bind
 the raw handle, and consumers sample the three texture: one allocation, two views.
 Storage views are pinned to one mip level, and `generateMipmaps` is off, because three
@@ -118,20 +170,20 @@ encoding or any other presentation transform.
 
 Every pass binds one uniform buffer at `@group(0) @binding(0)`: the `FsrConstants`
 struct (96 bytes of payload, in a 256-byte buffer), written once per frame. The WGSL
-layout (`WGSL_CONSTANTS` in [`src/shaders/common.ts`](../src/shaders/common.ts)) and
-the CPU writer ([`src/internal/ConstantsBuffer.ts`](../src/internal/ConstantsBuffer.ts))
+layout (`WGSL_CONSTANTS` in [`packages/core/src/shaders/common.ts`](../packages/core/src/shaders/common.ts)) and
+the CPU writer ([`packages/core/src/internal/ConstantsBuffer.ts`](../packages/core/src/internal/ConstantsBuffer.ts))
 must stay byte-for-byte in sync. A field added or reordered on one side only silently
 corrupts every pass. `FLAG_*` bits in the same struct carry the per-frame feature
 switches.
 
 WGSL has no `#include`, so shared chunks are TypeScript strings deduplicated by
-`assembleShader()` ([`src/shaders/wgsl.ts`](../src/shaders/wgsl.ts)). Every pass uses
+`assembleShader()` ([`packages/core/src/shaders/wgsl.ts`](../packages/core/src/shaders/wgsl.ts)). Every pass uses
 8×8 workgroups, guards against grid overrun, and has the entry point `main`. The
-structural tests in `src/shaders/shaders.test.ts` enforce most of this without a GPU.
+structural tests in `packages/core/src/shaders/shaders.test.ts` enforce most of this without a GPU.
 
 ## Testing and evidence
 
-- `npm test` is GPU-free on purpose, because CI has no GPU. It covers jitter math,
+- `pnpm test` is GPU-free on purpose, because CI has no GPU. It covers jitter math,
   quality presets, shader-module structure and shader fingerprints. Keep new tests
   device-free.
 - Real-GPU verification (bench, headless Chrome over CDP, convergence meters) is

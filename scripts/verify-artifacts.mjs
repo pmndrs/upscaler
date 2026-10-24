@@ -7,6 +7,7 @@ import { parsePackJson } from './npm-pack-json.mjs';
 
 const root = resolve(import.meta.dirname, '..');
 const dist = resolve(root, 'dist');
+const PRIVATE_PACKAGE_PREFIX = '@pmndrs/upscaler-';
 const candidatePathPattern = /(?:^|\/)candidate[^/]*(?:\/|$)/i;
 const candidateMarkers = [
     'transparencyAndComposition?:',
@@ -66,6 +67,13 @@ const [packResult] = parsePackJson(packed.stdout);
 const packageFiles = packResult.files.map(({ path }) => resolve(root, path));
 assertCleanFiles(packageFiles, 'npm package');
 
-const indexPath = resolve(dist, 'index.js');
-const indexBytes = statSync(indexPath).size;
-console.log(`Verified candidate-free artifacts. dist/index.js: ${indexBytes} bytes.`);
+//* Private Workspace Packages ===
+
+// packages/* are bundled in and never published, so the artifact must not name
+// one: a consumer install could not resolve it.
+const leaks = distFiles.filter((file) => readFileSync(file, 'utf8').includes(PRIVATE_PACKAGE_PREFIX));
+if (leaks.length)
+    throw new Error(`dist references a private workspace package (${PRIVATE_PACKAGE_PREFIX}*):\n${leaks.map((file) => relative(root, file)).join('\n')}`);
+
+const jsBytes = distFiles.filter((file) => file.endsWith('.js')).reduce((sum, file) => sum + statSync(file).size, 0);
+console.log(`Verified candidate-free artifacts. dist/**/*.js: ${jsBytes} bytes.`);

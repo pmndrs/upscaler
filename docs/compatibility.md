@@ -22,9 +22,28 @@ render-pipeline hooks and aren't affected.
 device, so it depends on two private internals: `renderer.backend.device` (the
 `GPUDevice`) and `renderer.backend.get(texture).texture` (the `GPUTexture` behind a
 three texture). They are isolated in
-[`src/internal/threeWebGPU.ts`](../src/internal/threeWebGPU.ts), which throws loudly
+[`packages/three/src/internal/threeWebGPU.ts`](../packages/three/src/internal/threeWebGPU.ts), which throws loudly
 if their shape changes, rather than limping along. They were verified on r184 and
 re-verified on r186.1.
+
+## Babylon.js versions
+
+The Babylon adapter (`@pmndrs/upscaler/babylon`) is **experimental** and verified on
+`@babylonjs/core` 9.31 (peer range `>=9.31.0 <10`), on a `WebGPUEngine` only. It
+depends on two private Babylon fields (`engine._device`,
+`internalTexture._hardwareTexture.underlyingResource`) and on Babylon drawing render
+targets Y-flipped; see [Babylon.js adapter](babylon.md#babylon-internals-the-adapter-depends-on)
+for what to re-verify on an upgrade.
+
+## pixi.js versions
+
+The pixi adapter (`@pmndrs/upscaler/pixi`) is **experimental**, verified on pixi.js
+8.22 (peer range `>=8.22.0 <9`) with the WebGPU renderer, spatial path only. It uses
+public pixi API throughout ([pixi.js adapter](pixi.md)).
+
+Every engine is an optional peer dependency of `@pmndrs/upscaler`: install the one
+whose subpath you import (`three` for the root and `/three`, `@babylonjs/core` for
+`/babylon`, `pixi.js` for `/pixi`). `/core` needs none.
 
 ## WebGPU
 

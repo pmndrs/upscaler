@@ -12,14 +12,14 @@ import {
 } from 'three';
 import { StorageTexture, type Texture, type WebGPURenderer } from 'three/webgpu';
 
-import { ComputePass } from '../../../src/internal/ComputePass';
-import { ConstantsBuffer } from '../../../src/internal/ConstantsBuffer';
-import { GpuTimer } from '../../../src/internal/GpuTimer';
-import { getDevice, getGPUTexture } from '../../../src/internal/threeWebGPU';
-import { JitterSequence } from '../../../src/math/jitter';
-import { getQualityModeRatio, getRenderResolution } from '../../../src/math/resolution';
-import { ACCUMULATE_SHADER } from '../../../src/shaders/accumulate';
-import { BLIT_SHADER } from '../../../src/shaders/blit';
+import { ComputePass } from '@pmndrs/upscaler-core/internal/ComputePass';
+import { ConstantsBuffer } from '@pmndrs/upscaler-core/internal/ConstantsBuffer';
+import { GpuTimer } from '@pmndrs/upscaler-core/internal/GpuTimer';
+import { getDevice, getGPUTexture } from '@pmndrs/upscaler-three/internal/threeWebGPU';
+import { JitterSequence } from '@pmndrs/upscaler-core/math/jitter';
+import { getQualityModeRatio, getRenderResolution } from '@pmndrs/upscaler-core/math/resolution';
+import { ACCUMULATE_SHADER } from '@pmndrs/upscaler-core/shaders/accumulate';
+import { BLIT_SHADER } from '@pmndrs/upscaler-core/shaders/blit';
 import {
     ACCUMULATE_SOURCE_FILTER_SHADER,
     ACCUMULATE_SOURCE_STRUCTURAL_SHADER,
@@ -55,14 +55,14 @@ import {
     FLAG_RESET,
     FLAG_REVERSED_DEPTH,
     FLAG_SHADING_CHANGE,
-} from '../../../src/shaders/common';
-import { DEBUG_SHADER } from '../../../src/shaders/debug';
-import { EASU_SHADER } from '../../../src/shaders/easu';
-import { GENERATE_REACTIVE_SHADER } from '../../../src/shaders/generateReactive';
-import { LUMINANCE_PYRAMID_SHADER } from '../../../src/shaders/luminancePyramid';
-import { RCAS_SHADER } from '../../../src/shaders/rcas';
-import { RECONSTRUCT_SHADER } from '../../../src/shaders/reconstruct';
-import { SHADING_CHANGE_SHADER } from '../../../src/shaders/shadingChange';
+} from '@pmndrs/upscaler-core/shaders/common';
+import { DEBUG_SHADER } from '@pmndrs/upscaler-core/shaders/debug';
+import { EASU_SHADER } from '@pmndrs/upscaler-core/shaders/easu';
+import { GENERATE_REACTIVE_SHADER } from '@pmndrs/upscaler-core/shaders/generateReactive';
+import { LUMINANCE_PYRAMID_SHADER } from '@pmndrs/upscaler-core/shaders/luminancePyramid';
+import { RCAS_SHADER } from '@pmndrs/upscaler-core/shaders/rcas';
+import { RECONSTRUCT_SHADER } from '@pmndrs/upscaler-core/shaders/reconstruct';
+import { SHADING_CHANGE_SHADER } from '@pmndrs/upscaler-core/shaders/shadingChange';
 import {
     DebugView,
     QualityMode,
@@ -72,7 +72,7 @@ import {
     type RuntimeSettings,
     type TemporalGuides,
     type UpscalePath,
-} from '../../../src/types';
+} from '@pmndrs/upscaler-three/types';
 
 type JitterableCamera = PerspectiveCamera | OrthographicCamera;
 type CandidateDispatchInputs = DispatchInputs & {
@@ -800,7 +800,7 @@ export class CandidateUpscaler {
     // `alpha` names the texture whose .a carries the caller's alpha — the color
     // input itself everywhere except the production temporal graph, where the
     // input's .a is the accumulation age and the resolved alpha lives in the
-    // locks buffer (see src/shaders/accumulate.ts).
+    // locks buffer (see packages/core/src/shaders/accumulate.ts).
     private _encodeBlit(
         encoder: GPUCommandEncoder,
         input: GPUTextureView,

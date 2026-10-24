@@ -21,6 +21,16 @@ Maintained, normative, for anyone integrating `@pmndrs/upscaler`:
   verifying on a real GPU.
 - [Compatibility and limitations](compatibility.md): supported three.js versions,
   WebGPU requirements, and what is out of scope.
+- [Engine contract](engine-contract.md): driving `UpscalerCore`
+  (`@pmndrs/upscaler/core`) from raw WebGPU or a new engine adapter: device,
+  inputs, `FrameCamera`, jitter and motion conventions, the texture allocator, and
+  submit ordering.
+- [Babylon.js adapter](babylon.md) (experimental): `@pmndrs/upscaler/babylon` on a
+  `WebGPUEngine`: the frame-graph task, inputs, how jitter and orientation map
+  onto Babylon, and the Babylon internals it depends on.
+- [pixi.js adapter](pixi.md) (experimental): `@pmndrs/upscaler/pixi` on pixi v8's
+  `WebGPURenderer`: the spatial path between renders, `encode()` inside a render,
+  3D layers, and what the temporal path still needs.
 
 The [examples](../examples/README.md) are the executable references; each guide links
 the ones for its integration path.
@@ -34,7 +44,7 @@ Maintained, for contributors:
 - [Windows audit and roadmap](windows-audit.md): async startup evidence, browser/demo coverage, native tooling gaps and prioritized follow-ups.
 - [Architecture](architecture.md): the layers, the pass graph, color domains and the
   shared constants buffer.
-- [`src/shaders/README.md`](../src/shaders/README.md): the per-pass audit against
+- [`packages/core/src/shaders/README.md`](../packages/core/src/shaders/README.md): the per-pass audit against
   FidelityFX FSR 3.1.5 and the operational notes for each pass.
 - [`bench/docs/BENCHMARKING.md`](../bench/docs/BENCHMARKING.md): how to run and read a
   benchmark.

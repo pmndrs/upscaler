@@ -1,0 +1,528 @@
+import { describe, expect, it } from 'vitest';
+
+import * as accumulateModule from './accumulate';
+import { ACCUMULATE_SHADER } from './accumulate';
+import * as blitModule from './blit';
+import { BLIT_SHADER } from './blit';
+import { DEBUG_SHADER } from './debug';
+import * as easuModule from './easu';
+import { EASU_SHADER } from './easu';
+import { GENERATE_REACTIVE_SHADER } from './generateReactive';
+import { LUMINANCE_PYRAMID_SHADER } from './luminancePyramid';
+import { MOMENTS_SHADER } from './moments';
+import * as rcasModule from './rcas';
+import {
+    RCAS_HOISTED_EXPOSURE_SHADER,
+    RCAS_LEGACY_SHADER,
+    RCAS_PER_TAP_SHADER,
+    RCAS_SHADER,
+    RCAS_TONEMAP_SPACE_SHADER,
+} from './rcas';
+import { DEPTH_CLIP_SHADER, RECONSTRUCT_SHADER } from './reconstruct';
+import {
+    DEPTH_CLIP_VARIANTS,
+    RECONSTRUCT_CROSS_FRAME_SHADER,
+    buildDepthClipVariant,
+} from './reconstructVariants';
+import { SHADING_CHANGE_SHADER } from './shadingChange';
+import { assembleShader } from './wgsl';
+
+const ALL_SHADERS: Record<string, string> = {
+    blit: BLIT_SHADER,
+    easu: EASU_SHADER,
+    rcas: RCAS_SHADER,
+    reconstruct: RECONSTRUCT_SHADER,
+    depthClip: DEPTH_CLIP_SHADER,
+    // Frozen bench identity (reconstruct-cross-frame-v1), pre-#67 production.
+    reconstructCrossFrame: RECONSTRUCT_CROSS_FRAME_SHADER,
+    shadingChange: SHADING_CHANGE_SHADER,
+    accumulate: ACCUMULATE_SHADER,
+    luminancePyramid: LUMINANCE_PYRAMID_SHADER,
+    generateReactive: GENERATE_REACTIVE_SHADER,
+    debug: DEBUG_SHADER,
+    moments: MOMENTS_SHADER,
+};
+
+const BASELINE_BINDING_COUNTS: Record<string, number> = {
+    // blit 6 / rcas 5 since 2026-08-25: the alpha-source binding (issue #15).
+    blit: 6,
+    easu: 3,
+    rcas: 5,
+    // 6 since 2026-10-05: dilate + scatter, depth clip split out (issue #67).
+    reconstruct: 6,
+    depthClip: 6,
+    reconstructCrossFrame: 7,
+    // 11 since 2026-10-05: per-block memory in/out (NEXT-STEPS §14).
+    shadingChange: 11,
+    accumulate: 13,
+    luminancePyramid: 7,
+    // 5 since 2026-07-22: incoming-mask binding for merge-not-overwrite.
+    generateReactive: 5,
+    debug: 10,
+    // Added 2026-07-22: standalone signal-agnostic moments (guides spec M5).
+    moments: 4,
+};
+
+const BASELINE_FINGERPRINTS: Record<string, string> = {
+    // Updated 2026-08-25: alpha passthrough (issue #15) — blit/rcas gained the
+    // alpha-source binding, easu carries alpha as a fourth kernel channel.
+    blit: 'ef2eec52',
+    easu: '48248d62',
+    // Updated 2026-07-21: conditioned-space sharpening adopted (NEXT-STEPS item 1);
+    // 2026-08-25: alpha passthrough; 2026-10-02: the spatial path conditions its
+    // linear/HDR taps the same way (anchored, gain-capped inversion);
+    // 2026-10-02: the temporal inversion is gain-capped too (issue #32);
+    // 2026-10-03: both caps become the lobe applied in linear space against
+    // the ring min (issue #50, HDR plateau overshoot).
+    rcas: 'b0405308',
+    // Updated 2026-07-22: depth-clip flicker fix — reference tap-skip semantics
+    // (no all-taps veto), jitter-delta-compensated reprojection, and a
+    // neighborhood-relief-widened separation tolerance (grazing-angle planes).
+    // 2026-10-03: off-screen test on the motion-only reprojection (viewport
+    // border no longer reads disoccluded under jitter).
+    // 2026-10-05: reconstructed-previous-depth scatter (issue #67) — the
+    // depth clip moved to its own pass; the old fused form is frozen below.
+    reconstruct: '193dec98',
+    depthClip: '800a41f5',
+    reconstructCrossFrame: 'd944fd8f',
+    // Added 2026-07-21: multi-scale shading-change detector (NEXT-STEPS item 4);
+    // 2026-10-03: the contrast floor reads both frames' spread, not just the
+    // current frame's (issue #22, NEXT-STEPS §9); 2026-10-03: the compared
+    // previous value is clamped into the bilinear footprint's tap range;
+    // 2026-10-05: per-block memory of the last 8 means, jump-gated range test
+    // (fine-line aliasing on a still camera, NEXT-STEPS §14); 2026-10-05: an
+    // all-zero (empty) memory restarts instead of pushing (NEXT-STEPS §14).
+    shadingChange: 'fba11623',
+    // Updated 2026-07-21: DeltaPreExposure history correction (NEXT-STEPS item 2);
+    // 2026-08-25: alpha resolved alongside color into the locks buffer's .a;
+    // 2026-10-02: the alpha clamp takes the color path's still-scene relax;
+    // 2026-10-02: alphaRelax guarded against STILL_CLAMP_RELAX = 0 (NEXT-STEPS
+    // §8) — GPU captures byte-identical at the shipped 8;
+    // 2026-10-03: clipToAABB's epsilon moved onto the extents too, so a
+    // zero-extent (achromatic) axis no longer collapses the clip (issue #51,
+    // NEXT-STEPS §11);
+    // 2026-10-05: pre-exposure read guarded with max(…, 1e-4) like RCAS/blit,
+    // so a fixed/external exposure of 0 no longer blacks out accumulation.
+    accumulate: '1505bcb5',
+    // 2026-10-08: 1/16-stop adaptation dead-band, so the jitter-phase wobble of
+    // the metered log-average no longer re-conditions history on still scenes.
+    luminancePyramid: '30144ae9',
+    // Updated 2026-07-22: reactive merge-not-overwrite (guides spec M3) — the
+    // generator max-merges an incoming mask instead of being suppressed by it.
+    generateReactive: '9d0739e5',
+    debug: 'e30ebd6c',
+    // Added 2026-07-22: standalone signal-agnostic moments (guides spec M5).
+    moments: 'ec1952d4',
+};
+
+
+
+function fingerprint(source: string): string {
+    let hash = 0x811c9dc5;
+    for (let index = 0; index < source.length; index++) {
+        hash ^= source.charCodeAt(index);
+        hash = Math.imul(hash, 0x01000193);
+    }
+    return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+describe('assembleShader', () => {
+    it('deduplicates shared chunks', () => {
+        const chunk = 'fn shared() -> f32 { return 1.0; }';
+        const out = assembleShader(chunk, 'fn other() {}', chunk);
+        expect(out.match(/fn shared/g)).toHaveLength(1);
+    });
+
+    it('assembles deterministically across repeated calls', () => {
+        for (const source of [BLIT_SHADER, EASU_SHADER, RCAS_SHADER, ACCUMULATE_SHADER,
+            RECONSTRUCT_SHADER, DEPTH_CLIP_SHADER, DEBUG_SHADER, LUMINANCE_PYRAMID_SHADER]) {
+            expect(assembleShader(source)).toBe(assembleShader(source));
+        }
+    });
+
+    it('drops empty parts', () => {
+        expect(assembleShader('', 'fn a() {}', '  ')).toBe('fn a() {}\n');
+    });
+});
+
+// Structural sanity for every assembled WGSL module — catches include
+// mistakes (missing constants block, duplicate helpers, unbalanced braces)
+// long before a GPU sees the source.
+describe.each(Object.entries(ALL_SHADERS))('%s shader', (_name, source) => {
+    it('has exactly one compute entry point named main', () => {
+        expect(source.match(/@compute/g)).toHaveLength(1);
+        expect(source).toMatch(/@compute @workgroup_size\(8, 8\)\s*\nfn main\(/);
+    });
+
+    it('binds the shared constants block at binding 0', () => {
+        expect(source.match(/struct FsrConstants/g)).toHaveLength(1);
+        expect(source).toContain('@group(0) @binding(0) var<uniform> C : FsrConstants;');
+    });
+
+    it('has balanced braces and parens', () => {
+        const count = (re: RegExp) => (source.match(re) ?? []).length;
+        expect(count(/\{/g)).toBe(count(/\}/g));
+        expect(count(/\(/g)).toBe(count(/\)/g));
+    });
+
+    it('declares no duplicate function names', () => {
+        const names = [...source.matchAll(/\bfn\s+(\w+)\s*\(/g)].map((m) => m[1]);
+        expect(new Set(names).size).toBe(names.length);
+    });
+
+    it('guards the dispatch grid against overrun', () => {
+        expect(source).toMatch(
+            /if \(any\(vec2f\(gid\.xy\) >= C\.(displaySize|renderSize)\)\) \{ return; \}/,
+        );
+    });
+
+    it('keeps the reviewed production assembly', () => {
+        expect(fingerprint(source)).toBe(BASELINE_FINGERPRINTS[_name]);
+    });
+
+    it('contains only the active baseline bindings and body', () => {
+        const bindings = [...source.matchAll(/@group\(0\) @binding\((\d+)\)/g)].map((match) =>
+            Number(match[1]),
+        );
+        expect(bindings).toEqual(
+            Array.from({ length: BASELINE_BINDING_COUNTS[_name] }, (_, index) => index),
+        );
+        expect(source).not.toMatch(/(?:^|\n)\s*override\s+|E00_CANDIDATE|candidate algorithm/i);
+    });
+});
+
+
+describe('FSR 3.1.5 RCAS numeric parity', () => {
+    it('keeps a separate pipeline body with the source limiter and denoise luma', () => {
+        expect(RCAS_SHADER).not.toBe(RCAS_LEGACY_SHADER);
+        expect(RCAS_SHADER).toContain('let lowerLimiterMultiplier = clamp(');
+        expect(RCAS_SHADER).toContain('let eL = 0.5 * e.r + e.g + 0.5 * e.b;');
+        expect(RCAS_SHADER).toContain('let mn = min(min(min(bL, dL), eL), min(fL, hL));');
+        expect(RCAS_SHADER).toContain(
+            'let hitMin = mn4 / (4.0 * mx4) * lowerLimiterMultiplier;',
+        );
+        expect(RCAS_LEGACY_SHADER).not.toContain('lowerLimiterMultiplier');
+    });
+});
+
+describe('RCAS on the spatial path', () => {
+    // FSR1's limiter assumes [0,1]. On linear HDR, hitMax switches sharpening
+    // off wherever the ring straddles 1.0 and divides 0/0 on a flat 1.0 ring,
+    // so production RCAS conditions the spatial path's taps like the temporal
+    // path's history (GPU probes, 2026-10-02).
+    it('conditions linear taps only when the input is not accumulate history', () => {
+        const conditioned = RCAS_SHADER.split('if (!hasFlag(FLAG_INPUT_REINHARD)) {')[1] ?? '';
+        expect(conditioned).not.toBe('');
+        for (const tap of ['b', 'd', 'e', 'f', 'h']) {
+            expect(RCAS_SHADER).toContain(`var ${tap} = ${tap}In;`);
+            expect(conditioned).toContain(`${tap} = tonemapInvertible(${tap}In);`);
+        }
+    });
+
+    it('inverts once, anchored on the linear center and capped by the lobe in linear space', () => {
+        const spatial = RCAS_SHADER.split('//* Resolve')[1]?.split('} else {')[1] ?? '';
+        expect(spatial).toContain('eIn + tonemapInvert(max(pix, vec3f(0.0))) - tonemapInvert(e),');
+        // The linear taps are at hand: the ring min needs no inversion.
+        expect(spatial).toContain(
+            'let mnIn = max(min(min(bIn, dIn), min(fIn, hIn)), vec3f(0.0));',
+        );
+        expect(spatial).toContain(
+            'let ceiling = max(eIn, vec3f(0.0)) - 4.0 * lobe * rcpL * max(eIn - mnIn, vec3f(0.0));',
+        );
+    });
+
+    it('leaves the frozen benchmark forms sharpening in linear space', () => {
+        for (const source of [
+            RCAS_LEGACY_SHADER,
+            RCAS_PER_TAP_SHADER,
+            RCAS_HOISTED_EXPOSURE_SHADER,
+            RCAS_TONEMAP_SPACE_SHADER,
+        ]) {
+            expect(source).not.toContain('tonemapInvertible(eIn)');
+            expect(source).toContain('let e = rcasLoad(sp');
+        }
+    });
+});
+
+describe('RCAS on the temporal path', () => {
+    // Sharpening conditioned history and inverting once can push an isolated
+    // peak to ~1 in conditioned space, which inverts to a ~1000x firefly
+    // (issue #32: a lone sub-pixel 16 on black became 1754; converged Q1/Q2
+    // highlights reached 316/423 next to ~17/~65 neighbours).
+    // Issue #50: below the firefly range the same inversion still overshoots
+    // converged HDR plateau edges — a 64 plateau corner read 127 at sharpness
+    // 1 against 64-67 for linear RCAS. Both are bounded by one cap: the lobe
+    // applied in linear space against the darkest ring tap.
+    it('caps the single inversion by the lobe applied in linear space against the ring min', () => {
+        const temporal =
+            RCAS_SHADER.split('//* Resolve')[1]
+                ?.split('if (hasFlag(FLAG_INPUT_REINHARD)) {')[1]
+                ?.split('} else {')[0] ?? '';
+        expect(temporal).not.toBe('');
+        // One inversion each for the center and the per-channel ring min (the
+        // inversion is monotone, so the min bounds every inverted ring tap).
+        expect(temporal).toContain('let eLin = tonemapInvert(e);');
+        expect(temporal).toContain('let mnLin = tonemapInvert(max(mn4, vec3f(0.0)));');
+        expect(temporal).toContain(
+            'let ceiling = eLin - 4.0 * lobe * rcpL * max(eLin - mnLin, vec3f(0.0));',
+        );
+        // The uncapped expression is unchanged, so uncapped pixels stay bit-exact.
+        expect(temporal).toContain(
+            'pix = min(tonemapInvert(max(pix, vec3f(0.0))) / exposure, ceiling / exposure);',
+        );
+        // The ceiling subsumes the #32 gain cap (at most center / (1 - 4 *
+        // RCAS_LIMIT * peak) with a non-negative ring min), which is gone.
+        expect(RCAS_SHADER).not.toContain('maxGain');
+    });
+
+    it('leaves the frozen benchmark forms uncapped', () => {
+        for (const source of [
+            RCAS_LEGACY_SHADER,
+            RCAS_PER_TAP_SHADER,
+            RCAS_HOISTED_EXPOSURE_SHADER,
+            RCAS_TONEMAP_SPACE_SHADER,
+        ]) {
+            expect(source).not.toContain('ceiling');
+            expect(source).not.toContain('maxGain');
+        }
+    });
+});
+
+describe('RCAS load-strategy experiment shaders', () => {
+    // These are built by string transforms over the production shader — a
+    // silently missed replacement would produce WGSL that only fails on a real
+    // device. Assert every transform actually landed.
+    it('hoisted-exposure moves the exposure load out of the tap function', () => {
+        expect(RCAS_HOISTED_EXPOSURE_SHADER).toContain(
+            'fn rcasLoad(p : vec2i, rcpExposure : f32) -> vec3f {',
+        );
+        expect(RCAS_HOISTED_EXPOSURE_SHADER).toContain(
+            'rcpExposure = 1.0 / max(textureLoad(exposureTex, vec2i(0), 0).r, 1.0e-4);',
+        );
+        expect(RCAS_HOISTED_EXPOSURE_SHADER).toContain('rcasLoad(sp, rcpExposure)');
+        expect(RCAS_HOISTED_EXPOSURE_SHADER).toContain(
+            'rcasLoad(sp + vec2i(0, -1), rcpExposure)',
+        );
+        expect(RCAS_HOISTED_EXPOSURE_SHADER).not.toContain('tonemapInvert(c) / exposure');
+        // Same sharpening math as production.
+        expect(RCAS_HOISTED_EXPOSURE_SHADER).toContain('lowerLimiterMultiplier');
+    });
+
+    it('tonemap-space uses plain tap loads and inverts once on the result', () => {
+        expect(RCAS_TONEMAP_SPACE_SHADER).toContain(
+            'return textureLoad(inputColor, clamped, 0).rgb;\n}',
+        );
+        expect(RCAS_TONEMAP_SPACE_SHADER).not.toContain('tonemapInvert(c)');
+        expect(RCAS_TONEMAP_SPACE_SHADER).toContain(
+            'pix = tonemapInvert(max(pix, vec3f(0.0))) / exposure;',
+        );
+        expect(RCAS_TONEMAP_SPACE_SHADER).toContain('lowerLimiterMultiplier');
+    });
+});
+
+// Alpha passthrough is unconditional (issue #15, review of PR #18): there is
+// one build of each pass, as in three's FSR1Node. With an opaque input every
+// stage reduces to alpha exactly 1, so an RGB-only variant would buy a
+// micro-optimisation at the price of a second code path and an option whose
+// renderer-derived default selected the RGBA build for nearly everyone anyway.
+describe('alpha passthrough is unconditional', () => {
+    const bindings = (source: string) =>
+        [...source.matchAll(/@group\(0\) @binding\((\d+)\)/g)].map((m) => Number(m[1]));
+
+    it('exports no RGB-only shader builds', () => {
+        for (const module of [accumulateModule, blitModule, easuModule, rcasModule]) {
+            for (const name of Object.keys(module)) expect(name).not.toMatch(/OPAQUE/);
+        }
+    });
+
+    it('declares the RCAS alpha source in every form Upscaler can be handed', () => {
+        // `_rcasShader` overrides (the bench's frozen identities and load-strategy
+        // experiments) share _encodeRcas's five-entry bind group, so each must
+        // declare binding 4 or bind-group creation fails on device.
+        for (const source of [
+            RCAS_SHADER,
+            RCAS_LEGACY_SHADER,
+            RCAS_PER_TAP_SHADER,
+            RCAS_HOISTED_EXPOSURE_SHADER,
+            RCAS_TONEMAP_SPACE_SHADER,
+        ]) {
+            expect(bindings(source)).toEqual([0, 1, 2, 3, 4]);
+            expect(source).toContain('@group(0) @binding(4) var alphaSource : texture_2d<f32>;');
+            expect(source).toContain('vec4f(pix, textureLoad(alphaSource, sp, 0).a)');
+            expect(source).not.toContain('vec4f(pix, 1.0)');
+        }
+    });
+
+    it('carries alpha through blit and EASU instead of writing 1.0', () => {
+        expect(bindings(BLIT_SHADER)).toEqual([0, 1, 2, 3, 4, 5]);
+        expect(BLIT_SHADER).toContain('textureStore(outputColor, gid.xy, vec4f(c, a));');
+        expect(BLIT_SHADER).not.toContain('vec4f(c, 1.0)');
+        // EASU filters all four channels with one kernel and one dering clamp.
+        expect(EASU_SHADER).toContain('fn easuLoad(p : vec2i) -> vec4f {');
+        expect(EASU_SHADER).toContain('var aC = vec4f(0.0);');
+        expect(EASU_SHADER).toContain('textureStore(outputColor, gid.xy, pix);');
+        expect(EASU_SHADER).not.toContain('vec4f(pix, 1.0)');
+    });
+
+    it('keeps the resolved alpha in the locks buffer, never the history age', () => {
+        // History .a is the accumulation age on its Catmull-Rom reprojection;
+        // alpha must ride the locks buffer's spare .a on both store paths.
+        expect(ACCUMULATE_SHADER).toContain(
+            'textureStore(locksOut, gid.xy, vec4f(0.0, 0.0, 0.0, currentAlpha));',
+        );
+        expect(ACCUMULATE_SHADER).toContain(
+            'textureStore(locksOut, gid.xy, vec4f(lockLife, lockedLuma, shadingChange, resultAlpha));',
+        );
+        expect(ACCUMULATE_SHADER).not.toContain('textureStore(locksOut, gid.xy, vec4f(0.0));');
+        expect(ACCUMULATE_SHADER).toContain(
+            'textureStore(historyOut, gid.xy, vec4f(result, newCount / C.maxAccumulation));',
+        );
+    });
+
+    it('lets a zero-extent axis leave the variance clip unconstrained', () => {
+        // Issue #51: with the epsilon only on |dir|, an axis whose extent AND
+        // offset are both 0 (Co/Cg in any exactly achromatic 3×3) gave
+        // scale = 0 / 1e-6 = 0, snapping history to the box mean every frame.
+        expect(ACCUMULATE_SHADER).toContain(
+            'let scale = (extents + 1.0e-6) / max(abs(dir), vec3f(1.0e-6));',
+        );
+        expect(ACCUMULATE_SHADER).not.toContain('let scale = extents / max(abs(dir)');
+    });
+
+    it('relaxes the alpha clamp on the same still-scene signal as the color box', () => {
+        // Convergence rule 2 (CLAUDE.md), applied to coverage: a sub-texel
+        // feature's all-0 / all-1 jitter phases must not re-snap converged alpha
+        // on a still scene, while motion, disocclusion, shading change and
+        // reactivity (all folded into stillRelax) restore the hard clamp.
+        // Guarded so STILL_CLAMP_RELAX = 0 (relax off) cannot divide 0 by 0.
+        expect(ACCUMULATE_SHADER).toContain(
+            'let alphaRelax = stillRelax / max(STILL_CLAMP_RELAX, 1.0e-6);',
+        );
+        expect(ACCUMULATE_SHADER).toContain(
+            'let rectifiedAlpha = mix(clamp(lockPrev.a, alphaMin, alphaMax), lockPrev.a, alphaRelax);',
+        );
+    });
+});
+
+describe('linear HDR output domain', () => {
+    it('keeps presentation transforms out of upscaling shaders', () => {
+        for (const source of [BLIT_SHADER, EASU_SHADER, RCAS_SHADER]) {
+            expect(source).not.toMatch(/acesFilm|srgbEncode|displayTransform/);
+        }
+    });
+
+    it('writes final and debug output through rgba16float storage', () => {
+        for (const source of [BLIT_SHADER, RCAS_SHADER, DEBUG_SHADER]) {
+            expect(source).toContain('texture_storage_2d<rgba16float, write>');
+            expect(source).not.toContain('texture_storage_2d<rgba8unorm, write>');
+        }
+    });
+});
+
+describe('auto-exposure clamp', () => {
+    // EXPOSURE_MAX is the dark-scene highlight ceiling: history resolves at most
+    // 999 / exposure (issue #49, bench/docs/NEXT-STEPS.md §10). 80 clipped at 12.5.
+    it('caps brightening at 8 and still clamps the auto target', () => {
+        expect(LUMINANCE_PYRAMID_SHADER).toContain('const EXPOSURE_MAX : f32 = 8.0;');
+        expect(LUMINANCE_PYRAMID_SHADER).toContain(
+            'clamp(EXPOSURE_KEY / max(avgLum, 1.0e-4), EXPOSURE_MIN, EXPOSURE_MAX)',
+        );
+    });
+});
+
+describe('shading-change block memory', () => {
+    // Fine-line aliasing on a still camera (bench Q18, NEXT-STEPS §14): a block
+    // mean inside the range of its last 8 means reads as no change, unless the
+    // frame's jump exceeds the jumps the memory holds (a step after a ramp).
+    it('ping-pongs a packed memory of 8 means per block', () => {
+        expect(SHADING_CHANGE_SHADER).toContain(
+            '@group(0) @binding(9) var blockMemoryIn : texture_2d<u32>;',
+        );
+        expect(SHADING_CHANGE_SHADER).toContain(
+            '@group(0) @binding(10) var blockMemoryOut : texture_storage_2d<rgba32uint, write>;',
+        );
+        expect(SHADING_CHANGE_SHADER).toContain('const SHADING_MEMORY_SLOTS : u32 = 8u;');
+        expect(SHADING_CHANGE_SHADER).toContain('const SHADING_MEMORY_JUMP_GAIN : f32 = 1.5;');
+    });
+
+    it('gates the range on the jump and only ever lowers the difference', () => {
+        expect(SHADING_CHANGE_SHADER).toContain(
+            '> SHADING_MEMORY_JUMP_GAIN * flicker) {\n        return 1.0;',
+        );
+        expect(SHADING_CHANGE_SHADER).toContain(
+            'let relative = min(1.0 - min(sums.x, sums.y) / maximum, memory);',
+        );
+        expect(SHADING_CHANGE_SHADER).toContain(
+            'scaleResponse(sums1, 16.0, SHADING_FLOOR_MID, midMemory)',
+        );
+        expect(SHADING_CHANGE_SHADER).toContain(
+            'scaleResponse(sums2, 64.0, SHADING_FLOOR_COARSE, coarseMemory)',
+        );
+    });
+
+    it('restarts the memory of blocks that moved, disoccluded or reset', () => {
+        expect(SHADING_CHANGE_SHADER).toContain('var moving = select(0.0, 1.0, hasFlag(FLAG_RESET));');
+        expect(SHADING_CHANGE_SHADER).toContain(
+            'select(memoryDistance(midWords, midMean), 1.0, moving1 > 0.5)',
+        );
+        expect(SHADING_CHANGE_SHADER).toContain(
+            'memoryUpdate(coarseWords, coarseMean, moving2 > 0.5)',
+        );
+        // One writer per block: its top-left thread.
+        expect(SHADING_CHANGE_SHADER).toContain('if (all((lid.xy & vec2u(1u)) == vec2u(0u))) {');
+        expect(SHADING_CHANGE_SHADER).toContain('if (all((lid.xy & vec2u(3u)) == vec2u(0u))) {');
+    });
+
+    it('restarts an empty (all-zero) memory instead of pushing into it', () => {
+        // Pushed, the zeros stay in the range for 8 frames with a stored jump of 1,
+        // so the gate never trips and a darkening step is hidden — e.g. right
+        // after the detector is re-enabled, when Upscaler zeroes the memory.
+        expect(SHADING_CHANGE_SHADER).toContain('if (restart || all(words == vec4u(0u))) {');
+    });
+});
+
+describe('reconstructed previous depth (issue #67)', () => {
+    it('scatters and gathers the same footprint', () => {
+        // Same weight floor and the same motion-only previous position on
+        // both sides; a mismatch would let a pixel miss its own scatter.
+        const floor = /DEPTH_TAP_WEIGHT_FLOOR : f32 = ([\d.e-]+);/;
+        expect(RECONSTRUCT_SHADER.match(floor)?.[1]).toBe(DEPTH_CLIP_SHADER.match(floor)?.[1]);
+        expect(RECONSTRUCT_SHADER).toMatch(/let prevUV = \(vec2f\(gid\.xy\) \+ 0\.5\) \* C\.renderSizeInv - uvDelta;/);
+        expect(DEPTH_CLIP_SHADER).toMatch(/let prevUV = uv - uvDelta;/);
+        expect(DEPTH_CLIP_SHADER.split('fn main')[1]).not.toMatch(/jitterPrev/);
+    });
+
+    it('keeps the nearest depth and empties the next buffer before any early return', () => {
+        expect(RECONSTRUCT_SHADER).toMatch(/atomicMin\(&reconstructedDepth/);
+        const body = DEPTH_CLIP_SHADER.split('fn main')[1] ?? '';
+        const clear = body.indexOf('nextReconstructedDepth[');
+        expect(clear).toBeGreaterThan(0);
+        // Off-screen pixels return early but must still empty their slot.
+        expect(clear).toBeLessThan(body.indexOf('if (any(prevUV'));
+        expect(DEPTH_CLIP_SHADER).toMatch(/EMPTY_DEPTH : u32 = 0x7f800000u/);
+    });
+});
+
+describe('depth-clip variants (issue #79)', () => {
+    // Swapped in through Upscaler's _depthClipShader, which binds production's
+    // six entries, so every variant must declare exactly bindings 0–5.
+    it.each(Object.entries(DEPTH_CLIP_VARIANTS))('%s keeps production bindings', (_id, options) => {
+        const source = buildDepthClipVariant(options);
+        const bindings = [...source.matchAll(/@group\(0\) @binding\((\d+)\)/g)].map((match) =>
+            Number(match[1]),
+        );
+        expect(bindings).toEqual([0, 1, 2, 3, 4, 5]);
+        expect(source.match(/@compute/g)).toHaveLength(1);
+        expect(source.match(/struct FsrConstants/g)).toHaveLength(1);
+        // Still empties next frame's slot before the off-screen early return.
+        const body = source.split('fn main')[1] ?? '';
+        expect(body.indexOf('nextReconstructedDepth[')).toBeLessThan(body.indexOf('if (any(prevUV'));
+    });
+
+    it('reads upstream tolerance as the full diagonal times Kfov', () => {
+        const upstream = buildDepthClipVariant(DEPTH_CLIP_VARIANTS['depth-clip-upstream-tolerance-v1']);
+        expect(upstream).toContain('kfov() * length(C.renderSize)');
+        const ours = buildDepthClipVariant(DEPTH_CLIP_VARIANTS['depth-clip-no-relief-v1']);
+        expect(ours).toContain('length(C.renderSize * 0.5)');
+    });
+});

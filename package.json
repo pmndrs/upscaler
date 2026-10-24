@@ -27,6 +27,7 @@
         "fidelityfx"
     ],
     "type": "module",
+    "packageManager": "pnpm@10.33.0",
     "publishConfig": {
         "access": "public"
     },
@@ -34,13 +35,28 @@
         ".": {
             "types": "./dist/index.d.ts",
             "import": "./dist/index.js"
+        },
+        "./three": {
+            "types": "./dist/three.d.ts",
+            "import": "./dist/three.js"
+        },
+        "./core": {
+            "types": "./dist/core.d.ts",
+            "import": "./dist/core.js"
+        },
+        "./babylon": {
+            "types": "./dist/babylon.d.ts",
+            "import": "./dist/babylon.js"
+        },
+        "./pixi": {
+            "types": "./dist/pixi.d.ts",
+            "import": "./dist/pixi.js"
         }
     },
     "main": "./dist/index.js",
     "types": "./dist/index.d.ts",
     "files": [
-        "dist",
-        "src"
+        "dist"
     ],
     "scripts": {
         "dev": "vite --config bench/vite.config.ts",
@@ -50,25 +66,47 @@
         "bench:compare:rcas": "node scripts/compare-rcas.mjs",
         "examples": "vite --config examples/vite.config.ts",
         "examples:build": "vite build --config examples/vite.config.ts",
-        "build": "vite build && tsc --declaration --emitDeclarationOnly -p tsconfig.build.json && node scripts/verify-artifacts.mjs",
+        "build": "vite build && rollup -c rollup.dts.config.mjs && node scripts/verify-artifacts.mjs",
         "verify:packed-guides": "node scripts/verify-packed-guides.mjs --build-only",
         "verify:packed-guides:gpu": "node scripts/verify-packed-guides.mjs",
+        "verify:packed-subpaths": "node scripts/verify-packed-subpaths.mjs",
         "lint": "eslint .",
         "typecheck": "tsc --noEmit",
         "test": "vitest run",
         "release": "node scripts/release.mjs",
-        "prepublishOnly": "npm run lint && npm run typecheck && npm run test && npm run build"
+        "prepublishOnly": "pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run build"
     },
     "peerDependencies": {
+        "@babylonjs/core": ">=9.31.0 <10",
+        "pixi.js": ">=8.22.0 <9",
         "three": ">=0.184.0"
     },
+    "peerDependenciesMeta": {
+        "@babylonjs/core": {
+            "optional": true
+        },
+        "pixi.js": {
+            "optional": true
+        },
+        "three": {
+            "optional": true
+        }
+    },
     "devDependencies": {
+        "@babylonjs/core": "9.31.0",
         "@eslint/js": "^9.18.0",
+        "@pmndrs/upscaler-babylon": "workspace:*",
+        "@pmndrs/upscaler-core": "workspace:*",
+        "@pmndrs/upscaler-pixi": "workspace:*",
+        "@pmndrs/upscaler-three": "workspace:*",
         "@types/three": "^0.186.0",
         "@webgpu/types": "^0.1.64",
         "eslint": "^9.18.0",
         "globals": "^15.14.0",
         "lil-gui": "^0.20.0",
+        "pixi.js": "8.22.0",
+        "rollup": "^4.62.2",
+        "rollup-plugin-dts": "^6.2.1",
         "three": "^0.186.1",
         "three-gpu-pathtracer": "https://codeload.github.com/gkjohnson/three-gpu-pathtracer/tar.gz/5f0ad5154a44224ae4b6c801b65778471dabf367",
         "three-mesh-bvh": "^0.9.15",

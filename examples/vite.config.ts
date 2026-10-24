@@ -15,6 +15,19 @@ export default defineConfig(({ mode }) => {
         root,
         optimizeDeps: { exclude: ['three-gpu-pathtracer/webgpu'] },
         plugins: [{
+            // Every example page gets the gallery nav (back link, title, source);
+            // the gallery itself doesn't. Injected here so examples stay standalone
+            // and a new example can't forget it.
+            name: 'example-nav',
+            // 'pre', so the build bundles the injected script like a written one.
+            transformIndexHtml: {
+                order: 'pre' as const,
+                handler(_html: string, ctx: { path: string }) {
+                    if (ctx.path === '/index.html') return;
+                    return [{ tag: 'script', attrs: { type: 'module', src: '/shared/nav.ts' }, injectTo: 'body' as const }];
+                },
+            },
+        }, {
             name: 'pathtracer-texture-source-compat',
             transform(code: string, id: string) {
                 if (!id.split('?')[0].replaceAll('\\', '/').endsWith('/three-gpu-pathtracer/src/uniforms/EquirectHdrInfoUniform.js')) return;
@@ -31,11 +44,15 @@ export default defineConfig(({ mode }) => {
         // resolve correctly under either base.
         base: process.env.PAGES_BASE ?? '/',
         resolve: {
-            alias: {
-                '@pmndrs/upscaler': packageConsumer
-                    ? packageEntry
-                    : resolve(root, '../src/index.ts'),
-            },
+            // Exact-match entries per public subpath: a plain '@pmndrs/upscaler'
+            // key is a prefix alias and would send '@pmndrs/upscaler/core' to
+            // 'src/index.ts/core'.
+            alias: packageConsumer
+                ? { '@pmndrs/upscaler': packageEntry }
+                : [
+                      { find: /^@pmndrs\/upscaler$/, replacement: resolve(root, '../src/index.ts') },
+                      { find: /^@pmndrs\/upscaler\/(core|three|babylon|pixi)$/, replacement: resolve(root, '../src/$1.ts') },
+                  ],
         },
         // Top-level await (renderer.init) needs a modern target.
         build: {
@@ -63,6 +80,9 @@ export default defineConfig(({ mode }) => {
                           pathtraceralpha: resolve(root, '14-pathtracer-alpha/index.html'),
                           transparentcanvas: resolve(root, '15-transparent-canvas/index.html'),
                           spatialnode: resolve(root, '16-spatial-node/index.html'),
+                          webgpuhello: resolve(root, 'webgpu/hello/index.html'),
+                          babylonhello: resolve(root, 'babylon/hello/index.html'),
+                          pixihello: resolve(root, 'pixi/hello/index.html'),
                           s1reinvest: resolve(root, 's1-reinvest/index.html'),
                           s2fractal: resolve(root, 's2-fractal/index.html'),
                           s3howlow: resolve(root, 's3-how-low/index.html'),

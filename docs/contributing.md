@@ -13,13 +13,14 @@ hard way on a real GPU.
 Clone the repo, then:
 
 ```bash
-npm install
-npm run dev        # interactive bench   → http://localhost:5199
-npm run examples   # example gallery      → http://localhost:5300
-npm test           # unit tests (GPU-free)
-npm run typecheck  # tsc --noEmit
-npm run lint       # eslint
-npm run build      # library build → dist/
+pnpm install
+pnpm dev           # interactive bench   → http://localhost:5199
+pnpm examples      # example gallery      → http://localhost:5300
+pnpm test          # unit tests (GPU-free)
+pnpm typecheck     # tsc --noEmit
+pnpm lint          # eslint
+pnpm build         # library build → dist/
+pnpm verify:packed-subpaths   # each subpath from the packed tarball, only its own engine installed
 ```
 
 The bench (in [`bench/`](../bench/README.md)) renders an aliasing-hostile scene and

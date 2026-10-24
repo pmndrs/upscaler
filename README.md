@@ -16,7 +16,7 @@ spend it on GI, reflections and heavier materials that wouldn't fit at native re
 pipeline.outputNode = upscaleScene(scene, camera);
 ```
 
-**▶ [See it live](https://pmndrs.github.io/upscaler/)**: showcases and 16 hands-on
+**▶ [See it live](https://pmndrs.github.io/upscaler/)**: showcases and 19 hands-on
 examples, each one a small, readable integration.
 
 ### Built on FSR, grown up on the web
@@ -46,29 +46,43 @@ FSR never had to answer, and we measured our way past the port:
 
 ### Where it runs
 
-Today it plugs into **three.js `WebGPURenderer`** (r186+). Underneath it's plain WebGPU:
-hand-written WGSL compute passes dispatched on your renderer's `GPUDevice`, with no
-three.js in the shaders. Bringing it to another WebGPU engine means writing an adapter,
-not rewriting the upscaler; that's tracked in
-[#61](https://github.com/pmndrs/upscaler/issues/61). It needs a WebGPU-capable browser,
-and there's no WebGL fallback.
+Underneath it's plain WebGPU: hand-written WGSL compute passes dispatched on your
+renderer's `GPUDevice`, with no engine in the shaders. One package ships an
+engine-free core and a thin adapter per engine, each on its own import path:
+
+| Import | Runs on | Status |
+| --- | --- | --- |
+| `@pmndrs/upscaler` (or `/three`) | three.js `WebGPURenderer` (r186+) | Stable, every feature below |
+| `@pmndrs/upscaler/core` | A bare `GPUDevice`: raw WebGPU, or your own engine adapter | New ([engine contract](./docs/engine-contract.md)) |
+| `@pmndrs/upscaler/babylon` | Babylon.js `WebGPUEngine` (9.31+) | Experimental ([guide](./docs/babylon.md)) |
+| `@pmndrs/upscaler/pixi` | pixi.js v8 `WebGPURenderer` (8.22+) | Experimental, spatial path ([guide](./docs/pixi.md)) |
+
+It needs a WebGPU-capable browser, and there's no WebGL fallback.
 
 ## Install
 
 ```bash
-npm install @pmndrs/upscaler three
+npm install @pmndrs/upscaler three              # three.js
+npm install @pmndrs/upscaler @babylonjs/core    # Babylon.js (experimental)
+npm install @pmndrs/upscaler pixi.js            # pixi.js (experimental)
+npm install @pmndrs/upscaler                    # raw WebGPU: @pmndrs/upscaler/core
 ```
 
-WebGPU only: you need a WebGPU-capable browser (Chrome/Edge 113+) and `three`
-**r186+** (a peer dependency). r184/r185 still work but are deprecated. The TSL node
+Every engine is an *optional* peer dependency, so install the one you import; the
+others are never pulled in. The rest of this README is the three.js integration.
+Other engines start from their guides above.
+
+WebGPU only: you need a WebGPU-capable browser (Chrome/Edge 113+) and, for three.js,
+`three` **r186+**. r184/r185 still work but are deprecated. The TSL node
 warns once and falls back to the pre-r186 render-pipeline hooks, and that fallback
 will be removed. There is no WebGL fallback. See
 [Compatibility](./docs/compatibility.md).
 
-**▶ Live demos: [pmndrs.github.io/upscaler](https://pmndrs.github.io/upscaler/)**: 16
+**▶ Live demos: [pmndrs.github.io/upscaler](https://pmndrs.github.io/upscaler/)**: 19
 interactive examples, covering spatial vs temporal, the aliasing-torture scene,
 transparency and reactive masks, the composable and spatial-only TSL nodes, SSGI/SSR
-upscaled in one post graph, temporal guides, and transparent-canvas alpha.
+upscaled in one post graph, temporal guides, transparent-canvas alpha, and the same
+upscaler on raw WebGPU, Babylon.js and pixi.js.
 
 ## Quick start
 
@@ -136,7 +150,12 @@ alpha exactly 1.
 - [Temporal guides](./docs/temporal-guides.md): the published motion/disocclusion
   bundle and the split frame
 - [Debugging](./docs/debugging.md): debug views, symptoms, real-GPU verification
-- [Compatibility](./docs/compatibility.md): three.js versions, WebGPU, limitations
+- [Compatibility](./docs/compatibility.md): three.js, Babylon.js and pixi.js versions,
+  WebGPU, limitations
+- [Engine contract](./docs/engine-contract.md): `@pmndrs/upscaler/core` on a bare
+  `GPUDevice`, for raw WebGPU or a new engine adapter
+- [Babylon.js](./docs/babylon.md) and [pixi.js](./docs/pixi.md) adapters
+  (experimental)
 - [Architecture](./docs/architecture.md): the pass graph and internals, for
   contributors
 - [Design rationale vs FSR 3.1.5](./docs/research/PARITY.md), and the
@@ -149,7 +168,8 @@ and temporal paths, RGBA (alpha) passthrough, luminance-stability locks, auto-ex
 (plus external and host pre-exposure inputs), multi-scale shading-change detection,
 reactive masks (explicit and auto-generated), RCAS with opt-in denoise, the imperative
 `UpscalePass`, the composable TSL nodes, and the raw and linked-TSL temporal-guides
-surfaces. A benchmarking program A/B-compared this implementation against
+surfaces. The same core also runs on raw WebGPU and, experimentally, on Babylon.js
+(temporal and spatial) and pixi.js (spatial). A benchmarking program A/B-compared this implementation against
 source-style FSR 3.1.5 pass graphs on the GPU. The measurements and the reasoning for
 each divergence are in [PARITY.md](./docs/research/PARITY.md).
 

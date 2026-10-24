@@ -60,7 +60,7 @@ resolver ran with the flag off (plain loads).
 ## 4. Multi-scale shading-change detector — DONE
 
 The long-standing roadmap item (the source's SPD coarse-mip detector concept)
-landed as `src/shaders/shadingChange.ts`: one fused half-resolution
+landed as `packages/core/src/shaders/shadingChange.ts`: one fused half-resolution
 dispatch (an 8×8 workgroup covers a 16×16 render tile, so the 4×4/8×8 reductions are
 workgroup-local) that maintains a 1-frame luma history, compares jitter-aligned
 block-mean luma per scale with base + contrast-scaled noise floors, neutralizes
@@ -745,7 +745,7 @@ ops in the resolve, in a pass that measured 0.044 ms at ratio 2.
 Fingerprint: `shadingChange` `41ed97fa` → `061f55cd`. No other shader changed.
 
 Reproduce, with the bench on 5199 or `--url`. For the pre column, check out
-`src/shaders/shadingChange.ts` from before this change:
+`packages/core/src/shaders/shadingChange.ts` from before this change:
 
 ```bash
 node scripts/measure-convergence.mjs --scenario Q16 --ratio 2 --pairs 40 --shading-frames 32 \
@@ -1440,7 +1440,7 @@ is two `rgba32uint` loads per thread, one store per 4×4 and per 8×8 block, and
 workgroup-memory reads in the reductions. The memory is ⌈w/4⌉ × (⌈h/4⌉ + ⌈h/8⌉) × 16 B
 × 2, which is 173 KB at 1280×720 render.
 
-**Adopted** in `src/shaders/shadingChange.ts` as `SHADING_MEMORY_SLOTS` 8,
+**Adopted** in `packages/core/src/shaders/shadingChange.ts` as `SHADING_MEMORY_SLOTS` 8,
 `SHADING_MEMORY_JUMP_GAIN` 1.5 and `SHADING_MEMORY_STILL_PX` 0.05, with bindings 9/10.
 `Upscaler` always allocates the memory. It also zeroes the memory before the detector
 runs again after any temporal frame without it, and the shader treats an all-zero
@@ -1626,7 +1626,7 @@ cause — unverified, and the obvious lever if NativeAA cost ever matters. Mobil
 unmeasured (#4: needs a device).
 
 *Dropping the cross-frame stabilizers.* Bench identities `depth-clip-*`
-(`buildDepthClipVariant` in `src/shaders/reconstructVariants.ts`) swap only the depth-clip
+(`buildDepthClipVariant` in `packages/core/src/shaders/reconstructVariants.ts`) swap only the depth-clip
 pass. Upstream's `ComputeDepthClip` (ffx_fsr2_depth_clip.h, read 2026-10-05) differs from
 ours in four places: its `fHalfViewportWidth` is `length(RenderSize())` — the **full**
 diagonal, so our port's literal half made our tolerance 2× tighter — times

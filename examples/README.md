@@ -5,11 +5,12 @@ expensive screen-space effect rendered small and upscaled. WebGPU-only — open 
 Chrome/Edge 113+.
 
 ```bash
-npm install
-npm run examples     # http://localhost:5300  (landing page links every demo)
+pnpm install
+pnpm examples        # http://localhost:5300  (landing page links every demo)
 ```
 
-The library is consumed straight from `../src` (aliased as `@pmndrs/upscaler`), so
+The library is consumed straight from `../src` (aliased as `@pmndrs/upscaler` and its
+`/core`, `/three`, `/babylon` and `/pixi` subpaths), so
 shader/pipeline edits hot-reload here just like in the bench.
 
 ## Showcases
@@ -46,6 +47,32 @@ number so they sort apart from the single-purpose demos.
 | 15 | **Transparent canvas** (`15-transparent-canvas`) | Alpha on the *temporal* path — coverage reconstructed from jitter, not interpolated. The acceptance demo for temporal RGBA; toggles temporal/spatial on sub-texel wires. |
 | 16 | **Spatial node** (`16-spatial-node`) | `upscaleSpatial(color)`, the color-only FSR1 node, in a `RenderPipeline`: fed by an in-graph reduced-res `pass()` or an externally filled `texture()`. RCAS sharpness / `rcasDenoise` controls, an input-grain slider for the denoise to act on, and HDR neon (well above 1.0) to show RCAS sharpening highlight edges in conditioned space (#30). |
 
+## No engine
+
+`@pmndrs/upscaler/core` on a bare `GPUDevice` — no three.js. The reference for raw
+WebGPU apps and for anyone writing an engine adapter against
+[`docs/engine-contract.md`](../docs/engine-contract.md).
+
+| # | Demo | Shows |
+|---|------|-------|
+| W1 | **Raw WebGPU** (`webgpu/hello`) | A hand-written WebGPU scene (generated cubes over an aliasing grid floor) renders linear color, depth and jitter-free motion, offsets its own projection by `core.beginFrame()`'s jitter, and `core.encode()`s the upscale into its own command encoder — scene, upscale and present in one submit. Keys switch temporal / spatial / bilinear / native and cycle the debug views. |
+
+## Babylon.js
+
+The experimental Babylon adapter, `@pmndrs/upscaler/babylon` ([`docs/babylon.md`](../docs/babylon.md)).
+
+| # | Demo | Shows |
+|---|------|-------|
+| B1 | **Babylon.js** (`babylon/hello`) | A Babylon frame graph: a geometry renderer writes linear HDR color, depth and linear velocity at render resolution, `FrameGraphUpscaleTask` upscales them on Babylon's device (jittered through `TAAMaterialManager`, so velocity stays jitter-free), and image processing presents the output. The same scene and keys as W1. |
+
+## pixi.js
+
+The experimental pixi adapter, `@pmndrs/upscaler/pixi` ([`docs/pixi.md`](../docs/pixi.md)).
+
+| # | Demo | Shows |
+|---|------|-------|
+| P1 | **pixi.js** (`pixi/hello`) | A pixi stage (thin strokes, small type) rendered anti-aliased at half resolution into a `RenderTexture`, upscaled by the spatial path (FSR1) between pixi renders, and presented on a `Sprite`. Keys switch spatial / bilinear / native. |
+
 Most interactive demos have a **render scale ×** slider (1.0×–3.0×) that sweeps the
 base render resolution, with the resulting size + base % shown in the HUD.
 
@@ -62,7 +89,7 @@ base render resolution, with the resulting size + base % shown in the HUD.
 ## Measuring performance
 
 The library already ships real per-pass GPU timing via WebGPU **`timestamp-query`**
-([`src/internal/GpuTimer.ts`](../src/internal/GpuTimer.ts)) — `upscaler.gpuTimings`
+([`packages/core/src/internal/GpuTimer.ts`](../packages/core/src/internal/GpuTimer.ts)) — `upscaler.gpuTimings`
 is a per-pass map of GPU milliseconds (reconstruct / exposure / shadingChange / accumulate / rcas / …),
 surfaced in the bench and `02` HUDs. It's **off by default** (it costs GPU time
 every frame), so a demo that reads it opts in with `gpuTiming: true` — the examples
@@ -95,6 +122,12 @@ linear/HDR output, and renderer-owned presentation). `06` and `12` drive the raw
 the recipe inside the post graph. New imperative demos should reuse the presenter
 rather than re-deriving the wiring; new graph demos should start from `07`.
 The integration guides these demos illustrate live in [`docs/`](../docs/README.md).
+
+Every page except the gallery gets a small top-centre nav (back to the gallery, the
+title, the source on GitHub) from [`shared/nav.ts`](shared/nav.ts). `vite.config.ts`
+injects it, so an example never imports it and a new one gets it for free. A page
+whose own UI sits at the top centre moves it down with
+`<meta name="example-nav-top" content="64px">` (S1 and S4 do).
 
 ### The `06` pattern (TSL effect graph → FSR3)
 

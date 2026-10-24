@@ -24,7 +24,7 @@ Check them in this order:
 | 7 | `Reactivity` | White on flagged transparents/particles, black on opaque geometry. | Empty or misaligned: the mask isn't authored, isn't passed, or isn't rendered under the same jitter as `color`. |
 
 The per-pass reference for what each internal means is
-[`src/shaders/README.md`](../src/shaders/README.md#debugging).
+[`packages/core/src/shaders/README.md`](../packages/core/src/shaders/README.md#debugging).
 
 ### Reading debug values
 
@@ -89,9 +89,9 @@ shader-module structure, never a device. "It builds" therefore doesn't mean "it
 works". Anything touching shaders, passes or integration wiring needs a run on real
 WebGPU:
 
-- **Interactively:** `npm run dev` opens the test bench (http://localhost:5199):
+- **Interactively:** `pnpm dev` opens the test bench (http://localhost:5199):
   native, bilinear, FSR1 and temporal modes, the debug views, and per-pass GPU timings.
-  `npm run examples` opens the gallery on port 5300.
+  `pnpm examples` opens the gallery on port 5300.
 - **Headlessly:** launch Chrome with `--headless=new --enable-unsafe-webgpu
   --remote-debugging-port=<port>` and drive it over the DevTools Protocol. WGSL
   validation errors arrive as `Log.entryAdded` events; the scripts below do this for
@@ -117,7 +117,7 @@ WebGPU:
   switch-off ghost. See [`NEXT-STEPS.md` §11](../bench/docs/NEXT-STEPS.md).
 - **Alpha convergence:** `node scripts/measure-alpha-convergence.mjs --ratio 3` reads
   the output texture back on `examples/15-transparent-canvas` (frozen, still camera).
-- **Packaged TSL guides:** `npm run verify:packed-guides:gpu` builds and packs the
+- **Packaged TSL guides:** `pnpm verify:packed-guides:gpu` builds and packs the
   library, then runs `examples/13-guides-node` against the packed artifact on a real
   GPU.
 - **Benchmarks:** how to run and read A/B timing runs, the Q0–Q19 scenario catalogue,

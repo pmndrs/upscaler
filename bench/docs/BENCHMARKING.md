@@ -9,7 +9,7 @@ experiments. This one is the *manual*.
 ## TL;DR
 
 ```bash
-npm run dev                  # interactive bench with a live GPU-ms readout
+pnpm dev                     # interactive bench with a live GPU-ms readout
 
 # An interleaved A/B of two registered variants (see "Running an A/B")
 node scripts/run-benchmark.mjs --smoke --ratios 2 --blocks 4 \
@@ -91,7 +91,7 @@ comparison.
 
 RCAS is the one shader the identities swap, and the swap can differ between the
 temporal path and the FSR1 spatial path. Shader names refer to
-`src/shaders/rcas.ts`.
+`packages/core/src/shaders/rcas.ts`.
 
 | identity | temporal mode | FSR1 spatial mode |
 | --- | --- | --- |
@@ -334,7 +334,7 @@ their usage is in the header comment.
 - **A `node_modules` symlink in a worktree crashes the working-tree digest.**
   The root `.gitignore` pattern `node_modules/` does not match a symlink
   (trailing slash ≠ symlink). `.git/info/exclude` carries a slash-less entry.
-- **The interactive bench reads higher than the timed runs.** `npm run dev` is
+- **The interactive bench reads higher than the timed runs.** `pnpm dev` is
   doing more per frame than the automated protocol. Do not compare the two.
 - **Register pressure does not travel.** Costs that come from ALU and register
   allocation — rather than memory traffic — behave differently on a mobile tiler

@@ -26,13 +26,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - name: Build gallery
-        run: npm run examples:build
+        run: pnpm examples:build
         env:
           PAGES_BASE: /upscaler/
       - uses: actions/upload-pages-artifact@v3

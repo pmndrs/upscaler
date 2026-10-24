@@ -1,5 +1,5 @@
-import { WGSL_COLOR, WGSL_CONSTANTS } from '../../../../src/shaders/common';
-import { assembleShader } from '../../../../src/shaders/wgsl';
+import { WGSL_COLOR, WGSL_CONSTANTS } from '@pmndrs/upscaler-core/shaders/common';
+import { assembleShader } from '@pmndrs/upscaler-core/shaders/wgsl';
 
 function createCandidateDebugShader(
     preparedChannels: boolean,

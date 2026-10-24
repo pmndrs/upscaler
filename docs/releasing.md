@@ -5,6 +5,12 @@ and it never needs a local step. There are two ways to ask, and both run entirel
 GitHub Actions ([`publish.yml`](../.github/workflows/publish.yml)) with the same
 guards, publish and GitHub Release steps.
 
+The repo installs with **pnpm** (`pnpm install --frozen-lockfile`), but versioning and
+publishing stay on the **npm CLI** (`npm version`, `npm view`, `npm publish`): npm
+Trusted Publishing is an npm-CLI OIDC flow, and `npm version` edits only
+`package.json` (there is no `package-lock.json`, and `pnpm-lock.yaml` records no root
+version).
+
 ## Option A: the Run workflow button
 
 **Actions → Publish to npm → Run workflow**, on branch `main`, with:
@@ -25,8 +31,8 @@ In one run, the workflow:
 1. computes the version and refuses if nothing warrants a release (`auto` with only
    `docs:`/`chore:` commits), if the version isn't newer than `package.json`, or if
    the run wasn't started from `main`;
-2. commits `release: vX.Y.Z [skip ci]` to `main` (only `package.json` and
-   `package-lock.json` change), creates the annotated tag `vX.Y.Z` on it, and pushes
+2. commits `release: vX.Y.Z [skip ci]` to `main` (only `package.json` changes),
+   creates the annotated tag `vX.Y.Z` on it, and pushes
    both atomically. If `main` moved while the run was going, nothing is pushed: run
    it again;
 3. publishes to npm and creates the GitHub Release, as for a tag push.
@@ -47,7 +53,7 @@ into `package.json` in its own checkout (`npm version X.Y.Z --no-git-tag-version
 publishes that.
 
 Afterwards it brings `main` up to date with a separate `release: vX.Y.Z [skip ci]`
-commit that only bumps `package.json`/`package-lock.json`. That commit is a plain
+commit that only bumps `package.json`. That commit is a plain
 fast-forward push: no force-push, no new tag, and the release tag stays where you put
 it. It is skipped when `main`'s version is already at or past the tag (for example,
 after a re-run, or a tag for an older version). If a merge lands at the same moment,

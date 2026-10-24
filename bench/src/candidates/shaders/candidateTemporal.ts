@@ -2,8 +2,8 @@ import {
     WGSL_COLOR,
     WGSL_CONSTANTS,
     WGSL_TONEMAP,
-} from '../../../../src/shaders/common';
-import { assembleShader } from '../../../../src/shaders/wgsl';
+} from '@pmndrs/upscaler-core/shaders/common';
+import { assembleShader } from '@pmndrs/upscaler-core/shaders/wgsl';
 
 /**
  * Scalar exposure candidate used by the filter and structural bundles. It

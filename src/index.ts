@@ -1,20 +1,4 @@
-export { Upscaler, type UpscalerOptions } from './Upscaler';
-export { UpscalerNotReadyError } from './initializationError';
-export { MomentsPass, type MomentsPassConfig, type MomentsSpace } from './MomentsPass';
-export { UpscalePass, type UpscalePassConfig } from './UpscalePass';
-export { UpscalerNode, upscale, upscaleSpatial, upscaleScene, type UpscalerNodeOptions } from './UpscalerNode';
-export { TemporalGuidesNode, temporalGuides, type TemporalGuidesNodeOptions } from './TemporalGuidesNode';
-export {
-    DebugView,
-    QualityMode,
-    type UpscalerConfig,
-    type DispatchInputs,
-    type GuideDispatchInputs,
-    type JitterOffset,
-    type RuntimeSettings,
-    type TemporalGuides,
-    type UpscalePath,
-} from './types';
-export { halton, generateJitterSequence } from './math/halton';
-export { getJitterPhaseCount, JitterSequence } from './math/jitter';
-export { getQualityModeRatio, getRenderResolution, QUALITY_MODE_RATIOS } from './math/resolution';
+// The published package. `.` stays the three.js surface so existing imports keep
+// working; engine code lives in the private workspace packages under packages/
+// and is bundled in at build time.
+export * from '@pmndrs/upscaler-three';

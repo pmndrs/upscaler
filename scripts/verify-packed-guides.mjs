@@ -6,7 +6,6 @@ import {
     mkdirSync,
     mkdtempSync,
     readFileSync,
-    readdirSync,
     symlinkSync,
 } from 'node:fs';
 import { createServer } from 'node:net';
@@ -22,7 +21,7 @@ import {
     stopChild,
     waitForUrl,
 } from './local-processes.mjs';
-import { parsePackJson } from './npm-pack-json.mjs';
+import { packLibrary } from './pack-library.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
 export const USAGE = `Usage: node scripts/verify-packed-guides.mjs [options]
@@ -115,27 +114,6 @@ function run(command, args, options = {}) {
     if (result.status !== 0)
         throw new Error(`${basename(command)} ${args.join(' ')} failed with status ${result.status}.`);
     return result;
-}
-
-function packLibrary(archiveDirectory) {
-    const result = spawnSync(
-        ...npmInvocation(['pack', '--ignore-scripts', '--json', '--pack-destination', archiveDirectory]),
-        {
-            cwd: ROOT,
-            encoding: 'utf8',
-        },
-    );
-    if (result.status !== 0)
-        throw new Error(`npm pack failed:\n${result.stderr || result.stdout}`);
-
-    const filename = parsePackJson(result.stdout)[0].filename;
-    if (!filename) throw new Error('npm pack did not report an artifact filename.');
-    const archive = join(archiveDirectory, filename);
-    if (existsSync(archive)) return archive;
-    // npm 8 on Windows reports a scoped filename that differs from the actual tarball.
-    const tarballs = readdirSync(archiveDirectory).filter(name => name.endsWith('.tgz'));
-    if (tarballs.length !== 1) throw new Error('npm pack did not create one identifiable archive.');
-    return join(archiveDirectory, tarballs[0]);
 }
 
 function unpackLibrary(archive, consumerDirectory) {

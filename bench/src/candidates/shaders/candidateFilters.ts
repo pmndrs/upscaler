@@ -1,10 +1,10 @@
-import { EASU_SHADER } from '../../../../src/shaders/easu';
+import { EASU_SHADER } from '@pmndrs/upscaler-core/shaders/easu';
 import {
     WGSL_COLOR,
     WGSL_CONSTANTS,
     WGSL_TONEMAP,
-} from '../../../../src/shaders/common';
-import { assembleShader } from '../../../../src/shaders/wgsl';
+} from '@pmndrs/upscaler-core/shaders/common';
+import { assembleShader } from '@pmndrs/upscaler-core/shaders/wgsl';
 
 const EASU_APPROXIMATION_HELPERS = /* wgsl */ `
 // FSR1's low-precision helpers trade exact division for a bit estimate plus

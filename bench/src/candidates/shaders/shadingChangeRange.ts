@@ -1,5 +1,5 @@
-import { WGSL_COLOR, WGSL_CONSTANTS } from '../../../../src/shaders/common';
-import { assembleShader } from '../../../../src/shaders/wgsl';
+import { WGSL_COLOR, WGSL_CONSTANTS } from '@pmndrs/upscaler-core/shaders/common';
+import { assembleShader } from '@pmndrs/upscaler-core/shaders/wgsl';
 
 /** How a block's stored history of means suppresses a response. */
 export type ShadingRecurrenceMode = 'range' | 'nearest' | 'ema' | 'gated';
@@ -19,7 +19,7 @@ export interface ShadingRecurrenceOptions {
 
 /**
  * Shading-change candidates with a per-block temporal memory (NEXT-STEPS §14).
- * Production (`src/shaders/shadingChange.ts`) adopted `gated` with 8 slots and
+ * Production (`packages/core/src/shaders/shadingChange.ts`) adopted `gated` with 8 slots and
  * `jumpGain` 1.5; the other forms stay here for re-measurement.
  *
  * The production detector compares this frame's 4×4 / 8×8 block means with

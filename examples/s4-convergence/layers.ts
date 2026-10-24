@@ -30,7 +30,7 @@ import {
 // The library's debug views are drawn by the frame's output pass, so they only
 // change when a frame is dispatched — but an explainer must let you flip
 // between age, locks and disocclusion of the *same* paused frame. The mappings
-// below are the ones in src/shaders/debug.ts, case for case, so a layer here
+// below are the ones in packages/core/src/shaders/debug.ts, case for case, so a layer here
 // reads exactly like the matching `DebugView`.
 
 /** The selectable layers, in the order the UI lists them. */

@@ -22,7 +22,7 @@ SOFTWARE.
 
 ---
 
-The WGSL EASU and RCAS shaders in src/shaders/ are derived from AMD's
+The WGSL EASU and RCAS shaders in packages/core/src/shaders/ are derived from AMD's
 FidelityFX Super Resolution (ffx_fsr1.h), and the temporal pipeline follows
 the architecture of FidelityFX Super Resolution 2/3:
 

@@ -1,7 +1,7 @@
 # FSR3 test bench
 
 ```bash
-npm run dev   # http://localhost:5199 (WebGPU browser required)
+pnpm dev      # http://localhost:5199 (WebGPU browser required)
 ```
 
 An aliasing-hostile scene — thin-line grid floor, torus knots with hot speculars, a picket fence, orbiting spheres, an emissive HDR hotspot — rendered at reduced resolution and upscaled to the canvas. Every mode (including native) funnels through the same render target and WGSL display transform so comparisons are honest.

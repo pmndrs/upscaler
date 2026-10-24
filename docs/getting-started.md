@@ -21,6 +21,12 @@ integration, because most upscaler bugs are input bugs.
 npm install @pmndrs/upscaler three
 ```
 
+This guide is the three.js integration (`@pmndrs/upscaler`, also available as
+`@pmndrs/upscaler/three`). Other engines have their own guides:
+[Babylon.js](babylon.md) and [pixi.js](pixi.md) (both experimental), and
+[Engine contract](engine-contract.md) for raw WebGPU or a new adapter through
+`@pmndrs/upscaler/core`.
+
 ## Choose an integration
 
 All four surfaces run the same `Upscaler` underneath. They differ only in who renders
@@ -35,7 +41,7 @@ the inputs and who applies the jitter.
 | Your own render-target loop, split frames, or inputs the other surfaces don't expose | [`Upscaler`](#upscaler-the-raw-api) | `examples/06-screenspace-gi`, `12-temporal-guides`, `14-pathtracer-alpha` |
 | Other temporal effects that should share the upscaler's motion/disocclusion data | [`temporalGuides()` / `upscaler.guides`](temporal-guides.md) | `examples/12-temporal-guides` (raw), `13-guides-node` (TSL) |
 
-Run the examples locally with `npm run examples` (port 5300), or browse the
+Run the examples locally with `pnpm examples` (port 5300), or browse the
 [live gallery](https://pmndrs.github.io/upscaler/).
 
 The upscaler's output is **linear/HDR** on every surface. It applies no tone mapping and

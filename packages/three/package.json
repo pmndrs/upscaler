@@ -1,0 +1,23 @@
+{
+    "name": "@pmndrs/upscaler-three",
+    "version": "0.0.0",
+    "private": true,
+    "description": "three.js WebGPURenderer adapter for @pmndrs/upscaler. Bundled into the published package; never published on its own.",
+    "license": "MIT",
+    "type": "module",
+    "sideEffects": false,
+    "exports": {
+        ".": "./src/index.ts",
+        "./*": "./src/*.ts"
+    },
+    "dependencies": {
+        "@pmndrs/upscaler-core": "workspace:*"
+    },
+    "peerDependencies": {
+        "three": ">=0.184.0"
+    },
+    "devDependencies": {
+        "@types/three": "^0.186.0",
+        "three": "^0.186.1"
+    }
+}

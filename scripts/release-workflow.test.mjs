@@ -174,6 +174,15 @@ case "$1" in
 esac
 `;
 
+const FAKE_PNPM = `#!/usr/bin/env bash
+set -euo pipefail
+printf 'pnpm %s\\n' "$*" >> "$NPM_LOG"
+case "$1" in
+    install) exit 0 ;;
+    *) printf 'unexpected pnpm command: %s\\n' "$*" >&2; exit 2 ;;
+esac
+`;
+
 const FAKE_GH = `#!/usr/bin/env bash
 set -euo pipefail
 if [[ "$1" == "release" && "$2" == "create" ]]; then
@@ -246,6 +255,7 @@ function createFixture({ tag, offMain } = {}) {
     git(seed, ['push', '-q', 'origin', 'main', '--tags']);
 
     writeFileSync(join(bin, 'npm'), FAKE_NPM.replaceAll('\r\n', '\n'), { mode: 0o755 });
+    writeFileSync(join(bin, 'pnpm'), FAKE_PNPM.replaceAll('\r\n', '\n'), { mode: 0o755 });
     writeFileSync(join(bin, 'gh'), FAKE_GH.replaceAll('\r\n', '\n'), { mode: 0o755 });
     writeFileSync(join(bin, 'git'), GIT_WRAPPER.replaceAll('\r\n', '\n'), { mode: 0o755 });
     const realNpm = process.platform === 'win32' ? join(bin, 'real-npm') : which('npm');
@@ -407,7 +417,7 @@ function runJob(
         publishes: npmCalls.filter((line) => line.startsWith('publish ')),
         latestLookups: npmCalls.filter((line) => line.endsWith(' dist-tags.latest')),
         publishedVersions: npmCalls.filter((line) => line.startsWith('published ')).map((line) => line.slice(10)),
-        installs: npmCalls.filter((line) => line === 'ci'),
+        installs: npmCalls.filter((line) => line.startsWith('pnpm install')),
         releases: readLog(ghLog),
         notes: existsSync(notesPath) ? readFileSync(notesPath, 'utf8') : null,
     };
@@ -447,6 +457,7 @@ describe('tag push (including a tag made in the GitHub UI)', () => {
                 expect(job.outputs.resolve).toEqual({ tag: 'v0.3.0', mode: 'tag' });
                 expect(job.outputs.release).toMatchObject({ version: '0.3.0', latest: 'true' });
                 expect(job.outputs.dist).toEqual({ tag: 'latest' });
+                expect(job.installs).toEqual(['pnpm install --frozen-lockfile']);
                 expect(job.publishes).toEqual(['publish --access public --tag latest']);
                 expect(job.publishedVersions).toEqual(['0.3.0']);
                 expect(job.releases).toHaveLength(1);
