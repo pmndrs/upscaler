@@ -26,5 +26,5 @@
         }
     },
     "include": ["src", "packages/*/src", "bench/src", "examples", "test"],
-    "exclude": ["node_modules", "dist", "examples/vite.config.ts"]
+    "exclude": ["node_modules", "dist", "examples/vite.config.ts", "examples/pixi3d/hello", "examples/pixi3d/vendor"]
 }

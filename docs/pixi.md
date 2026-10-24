@@ -71,9 +71,30 @@ app.ticker.add(() => {
 A 3D layer that draws through pixi's renderer can be upscaled the same way:
 render it into the reduced `RenderTexture` and dispatch. The input must be
 exactly render-sized. A pooled or power-of-two texture that only *contains* a
-render-sized image needs a copy into an exact-size texture first. The adapter was
-checked locally this way against a pixi-3d beta scene (spatial path, Chrome,
-2026-10-19). That beta isn't public, so no example here depends on it.
+render-sized image needs a copy into an exact-size texture first.
+
+[`examples/pixi3d/hello`](../examples/pixi3d/hello/main.ts) does this with
+pixi-3d: a `View3D`, sized to the render resolution with `setSize()` and never
+added to the stage, renders straight into the reduced target.
+
+```ts
+view3d.setSize(upscaler.renderWidth, upscaler.renderHeight);
+renderer.render({ container: view3d, target: lowRes });
+upscaler.dispatch({ color: lowRes });
+```
+
+pixi-3d tone-maps inside the view (ACES by default), so its output is
+display-ready and the presenting `Sprite` needs nothing more. Don't
+`await app.init()` at a module's top level in a pixi-3d app: its renderer hook
+dynamically imports a backend chunk during `init()`, and in a production build
+that chunk imports back from the entry chunk, so the two wait on each other and
+the app never starts (dev serves modules separately and hides it). Start from an
+`async function main()` instead, as the example does. pixi-3d is in
+closed beta and isn't on npm; the example runs once the beta tarball is unpacked
+locally ([examples/pixi3d/README.md](../examples/pixi3d/README.md)). Verified on
+`@pixi/3d` 0.1.0-beta.2, pixi.js 8.22, Chrome, 2026-10-24: spatial, bilinear and
+native render upright with no WebGPU or pixi warnings, and FSR1 is visibly
+sharper than bilinear on the fence slats.
 
 ## Temporal
 
