@@ -72,6 +72,7 @@ The experimental pixi adapter, `@pmndrs/upscaler/pixi` ([`docs/pixi.md`](../docs
 | # | Demo | Shows |
 |---|------|-------|
 | P1 | **pixi.js** (`pixi/hello`) | A pixi stage (thin strokes, small type) rendered anti-aliased at half resolution into a `RenderTexture`, upscaled by the spatial path (FSR1) between pixi renders, and presented on a `Sprite`. Keys switch spatial / bilinear / native. |
+| P2 | **pixi-3d** (`pixi3d/hello`) | The same adapter under a [pixi-3d](pixi3d/README.md) `View3D` (a thin-slat fence, glossy spheres, a metal knot) rendered at half resolution and upscaled by FSR1. Needs the pixi-3d closed beta unpacked locally; without it the page explains how. Same keys as P1. |
 
 Most interactive demos have a **render scale ×** slider (1.0×–3.0×) that sweeps the
 base render resolution, with the resulting size + base % shown in the HUD.
