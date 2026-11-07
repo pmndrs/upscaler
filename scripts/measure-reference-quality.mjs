@@ -37,7 +37,7 @@ import { gpuAuditSource } from './gpu-audit.mjs';
  * Usage:
  *   node scripts/measure-reference-quality.mjs --scenario Q1 [--ratio 2]
  *     [--modes native,bilinear,spatial,temporal] [--frames still=180:211]
- *     [--samples 64] [--scale 1] [--label baseline] [--export-png]
+ *     [--samples 64] [--scale 1] [--variant production] [--export-png]
  *
  * Starts the bench dev server on --url's port if nothing answers there.
  * Writes summary.json (+ PNGs) under
@@ -120,9 +120,10 @@ const USAGE = `Usage: node scripts/measure-reference-quality.mjs [options]
                          the floor below which mode differences mean nothing
                          (default 0 = off; e.g. 1024)
   --width <px> --height <px>   display size (default 1280x720)
-  --variant <id>         bench variant (default: the page default, baseline)
+  --variant <id>         bench variant (default production: production RCAS on every
+                         path; 'baseline' runs the frozen legacy RCAS on temporal)
   --settings <json>      capture-setting overrides, e.g. '{"autoExposure":false}'
-  --label <name>         output folder prefix (default baseline)
+  --label <name>         output folder prefix (default: the variant id)
   --export-png           write every measured frame (reference + each mode) as an
                          8-bit sRGB PNG sequence for offline perceptual metrics
   --keep-raw             keep the linear f32 reference frames (<out>/reference/*.f32)
@@ -153,9 +154,11 @@ const scale = Number(cli.scale ?? 1);
 const floorSamples = Number(cli['floor-samples'] ?? 0);
 const width = Number(cli.width ?? 1280);
 const height = Number(cli.height ?? 720);
-const variant = typeof cli.variant === 'string' ? cli.variant : null;
+// Not the page default: `baseline` keeps the frozen RCAS_LEGACY_SHADER on the
+// temporal path for history comparability, so it would not score what ships.
+const variant = typeof cli.variant === 'string' ? cli.variant : 'production';
 const settings = typeof cli.settings === 'string' ? JSON.parse(cli.settings) : {};
-const label = String(cli.label ?? 'baseline');
+const label = String(cli.label ?? variant);
 const exportPng = cli['export-png'] === true;
 const keepRaw = cli['keep-raw'] === true;
 const port = parsePort(cli.port, '--port') ?? 9333;
@@ -575,7 +578,7 @@ async function main() {
         url.searchParams.set('ratio', String(ratio));
         url.searchParams.set('width', String(width));
         url.searchParams.set('height', String(height));
-        if (variant) url.searchParams.set('variant', variant);
+        url.searchParams.set('variant', variant);
         await client.call('Page.addScriptToEvaluateOnNewDocument', { source: auditSource });
         await client.call('Page.navigate', { url: url.href });
         for (let attempt = 0; ; attempt++) {

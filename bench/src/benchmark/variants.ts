@@ -1,5 +1,6 @@
 import {
     createBaselineResolver,
+    createProductionRcasResolver,
     createRcasExperimentResolver,
     createRcasNumericParityResolver,
     createDepthClipVariantResolver,
@@ -30,6 +31,7 @@ let activeResolverCount = 0;
 
 const RESOLVER_FACTORIES = {
     baseline: createBaselineResolver,
+    production: createProductionRcasResolver,
     'local-baseline-5d6a65e': createBaselineResolver,
     'local-baseline-through-e00-harness': createBaselineResolver,
     'rcas-fsr315-limiter': createRcasNumericParityResolver,
@@ -168,6 +170,8 @@ function metadata(id: BenchmarkVariantId): BenchmarkVariantMetadata {
                     ? 'Shading change, frame pair only (pre block memory)'
                   : shadingMemory
                     ? `Shading change with block memory (${id.slice('shading-memory-'.length)})`
+                  : id === 'production'
+                    ? 'Production pipeline (production RCAS on every path)'
                 : rcasDenoise
             ? 'FSR 3.1.5 RCAS limiter + denoise'
             : rcasLimiterParity
@@ -189,7 +193,12 @@ function metadata(id: BenchmarkVariantId): BenchmarkVariantMetadata {
         resourceGraph: sourceBundle ? sourceResourceGraph : RESOURCE_GRAPH,
         pipeline: {
             shaderKey:
-                sourceBundle || rcasExperiment || shadingMemory || reconstructExperiment || depthClipVariant
+                sourceBundle ||
+                rcasExperiment ||
+                shadingMemory ||
+                reconstructExperiment ||
+                depthClipVariant ||
+                id === 'production'
                 ? id
                 : rcasNumericParity
                 ? rcasDenoise

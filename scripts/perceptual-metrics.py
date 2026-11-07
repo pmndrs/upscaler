@@ -9,7 +9,7 @@ reference). Setup and how to read the numbers: bench/docs/REFERENCE-QUALITY.md.
     python3 -m venv .venv-metrics
     .venv-metrics/bin/pip install torch lpips cvvdp pyfvvdp pillow
     .venv-metrics/bin/python scripts/perceptual-metrics.py \
-        bench/results/raw/reference-quality/baseline-Q19-2x [--display standard_fhd] [--fps 60]
+        bench/results/raw/reference-quality/production-Q19-2x [--display standard_fhd] [--fps 60]
 
 Writes perceptual.json next to the run's summary.json.
 """

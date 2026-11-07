@@ -39,14 +39,16 @@ and scenes held out from tuning.
   numbers for the full baseline (the recipe was verified on one window only).
   A reference-quality A/B for each entry below whose claim is about image
   quality, not stability.
-- **First findings the stability meters could not see:** (1) In motion,
-  temporal scores below FSR1 spatial in 7 of 8 motion windows (−0.13 to
-  −2.09 dB PSNR; the fast dolly ties) while churning less than both FSR1 and
-  the reference. That is "stable and wrong", and LPIPS and ColorVideoVDP agree
-  on the window checked. (2) The bench input renders without a negative
-  texture mip bias. A finer-LOD (`--scale 2`) reference scores Q1's temporal
-  output 1.9 dB lower, which is consistent with that, but it hasn't been
-  A/B'd yet.
+- **First findings the stability meters could not see** (production RCAS on
+  both paths, the `production` bench identity): (1) In motion, temporal scores
+  below FSR1 spatial in all 8 Q4/Q19 motion windows (−0.16 to −2.13 dB PSNR;
+  the fast dolly is effectively a tie at −0.01) while churning less than both
+  FSR1 and the reference. That is "stable and wrong". It is not an RCAS
+  effect: the legacy temporal RCAS moves every motion window by ≤ 0.04 dB.
+  LPIPS and ColorVideoVDP agree on the window checked. (2) The bench input
+  renders without a negative texture mip bias. A finer-LOD (`--scale 2`)
+  reference scores Q1's temporal output 1.9 dB lower, which is consistent
+  with that. A direct A/B is in progress separately.
 
 ---
 

@@ -287,6 +287,29 @@ export function createBaselineResolver(
 }
 
 /**
+ * Creates the `production` identity: the shipping pipeline with production
+ * `RCAS_SHADER` on both the temporal and the FSR1 spatial path, i.e. what a
+ * consumer gets with no bench override. `baseline` keeps the frozen legacy
+ * shader on the temporal path for history comparability; use this identity
+ * for anything that should describe current output quality (e.g.
+ * scripts/measure-reference-quality.mjs).
+ * @param renderer - Initialized three WebGPU renderer
+ * @param metadata - Registry metadata for the identity
+ * @returns One production resolver instance
+ */
+export function createProductionRcasResolver(
+    renderer: unknown,
+    metadata: BenchmarkVariantMetadata,
+): BenchmarkResolver {
+    return new BaselineBenchmarkResolver(
+        renderer as THREE.WebGPURenderer,
+        metadata,
+        RCAS_SHADER,
+        RCAS_SHADER,
+    );
+}
+
+/**
  * Creates the isolated FSR 3.1.5 RCAS numeric candidate. Pinned to the
  * per-tap shader (the production form when these identities were measured) so
  * their timings stay frozen; current production is `rcas-tonemap-space-v1`.

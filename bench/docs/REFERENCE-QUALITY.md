@@ -108,8 +108,9 @@ definition and are worth knowing before reading a delta:
   bench nor the three adapter applies the negative mip bias that FSR 2's
   integration guidance recommends, `log2(render / display) − 1`, which is −2
   at ratio 2. Raising the reference's own resolution moves the target toward the
-  true texture integral. Q1 at `--scale 2` gave temporal 26.67 dB against
-  28.54 at scale 1 (−1.9 dB), and native 35.14 against 33.75. So part of the
+  true texture integral. Q1 at `--scale 2` (measured with the `baseline`
+  identity's legacy temporal RCAS) gave temporal 26.67 dB against 28.54 at
+  scale 1 (−1.9 dB), and native 35.14 against 33.75. So part of the
   gap between temporal and native on textured scenes is mip LOD, not
   reconstruction. That makes it an integration question to measure here, not
   something to fix in the accumulate pass.
@@ -126,22 +127,24 @@ resolution, jittered samples) and native's own LOD.
 GTAO/SSR/SSGI), Q10 (resizes mid-run) and Q11 (host pre-exposure baked into the
 MRT output). The script refuses them.
 
-## Baseline (ratio 2, 64 spp, scale 1)
+## Baseline (ratio 2, 64 spp, scale 1, `production`)
 
 Measured 2026-11-07 on commit `2020ea2` (Apple M-series, Metal-3, headless
-Chrome 156, three r186.1), bench variant `baseline`, canonical capture
-settings (sharpness 0.8, max accumulation 24, auto-exposure, locks and the
-shading detector on), 1280×720 display. Native renders at ratio 1. The other
-three modes render at 640×360. Regenerate the whole table with:
+Chrome 156, three r186.1) with the bench identity `production`: production
+`RCAS_SHADER` on both the temporal and the FSR1 path, which is what ships and
+the script's default. Settings are the canonical capture settings (sharpness
+0.8, max accumulation 24, auto-exposure, locks and the shading detector on) at
+a 1280×720 display. Native renders at ratio 1. The other three modes render at
+640×360. Regenerate the whole table with:
 
 ```bash
 for s in Q0 Q1 Q4 Q12 Q18 Q19; do
-  node scripts/measure-reference-quality.mjs --scenario $s --ratio 2 --floor-samples 1024 --label baseline
+  node scripts/measure-reference-quality.mjs --scenario $s --ratio 2 --floor-samples 1024
 done
 ```
 
-That takes about 12 minutes in total. Each run writes
-`bench/results/raw/reference-quality/baseline-<scenario>-2x/summary.json`,
+That takes about 12 minutes on an idle GPU. Each run writes
+`bench/results/raw/reference-quality/production-<scenario>-2x/summary.json`,
 which holds per-frame and per-ROI numbers and records its own command line.
 Every run had zero non-finite values and no browser errors. The reference
 floor (64 vs 1024 spp) was 57.3 dB (Q0), 57.4 (Q1), 58.0 (Q4), 64.2 (Q12),
@@ -152,93 +155,120 @@ floor (64 vs 1024 spp) was 57.3 dB (Q0), 57.4 (Q1), 58.0 (Q4), 64.2 (Q12),
 | Q0 | animated (120–151) | native | 33.83 | 0.9818 | 0.074 | 0.209 | 0.197 |
 | Q0 | animated (120–151) | bilinear | 25.94 | 0.8796 | 0.132 | 0.217 | 0.197 |
 | Q0 | animated (120–151) | spatial | 27.37 | 0.9115 | 0.173 | 0.270 | 0.197 |
-| Q0 | animated (120–151) | temporal | 27.74 | 0.9215 | 0.311 | 0.339 | 0.197 |
+| Q0 | animated (120–151) | temporal | 27.73 | 0.9223 | 0.320 | 0.348 | 0.197 |
 | Q1 | still (180–211) | native | 33.75 | 0.9817 | 0.000 | 0.000 | 0.000 |
 | Q1 | still (180–211) | bilinear | 25.86 | 0.8801 | 0.000 | 0.000 | 0.000 |
 | Q1 | still (180–211) | spatial | 27.28 | 0.9116 | 0.000 | 0.000 | 0.000 |
-| Q1 | still (180–211) | temporal | 28.54 | 0.9331 | 0.114 | 0.114 | 0.000 |
+| Q1 | still (180–211) | temporal | 28.55 | 0.9340 | 0.118 | 0.118 | 0.000 |
 | Q4 | orbit (88–103) | native | 33.48 | 0.9810 | 1.539 | 3.264 | 3.058 |
 | Q4 | orbit (88–103) | bilinear | 25.68 | 0.8792 | 3.172 | 2.331 | 3.058 |
 | Q4 | orbit (88–103) | spatial | 27.22 | 0.9126 | 3.180 | 3.270 | 3.058 |
-| Q4 | orbit (88–103) | temporal | 26.24 | 0.8835 | 3.143 | 2.614 | 3.058 |
+| Q4 | orbit (88–103) | temporal | 26.22 | 0.8838 | 3.144 | 2.646 | 3.058 |
 | Q4 | translate (200–215) | native | 32.42 | 0.9771 | 2.843 | 13.871 | 13.469 |
 | Q4 | translate (200–215) | bilinear | 25.18 | 0.8625 | 8.416 | 11.231 | 13.469 |
 | Q4 | translate (200–215) | spatial | 26.35 | 0.8980 | 7.441 | 13.626 | 13.469 |
-| Q4 | translate (200–215) | temporal | 24.26 | 0.8265 | 9.897 | 11.203 | 13.469 |
+| Q4 | translate (200–215) | temporal | 24.22 | 0.8260 | 9.920 | 11.324 | 13.469 |
 | Q4 | orbit-2 (320–335) | native | 31.90 | 0.9788 | 2.746 | 11.675 | 11.273 |
 | Q4 | orbit-2 (320–335) | bilinear | 24.74 | 0.8502 | 7.853 | 9.473 | 11.273 |
 | Q4 | orbit-2 (320–335) | spatial | 26.13 | 0.8968 | 6.675 | 11.695 | 11.273 |
-| Q4 | orbit-2 (320–335) | temporal | 24.89 | 0.8473 | 8.108 | 9.732 | 11.273 |
+| Q4 | orbit-2 (320–335) | temporal | 24.86 | 0.8475 | 8.104 | 9.872 | 11.273 |
 | Q4 | hold (440–455) | native | 33.07 | 0.9829 | 0.000 | 0.000 | 0.000 |
 | Q4 | hold (440–455) | bilinear | 25.09 | 0.8596 | 0.000 | 0.000 | 0.000 |
 | Q4 | hold (440–455) | spatial | 26.83 | 0.9073 | 0.000 | 0.000 | 0.000 |
-| Q4 | hold (440–455) | temporal | 27.68 | 0.9220 | 0.128 | 0.128 | 0.000 |
+| Q4 | hold (440–455) | temporal | 27.69 | 0.9226 | 0.132 | 0.132 | 0.000 |
 | Q12 | still (180–211) | native | 37.02 | 0.9944 | 0.000 | 0.000 | 0.000 |
 | Q12 | still (180–211) | bilinear | 35.86 | 0.9913 | 0.000 | 0.000 | 0.000 |
 | Q12 | still (180–211) | spatial | 36.63 | 0.9924 | 0.000 | 0.000 | 0.000 |
-| Q12 | still (180–211) | temporal | 37.90 | 0.9941 | 0.020 | 0.020 | 0.000 |
+| Q12 | still (180–211) | temporal | 38.57 | 0.9947 | 0.022 | 0.022 | 0.000 |
 | Q18 | still (180–211) | native | 22.11 | 0.9620 | 0.000 | 0.000 | 0.000 |
 | Q18 | still (180–211) | bilinear | 16.42 | 0.7968 | 0.000 | 0.000 | 0.000 |
 | Q18 | still (180–211) | spatial | 16.46 | 0.8305 | 0.000 | 0.000 | 0.000 |
-| Q18 | still (180–211) | temporal | 20.71 | 0.8899 | 2.425 | 2.425 | 0.000 |
+| Q18 | still (180–211) | temporal | 20.89 | 0.8939 | 2.445 | 2.445 | 0.000 |
 | Q19 | still (96–111) | native | 34.67 | 0.9866 | 0.000 | 0.000 | 0.000 |
 | Q19 | still (96–111) | bilinear | 24.31 | 0.8573 | 0.000 | 0.000 | 0.000 |
 | Q19 | still (96–111) | spatial | 25.75 | 0.8972 | 0.000 | 0.000 | 0.000 |
-| Q19 | still (96–111) | temporal | 26.38 | 0.9122 | 0.113 | 0.113 | 0.000 |
+| Q19 | still (96–111) | temporal | 26.37 | 0.9130 | 0.115 | 0.115 | 0.000 |
 | Q19 | dolly-back (150–165) | native | 34.40 | 0.9861 | 1.947 | 11.106 | 10.817 |
 | Q19 | dolly-back (150–165) | bilinear | 23.54 | 0.8256 | 9.003 | 8.238 | 10.817 |
 | Q19 | dolly-back (150–165) | spatial | 24.78 | 0.8703 | 7.931 | 9.903 | 10.817 |
-| Q19 | dolly-back (150–165) | temporal | 24.64 | 0.8539 | 8.283 | 9.327 | 10.817 |
+| Q19 | dolly-back (150–165) | temporal | 24.62 | 0.8543 | 8.273 | 9.426 | 10.817 |
 | Q19 | orbit-left (390–405) | native | 33.68 | 0.9841 | 2.251 | 13.775 | 13.760 |
 | Q19 | orbit-left (390–405) | bilinear | 24.00 | 0.8519 | 9.351 | 12.351 | 13.760 |
 | Q19 | orbit-left (390–405) | spatial | 25.50 | 0.8975 | 7.518 | 14.421 | 13.760 |
-| Q19 | orbit-left (390–405) | temporal | 23.84 | 0.8394 | 9.880 | 12.712 | 13.760 |
+| Q19 | orbit-left (390–405) | temporal | 23.81 | 0.8395 | 9.877 | 12.836 | 13.760 |
 | Q19 | slide (630–645) | native | 34.82 | 0.9865 | 1.826 | 11.599 | 11.276 |
 | Q19 | slide (630–645) | bilinear | 24.40 | 0.8585 | 7.963 | 9.121 | 11.276 |
 | Q19 | slide (630–645) | spatial | 25.84 | 0.8971 | 6.897 | 10.906 | 11.276 |
-| Q19 | slide (630–645) | temporal | 25.08 | 0.8706 | 7.856 | 9.713 | 11.276 |
+| Q19 | slide (630–645) | temporal | 25.07 | 0.8711 | 7.835 | 9.805 | 11.276 |
 | Q19 | scene-recede (750–765) | native | 34.52 | 0.9861 | 1.908 | 10.884 | 10.562 |
 | Q19 | scene-recede (750–765) | bilinear | 23.89 | 0.8273 | 8.698 | 7.944 | 10.562 |
 | Q19 | scene-recede (750–765) | spatial | 25.15 | 0.8721 | 7.658 | 9.624 | 10.562 |
-| Q19 | scene-recede (750–765) | temporal | 25.02 | 0.8600 | 7.815 | 8.944 | 10.562 |
+| Q19 | scene-recede (750–765) | temporal | 24.99 | 0.8603 | 7.808 | 9.033 | 10.562 |
 | Q19 | dolly-back-fast (962–977) | native | 34.69 | 0.9868 | 2.159 | 18.784 | 18.829 |
 | Q19 | dolly-back-fast (962–977) | bilinear | 23.76 | 0.8332 | 11.831 | 17.501 | 18.829 |
 | Q19 | dolly-back-fast (962–977) | spatial | 25.06 | 0.8766 | 9.882 | 19.206 | 18.829 |
-| Q19 | dolly-back-fast (962–977) | temporal | 25.07 | 0.8700 | 10.158 | 18.296 | 18.829 |
+| Q19 | dolly-back-fast (962–977) | temporal | 25.04 | 0.8705 | 10.131 | 18.482 | 18.829 |
 
-The temporal column runs the frozen `RCAS_LEGACY_SHADER` and the spatial
-column runs production `RCAS_SHADER`; that is the `baseline` identity, see
-BENCHMARKING.md "Which RCAS each mode runs". The table records numbers, not
-causes. What it shows:
+The table records numbers, not causes. What it shows:
 
 - **Still scenes: temporal beats every other ratio-2 mode.** On Q1 it is
-  +1.26 dB over FSR1 and +2.68 dB over bilinear. On Q18's chart it is
-  +4.25 dB over FSR1 (bars ROI: 16.2 against 11.9). It still trails native,
-  which has 4× the pixels, by 1.4 dB (Q18) to 8.3 dB (Q19 still), except on
-  Q12, where it passes native (37.90 against 37.02). Q12's shadow dither and aliasing are noise that
-  accumulation averages out and native keeps.
-- **In motion, temporal falls behind FSR1 spatial in every window but one.**
-  The gap is −0.98 dB on Q4 orbit, −2.09 on Q4 translate, −1.24 on Q4
-  orbit-2, −1.66 on Q19 orbit-left, −0.76 on Q19 slide, −0.14 on Q19
-  dolly-back and −0.13 on Q19 scene-recede. The fast dolly is a tie (+0.01).
-  On Q4 translate and Q19 orbit-left temporal is even below bilinear.
-  Temporal error agrees in every motion window except Q4's slow first orbit
-  (3.14 against 3.18): temporal's is above FSR1's, e.g. Q4 translate 9.90
-  against 7.44. LPIPS and both VDPs agree on the one window measured
-  perceptually (below). The stability meters can't see this, because
-  temporal's churn under motion is below both FSR1's and the reference's own
-  in every motion window. The scale-2 sensitivity check and the missing mip
-  bias (see "What the reference is") account for part of the still-scene gap
-  to native. They do not explain why motion falls below FSR1, which renders
-  at the same resolution.
+  +1.27 dB over FSR1 and +2.69 dB over bilinear. On Q18's chart it is
+  +4.43 dB over FSR1 (bars ROI: 16.4 against 11.8). It still trails native,
+  which has 4× the pixels, by 1.2 dB (Q18) to 8.3 dB (Q19 still), except on
+  Q12, where it passes native (38.57 against 37.02). Q12's shadow dither and
+  aliasing are noise that accumulation averages out and native keeps.
+- **In motion, temporal falls behind FSR1 spatial in every window.** The gap
+  is −1.00 dB on Q4 orbit, −2.13 on Q4 translate, −1.27 on Q4 orbit-2, −1.69
+  on Q19 orbit-left, −0.77 on Q19 slide, −0.16 on Q19 dolly-back and −0.16 on
+  Q19 scene-recede. The fast dolly is effectively a tie (−0.01). On Q4
+  translate and Q19 orbit-left temporal is even below bilinear. Temporal error
+  agrees in every motion window except Q4's slow first orbit (3.14 against
+  3.18): temporal's is above FSR1's, e.g. Q4 translate 9.92 against 7.44.
+  LPIPS and both VDPs agree on the one window measured perceptually (below).
+  The stability meters can't see this, because temporal's churn under motion
+  is below both FSR1's and the reference's own in every motion window. The
+  scale-2 sensitivity check and the missing mip bias (see "What the reference
+  is") account for part of the still-scene gap to native. They do not explain
+  why motion falls below FSR1, which renders at the same resolution.
 - **On a still camera only temporal churns.** Temporal's churn equals its
-  temporal error there, 0.11–0.13/255 on Q1, Q4 hold and Q19 still. That is
+  temporal error there, 0.12–0.13/255 on Q1, Q4 hold and Q19 still. That is
   the residual jitter shimmer the convergence meter tracks, and the reference
-  has none. Q18's unresolvable bars are the exception at 2.43/255 (bars ROI
+  has none. Q18's unresolvable bars are the exception at 2.45/255 (bars ROI
   7.3/255): on a still camera the aliasing moiré never converges.
-- **Animated objects (Q0)** add flicker. Temporal error is 0.311 for temporal
+- **Animated objects (Q0)** add flicker. Temporal error is 0.320 for temporal
   against 0.173 for FSR1 and 0.074 for native, mostly on the fence and sphere
-  ROI (0.714).
+  ROI (0.730).
+
+### Production vs legacy temporal RCAS
+
+The first pass of this baseline ran the `baseline` identity. That identity
+keeps the frozen `RCAS_LEGACY_SHADER` on the temporal path so older captures
+stay comparable (BENCHMARKING.md, "Which RCAS each mode runs"). Its FSR1, native
+and bilinear columns are identical to the table above (FSR1 to 1e-6 dB, since
+both identities run production RCAS there), so only temporal differs:
+
+| scenario | window | temporal PSNR legacy → production | SSIM legacy → production | temporal error legacy → production | production temporal − FSR1 (dB) |
+| --- | --- | --- | --- | --- | ---: |
+| Q0 | animated | 27.74 → 27.73 | 0.9215 → 0.9223 | 0.311 → 0.320 | +0.36 |
+| Q1 | still | 28.54 → 28.55 | 0.9331 → 0.9340 | 0.114 → 0.118 | +1.26 |
+| Q4 | orbit | 26.24 → 26.22 | 0.8835 → 0.8838 | 3.143 → 3.144 | −1.00 |
+| Q4 | translate | 24.26 → 24.22 | 0.8265 → 0.8260 | 9.897 → 9.920 | −2.13 |
+| Q4 | orbit-2 | 24.89 → 24.86 | 0.8473 → 0.8475 | 8.108 → 8.104 | −1.27 |
+| Q4 | hold | 27.68 → 27.69 | 0.9220 → 0.9226 | 0.128 → 0.132 | +0.86 |
+| Q12 | still | 37.90 → 38.57 | 0.9941 → 0.9947 | 0.020 → 0.022 | +1.94 |
+| Q18 | still | 20.71 → 20.89 | 0.8899 → 0.8939 | 2.425 → 2.445 | +4.43 |
+| Q19 | still | 26.38 → 26.37 | 0.9122 → 0.9130 | 0.113 → 0.115 | +0.62 |
+| Q19 | dolly-back | 24.64 → 24.62 | 0.8539 → 0.8543 | 8.283 → 8.273 | −0.16 |
+| Q19 | orbit-left | 23.84 → 23.81 | 0.8394 → 0.8395 | 9.880 → 9.877 | −1.69 |
+| Q19 | slide | 25.08 → 25.07 | 0.8706 → 0.8711 | 7.856 → 7.835 | −0.77 |
+| Q19 | scene-recede | 25.02 → 24.99 | 0.8600 → 0.8603 | 7.815 → 7.808 | −0.16 |
+| Q19 | dolly-back-fast | 25.07 → 25.04 | 0.8700 → 0.8705 | 10.158 → 10.131 | −0.01 |
+
+Production RCAS lifts the high-contrast still scenes (Q12 +0.67 dB, Q18
++0.18 dB) and moves every motion window by 0.04 dB or less. The motion gap to
+FSR1 is not an RCAS effect. Under legacy RCAS the fast dolly read +0.01 (a
+tie) instead of −0.01. Regenerate the legacy columns with `--variant baseline`
+(the label defaults to the variant id).
 
 ## Offline perceptual metrics (LPIPS, ColorVideoVDP, FovVideoVDP)
 
@@ -264,7 +294,7 @@ not behind any `pnpm` script.
    ```bash
    python3 -m venv .venv-metrics
    .venv-metrics/bin/pip install torch lpips cvvdp pyfvvdp pillow
-   .venv-metrics/bin/python scripts/perceptual-metrics.py bench/results/raw/reference-quality/baseline-Q19-2x
+   .venv-metrics/bin/python scripts/perceptual-metrics.py bench/results/raw/reference-quality/production-Q19-2x
    ```
 
    `scripts/perceptual-metrics.py` scores LPIPS (AlexNet, per frame, mean per
@@ -274,8 +304,8 @@ not behind any `pnpm` script.
    indistinguishable from the reference. Lower LPIPS is better. The first run
    downloads LPIPS's AlexNet weights (233 MB, into `~/.cache/torch`).
 
-Verification run: Q19's dolly-back window (frames 150–165, ratio 2), about
-23 s on an M-series Mac. The perceptual metrics rank the modes the same way
+Verification run: Q19's dolly-back window (frames 150–165, ratio 2,
+`production`), about 23 s on an M-series Mac. The perceptual metrics rank the modes the same way
 PSNR and SSIM do on that window, including temporal trailing FSR1:
 
 | mode | PSNR dB | SSIM | LPIPS | ColorVideoVDP JOD | FovVideoVDP JOD |
@@ -283,7 +313,7 @@ PSNR and SSIM do on that window, including temporal trailing FSR1:
 | native | 34.40 | 0.9861 | 0.0165 | 9.620 | 9.508 |
 | bilinear | 23.54 | 0.8256 | 0.1729 | 6.521 | 7.719 |
 | spatial | 24.78 | 0.8703 | 0.0946 | 7.558 | 8.074 |
-| temporal | 24.64 | 0.8539 | 0.1301 | 7.062 | 7.857 |
+| temporal | 24.62 | 0.8543 | 0.1293 | 7.084 | 7.845 |
 
 ```bash
 node scripts/measure-reference-quality.mjs --scenario Q19 --frames dolly-back=150:165 --export-png --label perceptual-check
