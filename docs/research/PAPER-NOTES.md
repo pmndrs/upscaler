@@ -19,6 +19,35 @@ regenerate with the command given next to each pointer. The tracked evidence
 is the source, the measurement scripts, and the write-ups in
 [`bench/docs/`](../../bench/docs/).
 
+### Cross-cutting gap: evaluation against ground truth ([#10](https://github.com/pmndrs/upscaler/issues/10))
+
+Most entries below are measured for *stability* (same-phase churn, drift lag,
+ghost frames), not *correctness*. A publication-grade version of any of them
+needs what AMD's I3D 2025 joint denoising/upscaling evaluation has: references
+with many samples per pixel, full-reference metrics, a perceptual video metric,
+and scenes held out from tuning.
+
+- **Landed (2026-11-07):** `scripts/measure-reference-quality.mjs` renders a
+  64-spp display-res reference per frame. It scores native, bilinear, FSR1 and
+  temporal against it with PSNR, SSIM and a reference temporal error
+  (|Δoutput − Δreference|), and exports PNG sequences for LPIPS / ColorVideoVDP
+  / FovVideoVDP (`scripts/perceptual-metrics.py`, local-only). Baseline table
+  for Q0/Q1/Q4/Q12/Q18/Q19 at ratio 2, plus the commands that regenerate it:
+  [`bench/docs/REFERENCE-QUALITY.md`](../../bench/docs/REFERENCE-QUALITY.md).
+- **Still open:** held-out scenes. Every bench scenario so far was used for
+  tuning, so a quality claim needs scenes that never fed a constant. Perceptual
+  numbers for the full baseline (the recipe was verified on one window only).
+  A reference-quality A/B for each entry below whose claim is about image
+  quality, not stability.
+- **First findings the stability meters could not see:** (1) In motion,
+  temporal scores below FSR1 spatial in 7 of 8 motion windows (−0.13 to
+  −2.09 dB PSNR; the fast dolly ties) while churning less than both FSR1 and
+  the reference. That is "stable and wrong", and LPIPS and ColorVideoVDP agree
+  on the window checked. (2) The bench input renders without a negative
+  texture mip bias. A finer-LOD (`--scale 2`) reference scores Q1's temporal
+  output 1.9 dB lower, which is consistent with that, but it hasn't been
+  A/B'd yet.
+
 ---
 
 ## 1. Per-texel relative-difference metrics are biased under sub-pixel jitter

@@ -252,6 +252,24 @@ alpha is measured exactly — run it before and after touching the alpha resolve
 node scripts/measure-alpha-convergence.mjs --ratio 3
 ```
 
+### Against ground truth (reference quality)
+
+Every meter above measures *stability*: whether the output stops moving, and
+how far it trails a change. None of them can tell a stable, correct image from
+a stable, wrong one. `measure-reference-quality.mjs` scores the output against
+a 64-sample supersampled render of the same frame at display resolution (PSNR,
+SSIM, and a temporal error against the reference's own frame-to-frame change),
+for native, bilinear, FSR1 spatial and temporal:
+
+```bash
+node scripts/measure-reference-quality.mjs --scenario Q19 --ratio 2 --floor-samples 1024
+```
+
+Metric definitions, the reference's own error, the baseline table and the
+offline LPIPS / ColorVideoVDP / FovVideoVDP recipe are in
+[`REFERENCE-QUALITY.md`](REFERENCE-QUALITY.md). Run it before and after any
+change that trades sharpness or stability for something else.
+
 ---
 
 ## Benchmarking on a device
@@ -304,6 +322,7 @@ several runs — or several worktrees — can share a machine without colliding.
 | `measure-emitter-retention.mjs` | bench, `http://127.0.0.1:5199` | `--port` (9333) |
 | `measure-shading-restart.mjs` | bench, `http://127.0.0.1:5199` | `--port` (9333) |
 | `measure-receding-disocclusion.mjs` | bench, `http://127.0.0.1:5199` | `--port` (9333) |
+| `measure-reference-quality.mjs` | bench, `http://127.0.0.1:5199` | `--port` (9333) |
 | `verify-packed-guides.mjs` | its own `vite preview` on `--port` (a free port) | `--cdp-port` (a free port) |
 
 ```bash
