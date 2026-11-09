@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>S5 · Radiance cascades — TRAA vs upscaled</title>
+        <style>
+            html,
+            body {
+                margin: 0;
+                height: 100%;
+                overflow: hidden;
+                background: #0b0d10;
+            }
+            canvas {
+                display: block;
+            }
+            #hud {
+                position: fixed;
+                left: 12px;
+                top: 12px;
+                max-width: min(560px, calc(100vw - 24px));
+                padding: 8px 11px;
+                background: rgba(8, 10, 14, 0.8);
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                border-radius: 8px;
+                color: #cfd8e3;
+                font: 11px/1.5 ui-monospace, Menlo, monospace;
+                white-space: pre-wrap;
+                pointer-events: none;
+            }
+            #hud b {
+                color: #7dd3fc;
+            }
+            #hud .dim {
+                color: #7b8796;
+            }
+            #credits {
+                position: fixed;
+                left: 12px;
+                bottom: 10px;
+                color: #7b8796;
+                font: 11px/1.4 ui-sans-serif, system-ui, sans-serif;
+            }
+            #credits a {
+                color: #9fb3c8;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="hud"></div>
+        <div id="credits">
+            Radiance cascades GI from
+            <a href="https://github.com/mrdoob/three.js/pull/35349" target="_blank" rel="noopener">three.js#35349</a>
+            (zalo), after <a href="https://github.com/entropylost/chandra" target="_blank" rel="noopener">chandra</a>,
+            traced with <a href="https://github.com/gkjohnson/three-mesh-bvh" target="_blank" rel="noopener">three-mesh-bvh</a>.
+            Sponza by Frank Meinl, Crytek (CC BY 3.0), with chandra's materials.
+        </div>
+        <script type="module" src="./main.ts"></script>
+    </body>
+</html>

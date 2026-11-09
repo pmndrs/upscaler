@@ -3,7 +3,7 @@ import tseslint from 'typescript-eslint';
 import globals from 'globals';
 
 export default tseslint.config(
-    { ignores: ['dist/', 'node_modules/', 'bench/dist/', 'examples/dist/', 'examples/pixi3d/vendor/', '.claude/'] },
+    { ignores: ['dist/', 'node_modules/', 'bench/dist/', 'examples/dist/', 'examples/pixi3d/vendor/', 'examples/s5-radiance-cascades/RealtimeRadianceCascades.js', '.claude/'] },
     js.configs.recommended,
     ...tseslint.configs.recommended,
     {
