@@ -110,6 +110,7 @@ export default defineConfig(({ mode }) => {
                           s2fractal: resolve(root, 's2-fractal/index.html'),
                           s3howlow: resolve(root, 's3-how-low/index.html'),
                           s4convergence: resolve(root, 's4-convergence/index.html'),
+                          s5radiancecascades: resolve(root, 's5-radiance-cascades/index.html'),
                       },
             },
         },
