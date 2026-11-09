@@ -92,7 +92,10 @@ const params = {
     scene: 'Sponza',
     resolve: 'Upscaler' as Resolve,
     ratio: 2,
-    probeBasis: 'display px' as ProbeBasis,
+    // Probes coarsen with the render scale by default: the GI is diffuse and
+    // low-frequency, so it barely softens, and the probe work then scales with
+    // the render size too (Sponza 2×: GI 5.4 → 3.1 ms). TRAA is always native.
+    probeBasis: 'render px' as ProbeBasis,
     view: 'Lit',
     rays: '1 per 4 pixels',
     // Off by default (the demo's default is on): adaptive quality trades GI
@@ -601,7 +604,11 @@ resolveFolder
         if (params.probeBasis === 'render px') updateProbeLayout();
         updateOutput();
     });
-resolveFolder.add(params, 'probeBasis', ['display px', 'render px'] satisfies ProbeBasis[]).name('probes sized in').onChange(updateProbeLayout);
+resolveFolder
+    .add(params, 'probeBasis', ['render px', 'display px'] satisfies ProbeBasis[])
+    .name('probes sized in')
+    .listen()
+    .onChange(updateProbeLayout);
 resolveFolder.add(params, 'sharpness', 0, 1, 0.01).name('RCAS sharpness');
 resolveFolder
     .add(params, 'debug', {
