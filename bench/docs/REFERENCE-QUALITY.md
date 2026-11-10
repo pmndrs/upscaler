@@ -270,6 +270,125 @@ FSR1 is not an RCAS effect. Under legacy RCAS the fast dolly read +0.01 (a
 tie) instead of −0.01. Regenerate the legacy columns with `--variant baseline`
 (the label defaults to the variant id).
 
+## Why temporal trails FSR1 in motion (diagnosis, 2026-11-10)
+
+The baseline shows temporal behind FSR1 spatial on every Q4/Q19 motion window
+(−0.01 to −2.13 dB), while it leads on every still one. This section ranks
+the causes. Every number below is full-frame PSNR at ratio 2 with the
+`production` identity, on the worst segments: Q4 translate (200–215, mean
+motion 1.66 render px/frame), Q19 orbit-left (390–405, 1.77 px/frame) and
+Q4's slow first orbit (88–103, 0.31 px/frame). A positive number is dB
+recovered toward FSR1.
+
+### Ranking
+
+| # | cause | measured contribution | how |
+| --- | --- | --- | --- |
+| 1 | **Accumulation length under motion.** Every frame of history is a Catmull-Rom resample of the last, so at the full 24-frame setting a moving pixel's value is a long chain of resamples. The loss sits on thin high-contrast features (the floor's grid lines, fence edges, silhouettes) in both frequency bands. | **+2.58 / +1.72 / +1.58 dB** with a global `maxAccumulation` 2 (24.22 → 26.80, 23.81 → 25.53, 26.22 → 27.80) | `maxAccumulation` sweep 1 / 2 / 4 / 8 / 24 |
+| 2 | Single-frame upsample quality: Lanczos2 with dering versus EASU | −0.02 / −0.31 dB (`maxAccumulation` 1 against FSR1); this bounds what is left once #1 is fixed | `maxAccumulation` 1 |
+| 3 | Auto-exposure | +0.28 / −0.10 dB when off, mixed sign | `autoExposure: false` |
+| 4 | Luminance locks | +0.09 / 0.00 / +0.11 dB when off | `lockThinFeatures: false` |
+| 5 | Disocclusion, young history, screen-border band | 0.07 / 0.09 dB combined (error attribution, below); disoccluded 1.4 / 1.7 % of pixels, young (< 4 frames) 3.8 / 4.8 % | `analyze-reference-error.mjs` |
+| 6 | Shading-change detector | 0.00 / 0.00 dB | `detectShadingChanges: false` |
+| 7 | Input texture sharpness (negative mip bias; the mip-bias A/B on branch `claude/hopeful-lamport-58ad44`, setting `inputMipBias`) | the gap changes by +0.09 (Q4 translate) and −0.26 dB (Q19 orbit-left) at bias −1 | measured on the legacy-RCAS identity; not a driver |
+| — | Harness alignment | none: every mode peaks at reference offset 0 (temporal 24.22 dB at 0 against 19.27 / 19.13 at −1 / +1) | `--reference-offset −1 / 0 / 1` |
+
+**Why #1 and not the others.** The history under motion is mature, not young
+or rejected: the mean age is 21.7 / 21.4 of 24 frames, and the disoccluded,
+young and border classes together account for under 0.1 dB of the deficit.
+Locks and the shading detector are near-neutral. The signed temporal-minus-FSR1
+error map (`diff-temporal-spatial-f0200.png`) is red almost only along thin
+lines and edges. The deficit shows in both bands (σ 2 px): low 31.78 against
+36.23 dB and high 25.69 against 27.18 on Q4 translate, i.e. thin lines lose
+contrast, not just sharpness. Fetching history bilinearly instead of with
+Catmull-Rom costs another 0.55 / 0.90 dB (23.67 / 22.91), so the resampling
+filter is on the critical path. Shortening the chain helps for the same
+reason.
+
+**Why not a global cap.** `maxAccumulation` 4 everywhere keeps still-scene
+PSNR (Q1 28.47 against 28.55) but multiplies still-scene temporal error by 6
+(0.118 → 0.706/255): visible shimmer. The cap has to depend on motion.
+
+### Candidate fix: motion-adaptive accumulation cap (prototype, not shipped)
+
+`bench/src/candidates/shaders/accumulateVariants.ts` rewrites only the blend
+of production `ACCUMULATE_SHADER`. The effective `maxAccumulation` falls from
+the setting to `cap` as the pixel's motion rises from `lo` to `hi` render
+px/frame:
+`motionCap = mix(maxAccumulation, cap, smoothstep(lo, hi, motionTexels))`.
+It is wired through the bench-only `_accumulateShader` option, and the
+production shader and defaults are untouched. Identities, all on production
+RCAS:
+
+- `accumulate-motion-cap2-v1`: cap 2, ramp 0.5 → 1.5 px/frame.
+- `accumulate-motion-cap4-v1`: cap 4, ramp 0.5 → 1.5 px/frame.
+- `accumulate-motion-cap2-early-v1`: cap 2, ramp 0.05 → 0.5 px/frame. This
+  is the still-scene relax's own fade (`STILL_MOTION_LO/HI`), so the cap
+  engages exactly where the relax stops.
+
+PSNR in dB, with the difference to FSR1 in parentheses:
+
+| scenario | window | FSR1 | production temporal | cap 2 | cap 4 | cap 2 early | temporal error: production → cap 2 → cap 4 → cap 2 early |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Q0 | animated | 27.37 | 27.73 (+0.36) | 27.84 (+0.47) | 27.81 (+0.44) | 28.07 (+0.70) | 0.320 → 0.297 → 0.303 → 0.273 |
+| Q1 | still | 27.28 | 28.55 (+1.26) | 28.55 (+1.26) | 28.55 (+1.26) | 28.55 (+1.26) | 0.118 → 0.118 → 0.118 → 0.118 |
+| Q4 | orbit | 27.22 | 26.22 (−1.00) | 26.25 (−0.97) | 26.25 (−0.97) | 27.30 (+0.09) | 3.144 → 3.137 → 3.137 → 3.056 |
+| Q4 | translate | 26.35 | 24.22 (−2.13) | 26.18 (−0.17) | 25.83 (−0.51) | 26.76 (+0.42) | 9.920 → 7.472 → 7.830 → 7.217 |
+| Q4 | orbit-2 | 26.13 | 24.86 (−1.27) | 26.08 (−0.04) | 25.97 (−0.16) | 26.63 (+0.50) | 8.104 → 7.082 → 7.051 → 6.811 |
+| Q4 | hold | 26.83 | 27.69 (+0.86) | 27.77 (+0.95) | 27.76 (+0.93) | 27.79 (+0.96) | 0.132 → 0.131 → 0.132 → 0.131 |
+| Q12 | still | 36.63 | 38.57 (+1.94) | 38.57 (+1.94) | 38.57 (+1.94) | 38.57 (+1.94) | 0.022 → 0.022 → 0.022 → 0.022 |
+| Q18 | still | 16.46 | 20.89 (+4.43) | 20.89 (+4.43) | 20.89 (+4.43) | 20.89 (+4.43) | 2.445 → 2.445 → 2.445 → 2.445 |
+| Q19 | still | 25.75 | 26.37 (+0.62) | 26.37 (+0.62) | 26.37 (+0.62) | 26.37 (+0.62) | 0.115 → 0.115 → 0.115 → 0.115 |
+| Q19 | dolly-back | 24.78 | 24.62 (−0.16) | 24.84 (+0.06) | 24.83 (+0.05) | 25.03 (+0.25) | 8.273 → 8.119 → 8.077 → 8.040 |
+| Q19 | orbit-left | 25.50 | 23.81 (−1.69) | 24.99 (−0.51) | 24.85 (−0.65) | 25.51 (+0.01) | 9.877 → 8.255 → 8.393 → 7.873 |
+| Q19 | slide | 25.84 | 25.07 (−0.77) | 25.65 (−0.19) | 25.58 (−0.26) | 26.06 (+0.22) | 7.835 → 7.096 → 7.176 → 6.856 |
+| Q19 | scene-recede | 25.15 | 24.99 (−0.16) | 25.21 (+0.06) | 25.23 (+0.08) | 25.52 (+0.37) | 7.808 → 7.643 → 7.588 → 7.619 |
+| Q19 | dolly-back-fast | 25.06 | 25.04 (−0.01) | 25.32 (+0.27) | 25.36 (+0.30) | 25.32 (+0.27) | 10.131 → 9.807 → 9.738 → 9.826 |
+
+- **`accumulate-motion-cap2-early-v1` closes the motion gap.** Temporal goes
+  from −0.01…−2.13 dB below FSR1 to +0.01…+0.50 dB above it on all 8 motion
+  windows. Temporal error falls in every motion window, e.g. Q4 translate
+  9.92 → 7.22. Every still window (Q1, Q12, Q18, Q19 still, Q4 hold) is
+  unchanged to 0.01 dB with identical temporal error, because their motion
+  vectors are zero. Animated objects (Q0) gain +0.34 dB.
+- **The later ramp (0.5 → 1.5) misses slow motion.** Q4's first orbit, at
+  0.31 px/frame, stays at −0.97. Cap 4 lands within 0.4 dB of cap 2: it is
+  behind on the fastest lateral motion (Q4 translate 25.83 against 26.18)
+  and slightly ahead on scene-recede and the fast dolly.
+- **Holdout check (scenarios not used to choose the constants).** On Q2, the
+  slow aliasing dolly at 0.29 px/frame, temporal goes from −1.43 to
+  −0.46 dB against FSR1 (25.96 → 26.93; temporal error 3.28 → 3.10). On Q3,
+  object motion, it goes from +0.29 to +0.75.
+- **Not measured:** GPU cost (one `smoothstep` and `mix` per pixel, so
+  expected to be negligible but not timed), ratio 3, and the effect-graph
+  scenarios (Q6–Q8, Q14), which this harness doesn't support. Before
+  adoption: an ABBA timing run, ratio 3, and an interactive look at slow pans
+  for aliasing crawl. A 2-frame history under motion has less temporal AA to
+  give, although every motion window here already shows lower temporal error.
+
+### Reproduce
+
+```bash
+# Alignment: score against the reference one frame early / late
+node scripts/measure-reference-quality.mjs --scenario Q4 --frames translate=200:215 --modes native,spatial,temporal --reference-offset -1
+# Accumulation sweep (repeat for 1, 4, 8, 24, and on Q19 --frames orbit-left=390:405)
+node scripts/measure-reference-quality.mjs --scenario Q4 --frames translate=200:215 --modes temporal --settings '{"maxAccumulation":2}' --label acc2
+# Feature toggles: lockThinFeatures / detectShadingChanges / autoExposure
+node scripts/measure-reference-quality.mjs --scenario Q4 --frames translate=200:215 --modes temporal --settings '{"lockThinFeatures":false}' --label no-locks
+# Where the error lives (writes error-analysis.json and a signed diff PNG)
+node scripts/measure-reference-quality.mjs --scenario Q4 --frames translate=200:215 --modes spatial,temporal --save-diagnostics --label diag
+node scripts/analyze-reference-error.mjs bench/results/raw/reference-quality/diag-Q4-2x
+# Candidates (repeat per scenario: Q0 Q1 Q2 Q3 Q4 Q12 Q18 Q19)
+node scripts/measure-reference-quality.mjs --scenario Q4 --modes temporal --variant accumulate-motion-cap2-early-v1
+node scripts/measure-reference-quality.mjs --scenario Q4 --frames translate=200:215 --modes temporal --variant accumulate-bilinear-history-v1
+```
+
+Every temporal run also records history-age, disocclusion and motion
+statistics per window (`guides` in the summary). Note that the history
+texture's `.a` is age ÷ `maxAccumulation` (0–1), although
+`TemporalGuides.history` and `docs/temporal-guides.md` describe it in
+frames. The script converts it to frames.
+
 ## Offline perceptual metrics (LPIPS, ColorVideoVDP, FovVideoVDP)
 
 PSNR and SSIM are fast and need no dependencies, but they are not perceptual,

@@ -2,6 +2,10 @@ declare type BenchmarkMode = 'interactive' | 'performance' | 'capture';
 declare type BenchmarkVariantId =
     | 'baseline'
     | 'production'
+    | 'accumulate-motion-cap2-v1'
+    | 'accumulate-motion-cap4-v1'
+    | 'accumulate-motion-cap2-early-v1'
+    | 'accumulate-bilinear-history-v1'
     | 'local-baseline-5d6a65e'
     | 'local-baseline-through-e00-harness'
     | 'rcas-fsr315-limiter'

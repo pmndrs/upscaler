@@ -97,6 +97,7 @@ temporal path and the FSR1 spatial path. Shader names refer to
 | --- | --- | --- |
 | `baseline`: the page default, so the interactive bench, `measure-convergence.mjs` and `measure-drift-lag.mjs` | `RCAS_LEGACY_SHADER` | **`RCAS_SHADER` (production)** |
 | `production`: the shipping pipeline, the default of `measure-reference-quality.mjs` | **`RCAS_SHADER` (production)** | **`RCAS_SHADER` (production)** |
+| `accumulate-*` (`motion-cap2-v1`, `motion-cap4-v1`, `motion-cap2-early-v1`, `bilinear-history-v1`): `production` with only the accumulate shader swapped (REFERENCE-QUALITY.md, motion-gap diagnosis) | `RCAS_SHADER` | `RCAS_SHADER` |
 | `local-baseline-5d6a65e`, `local-baseline-through-e00-harness`: the frozen E00 pair that `run-benchmark.mjs` maps `baseline` to | `RCAS_LEGACY_SHADER` | `RCAS_LEGACY_SHADER` |
 | `rcas-fsr315-limiter`, `rcas-fsr315-numeric` | `RCAS_PER_TAP_SHADER` | `RCAS_PER_TAP_SHADER` |
 | `rcas-hoisted-exposure-v1` / `rcas-tonemap-space-v1` | the experiment shader of the same name | the same shader |

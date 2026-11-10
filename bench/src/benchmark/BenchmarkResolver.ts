@@ -10,6 +10,7 @@ import {
 
 type CrossFrameReconstruct = { shader: string; cameraCompensated: boolean };
 import { CandidateUpscaler } from '../candidates/CandidateUpscaler';
+import { ACCUMULATE_VARIANTS } from '../candidates/shaders/accumulateVariants';
 import {
     buildShadingRecurrenceShader,
     SHADING_CHANGE_FRAME_PAIR_SHADER,
@@ -192,6 +193,7 @@ function createProductionUpscaler(
     shadingChangeShader?: string,
     crossFrameReconstruct?: CrossFrameReconstruct,
     depthClipShader?: string,
+    accumulateShader?: string,
 ): Upscaler {
     // The bench always times: its HUD and the benchmark protocol read the timer.
     const options = {
@@ -202,6 +204,7 @@ function createProductionUpscaler(
         _shadingChangeShader: shadingChangeShader,
         _crossFrameReconstruct: crossFrameReconstruct,
         _depthClipShader: depthClipShader,
+        _accumulateShader: accumulateShader,
     };
     return new Upscaler(options);
 }
@@ -232,6 +235,7 @@ export class BaselineBenchmarkResolver extends BenchmarkResolverAdapter {
         shadingChangeShader?: string,
         crossFrameReconstruct?: CrossFrameReconstruct,
         depthClipShader?: string,
+        accumulateShader?: string,
     ) {
         super(
             createProductionUpscaler(
@@ -241,6 +245,7 @@ export class BaselineBenchmarkResolver extends BenchmarkResolverAdapter {
                 shadingChangeShader,
                 crossFrameReconstruct,
                 depthClipShader,
+                accumulateShader,
             ),
             metadata,
         );
@@ -306,6 +311,31 @@ export function createProductionRcasResolver(
         metadata,
         RCAS_SHADER,
         RCAS_SHADER,
+    );
+}
+
+/**
+ * Creates a motion-gap accumulate candidate (bench/docs/REFERENCE-QUALITY.md,
+ * "Why temporal trails FSR1 in motion"): the `production` identity (production
+ * RCAS on both paths) with only the accumulate shader swapped for one of
+ * bench/src/candidates/shaders/accumulateVariants.ts.
+ * @param renderer - Initialized three WebGPU renderer
+ * @param metadata - Registry metadata carrying the candidate identity
+ * @returns One candidate resolver instance
+ */
+export function createAccumulateVariantResolver(
+    renderer: unknown,
+    metadata: BenchmarkVariantMetadata,
+): BenchmarkResolver {
+    return new BaselineBenchmarkResolver(
+        renderer as THREE.WebGPURenderer,
+        metadata,
+        RCAS_SHADER,
+        RCAS_SHADER,
+        undefined,
+        undefined,
+        undefined,
+        ACCUMULATE_VARIANTS[metadata.id as keyof typeof ACCUMULATE_VARIANTS],
     );
 }
 
