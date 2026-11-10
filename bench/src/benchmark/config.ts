@@ -1,6 +1,7 @@
 const RATIOS = [1, 1.5, 2, 3] as const;
 const VARIANTS = [
     'baseline',
+    'production',
     'local-baseline-5d6a65e',
     'local-baseline-through-e00-harness',
     'rcas-fsr315-limiter',

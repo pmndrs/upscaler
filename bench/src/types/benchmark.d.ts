@@ -1,6 +1,7 @@
 declare type BenchmarkMode = 'interactive' | 'performance' | 'capture';
 declare type BenchmarkVariantId =
     | 'baseline'
+    | 'production'
     | 'local-baseline-5d6a65e'
     | 'local-baseline-through-e00-harness'
     | 'rcas-fsr315-limiter'
