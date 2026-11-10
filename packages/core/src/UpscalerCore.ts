@@ -98,6 +98,9 @@ export type UpscalerCoreInternalOptions<THandle = GPUTexture> = UpscalerCoreOpti
     // Bench-only: a depth-clip shader with production's bindings — the
     // issue #79 variants in shaders/reconstructVariants.ts.
     _depthClipShader?: string;
+    // Bench-only: an accumulate shader with production's bindings — the
+    // motion-gap candidates in bench/src/candidates/shaders/accumulateVariants.ts.
+    _accumulateShader?: string;
     // Bench-only: a single-pass cross-frame reconstruct (the frozen pre-#67
     // form, or its camera-compensated variant — shaders/reconstructVariants.ts)
     // in place of the production scatter + depth clip pair.
@@ -145,6 +148,7 @@ export class UpscalerCore<THandle = GPUTexture> {
     private readonly _spatialRcasShader: string | null;
     private readonly _shadingChangeShader: string | null;
     private readonly _depthClipShader: string | null;
+    private readonly _accumulateShader: string | null;
     private readonly _crossFrameReconstruct: { shader: string; cameraCompensated: boolean } | null;
     private _constants!: ConstantsBuffer;
     // Null while GPU timing is off: nothing is allocated, nothing attached.
@@ -288,6 +292,7 @@ export class UpscalerCore<THandle = GPUTexture> {
         this._spatialRcasShader = options._spatialRcasShader ?? null;
         this._shadingChangeShader = options._shadingChangeShader ?? null;
         this._depthClipShader = options._depthClipShader ?? null;
+        this._accumulateShader = options._accumulateShader ?? null;
         this._crossFrameReconstruct = options._crossFrameReconstruct ?? null;
         this._reprojectData = options._reprojectData ?? null;
     }
@@ -382,7 +387,7 @@ export class UpscalerCore<THandle = GPUTexture> {
             spatialRcas: ['rcas', this._spatialRcasShader ?? this._rcasShader],
             reconstruct: ['reconstruct', this._crossFrameReconstruct?.shader ?? RECONSTRUCT_SHADER],
             depthClip: ['depth-clip', this._depthClipShader ?? DEPTH_CLIP_SHADER],
-            accumulate: ['accumulate', ACCUMULATE_SHADER],
+            accumulate: ['accumulate', this._accumulateShader ?? ACCUMULATE_SHADER],
             exposure: ['exposure', LUMINANCE_PYRAMID_SHADER],
             generateReactive: ['gen-reactive', GENERATE_REACTIVE_SHADER],
             shadingChange: ['shading-change', this._shadingChangeShader ?? SHADING_CHANGE_SHADER],
