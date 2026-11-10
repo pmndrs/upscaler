@@ -65,6 +65,9 @@ Live records, kept current as findings land:
 
 - [FSR 3.1.5 parity report](research/PARITY.md): where this implementation matches
   and diverges from FSR 3.1.5, and the measurements behind each choice.
+- [Albedo demodulation (design draft)](research/ALBEDO-DEMODULATION.md): an optional
+  albedo input so the temporal path accumulates lighting and texture in separate
+  histories; the first step toward a fused GI/denoise path. Proposal, not started.
 - [Paper notes](research/PAPER-NOTES.md): a running tracker of write-up-worthy
   findings (*surprised us + measured + others would hit it*) and what each still needs
   for publication ([#10](https://github.com/pmndrs/upscaler/issues/10)).
