@@ -8,7 +8,8 @@
  * profile, like measure-exposure-compile.mjs):
  * - compile time of four forms: serial and parallel, each with the shipped
  *   uniform row bound and with it replaced by the constant (the DXC case of
- *   docs/windows-followups.md); the order alternates between runs
+ *   docs/windows-followups.md); the order rotates between runs, and a per-run
+ *   constant keeps every cache (Chrome, Dawn, the macOS Metal cache) cold
  * - readback on synthetic HDR inputs (noise, smooth fields, gradients, sparse
  *   emitters, black, grey, the compile script's 64×64 fixture) under five
  *   flag cases, in the shipped rgba16float and, to see the difference before
@@ -123,13 +124,27 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
     //* Compile (timed, in the requested order)
     const pipelines = {};
     const compileMs = {};
+    // A fresh profile defeats Chrome's shader cache, but macOS keeps its own
+    // system-wide Metal cache keyed on the generated source (Tint renames
+    // identifiers, so a new name is not enough). The timed compiles carry a
+    // per-run constant in a never-taken branch (frameIndex is 0 here), so each
+    // is cold everywhere; readback and timing use the pristine sources below.
+    const nonce = 1 + Math.floor(Math.random() * 0x7ffffff0);
+    const coldSource = (code) => code.replace(
+        '    textureStore(exposureOut,',
+        `    if (C.frameIndex == ${nonce}u) { exposure = exposure + 1.0; }\n    textureStore(exposureOut,`,
+    );
     for (const name of order) {
         const begin = performance.now();
-        const shader = device.createShaderModule({ code: sources[name] });
-        pipelines[name] = await device.createComputePipelineAsync({ layout: 'auto', compute: { module: shader, entryPoint: 'main' } });
+        const shader = device.createShaderModule({ code: coldSource(sources[name]) });
+        await device.createComputePipelineAsync({ layout: 'auto', compute: { module: shader, entryPoint: 'main' } });
         compileMs[name] = performance.now() - begin;
         const info = await shader.getCompilationInfo();
         for (const message of info.messages) if (message.type === 'error') errors.push(`${name}: ${message.message}`);
+    }
+    for (const name of order) {
+        const shader = device.createShaderModule({ code: sources[name] });
+        pipelines[name] = await device.createComputePipelineAsync({ layout: 'auto', compute: { module: shader, entryPoint: 'main' } });
     }
     const tapPipeline = await device.createComputePipelineAsync({
         layout: 'auto', compute: { module: device.createShaderModule({ code: tapSource }), entryPoint: 'main' },
