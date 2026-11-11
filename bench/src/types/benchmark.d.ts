@@ -14,6 +14,7 @@ declare type BenchmarkVariantId =
     | 'depth-clip-mean-vote-v1'
     | 'depth-clip-upstream-tolerance-v1'
     | 'depth-clip-upstream-v1'
+    | 'exposure-serial-v1'
     | 'source-filter-bundle-v1'
     | 'source-structural-bundle-v1'
     | 'source-spd-resolver-bundle-v1'

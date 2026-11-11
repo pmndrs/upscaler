@@ -48,6 +48,7 @@ type UpscalerInternalOptions = UpscalerOptions & {
     _spatialRcasShader?: string;
     _shadingChangeShader?: string;
     _depthClipShader?: string;
+    _exposureShader?: string;
     _crossFrameReconstruct?: { shader: string; cameraCompensated: boolean };
 };
 

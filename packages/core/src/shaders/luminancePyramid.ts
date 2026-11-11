@@ -1,51 +1,13 @@
 import { WGSL_COLOR, WGSL_CONSTANTS } from './common';
 import { assembleShader } from './wgsl';
 
-/**
- * Luminance reduction → auto-exposure (FSR2/3's "compute luminance pyramid"
- * stage, in the pragmatic form the rest of this port needs).
- *
- * FSR2 downsamples the input into a full luminance mip chain with a single
- * atomic SPD dispatch and reads the coarsest mip for exposure. Nothing here
- * consumes the intermediate mips (the shading-change detector does its own
- * fused workgroup-local reduction in shadingChange.ts), so this pass computes
- * only the value that is actually used: a single
- * scene-average luminance, reduced in one workgroup, mapped to an exposure and
- * eased over time for eye-adaptation.
- *
- * The exposure conditions the invertible-tonemap accumulation so a very bright
- * or very dark HDR scene lands in the same working range (steadier variance
- * clip + firefly guard). It is **divided back out before display**, so it does
- * not change final image brightness — only accumulation stability.
- *
- * Runs as a single 8×8 workgroup (dispatch one group); only invocation (0,0)
- * does the reduction. The grid-overrun guard is a formality here — display size
- * is always ≥ 8, so no lane returns early.
- *
- * Bindings:
- * - 1: scene color, render size (linear HDR)
- * - 2: linear clamp sampler
- * - 3: previous frame's exposure (rgba16float; r = exposure, g = avg luma)
- * - 4: exposure out (rgba16float storage, 1×1)
- * - 5: external exposure (app-supplied; r = exposure). Read only when
- *      FLAG_EXTERNAL_EXPOSURE is set — else a 1×1 dummy is bound and ignored.
- * - 6: host pre-exposure (app-supplied; r = the pre-exposure baked into this
- *      frame's input color). Published in the output's .b so accumulate can
- *      ratio-correct history across a change (FSR3's DeltaPreExposure). A zero
- *      dummy (no input) publishes 1.0, keeping the correction inert.
- * - 7: reset signal (app-supplied; `.r > 0.5` at texel (0, 0) = this frame is
- *      a reset, e.g. a GPU cut detector's flag). Folded with FLAG_RESET into
- *      the output's .a, which every later pass of the frame reads as "reset"
- *      — so a GPU-side cut needs no readback and no per-pass binding. The
- *      zero dummy (no input) reads as "no reset", keeping this inert.
- */
-export const LUMINANCE_PYRAMID_SHADER = assembleShader(
-    // Exposure names the final reserved slot of the shared 96-byte layout.
-    // Other passes keep it as padding; the writer always supplies 32 here.
-    WGSL_CONSTANTS.replace('_pad            : u32,    // offset 92',
-        'exposureTaps    : u32,    // offset 92 — fixed metering grid, uniform loop bound'),
-    WGSL_COLOR,
-    /* wgsl */ `
+// Exposure names the final reserved slot of the shared 96-byte layout.
+// Other passes keep it as padding; the writer always supplies 32 here.
+const EXPOSURE_CONSTANTS = WGSL_CONSTANTS.replace('_pad            : u32,    // offset 92',
+    'exposureTaps    : u32,    // offset 92 — fixed metering grid, uniform loop bound');
+
+// Bindings and tuning constants, shared by the production and frozen forms.
+const EXPOSURE_HEAD = /* wgsl */ `
 @group(0) @binding(1) var inputColor : texture_2d<f32>;
 @group(0) @binding(2) var linearSampler : sampler;
 @group(0) @binding(3) var prevExposure : texture_2d<f32>;
@@ -86,24 +48,10 @@ const ADAPT_SPEED : f32 = 2.5;
 // Exposure is divided back out before display, so resting up to 1/16 stop off
 // target changes nothing visible.
 const ADAPT_DEADBAND_STOPS : f32 = 0.0625;
+`;
 
-@compute @workgroup_size(8, 8)
-fn main(@builtin(global_invocation_id) gid : vec3u) {
-    if (any(vec2f(gid.xy) >= C.displaySize)) { return; }
-    // Single-thread reduction — the other 63 lanes of the lone workgroup idle.
-    if (any(gid.xy != vec2u(0u))) { return; }
-
-    // Geometric mean of luminance (average in log space) resists a few bright
-    // pixels dragging the whole exposure, matching FSR2's log-average.
-    var logSum = 0.0;
-    for (var y = 0u; y < C.exposureTaps; y = y + 1u) {
-        for (var x = 0u; x < EXPOSURE_TAPS; x = x + 1u) {
-            let uv = (vec2f(f32(x), f32(y)) + 0.5) / f32(EXPOSURE_TAPS);
-            let c = textureSampleLevel(inputColor, linearSampler, uv, 0.0).rgb;
-            logSum = logSum + log2(max(luma(c), 1.0e-4));
-        }
-    }
-    // Meter host-invariantly (FSR2 divides pre-exposure out of every input
+// Host pre-exposure, target, adaptation and overrides, from the metered logSum.
+const EXPOSURE_PUBLISH = /* wgsl */ `    // Meter host-invariantly (FSR2 divides pre-exposure out of every input
     // load): the app already metered what it baked in, so a host pre-exposure
     // step must not send auto-exposure re-adapting — that multi-frame
     // conditioning drift would desynchronize history from the current frame
@@ -146,5 +94,125 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
     // .a is the resolved reset, read by shading change and accumulate.
     textureStore(exposureOut, vec2i(0), vec4f(exposure, avgLum, host, select(0.0, 1.0, reset)));
 }
-`,
+`;
+
+/**
+ * Luminance reduction → auto-exposure (FSR2/3's "compute luminance pyramid"
+ * stage, in the pragmatic form the rest of this port needs).
+ *
+ * FSR2 downsamples the input into a full luminance mip chain with a single
+ * atomic SPD dispatch and reads the coarsest mip for exposure. Nothing here
+ * consumes the intermediate mips (the shading-change detector does its own
+ * fused workgroup-local reduction in shadingChange.ts), so this pass computes
+ * only the value that is actually used: a single
+ * scene-average luminance, reduced in one workgroup, mapped to an exposure and
+ * eased over time for eye-adaptation.
+ *
+ * The exposure conditions the invertible-tonemap accumulation so a very bright
+ * or very dark HDR scene lands in the same working range (steadier variance
+ * clip + firefly guard). It is **divided back out before display**, so it does
+ * not change final image brightness — only accumulation stability.
+ *
+ * Runs as a single 8×8 workgroup (dispatch one group). All 64 invocations
+ * share the 1024 metering taps (16 each), a workgroup-memory tree sums their
+ * partial log-sums, and invocation 0 maps the result to an exposure. The
+ * grid-overrun guard sits after the barriers and is a formality here —
+ * display size is always ≥ 8, so no lane returns early.
+ *
+ * Bindings:
+ * - 1: scene color, render size (linear HDR)
+ * - 2: linear clamp sampler
+ * - 3: previous frame's exposure (rgba16float; r = exposure, g = avg luma)
+ * - 4: exposure out (rgba16float storage, 1×1)
+ * - 5: external exposure (app-supplied; r = exposure). Read only when
+ *      FLAG_EXTERNAL_EXPOSURE is set — else a 1×1 dummy is bound and ignored.
+ * - 6: host pre-exposure (app-supplied; r = the pre-exposure baked into this
+ *      frame's input color). Published in the output's .b so accumulate can
+ *      ratio-correct history across a change (FSR3's DeltaPreExposure). A zero
+ *      dummy (no input) publishes 1.0, keeping the correction inert.
+ * - 7: reset signal (app-supplied; `.r > 0.5` at texel (0, 0) = this frame is
+ *      a reset, e.g. a GPU cut detector's flag). Folded with FLAG_RESET into
+ *      the output's .a, which every later pass of the frame reads as "reset"
+ *      — so a GPU-side cut needs no readback and no per-pass binding. The
+ *      zero dummy (no input) reads as "no reset", keeping this inert.
+ */
+export const LUMINANCE_PYRAMID_SHADER = assembleShader(
+    EXPOSURE_CONSTANTS,
+    WGSL_COLOR,
+    EXPOSURE_HEAD + /* wgsl */ `
+// Lanes per axis of the 8×8 workgroup that shares the metering grid.
+const EXPOSURE_LANES : u32 = 8u;
+// One partial log-sum per lane; the tree below folds them into slot 0.
+var<workgroup> laneLogSums : array<f32, 64>;
+
+@compute @workgroup_size(8, 8)
+fn main(
+    @builtin(global_invocation_id) gid : vec3u,
+    @builtin(local_invocation_index) lane : u32,
+) {
+    // Geometric mean of luminance (average in log space) resists a few bright
+    // pixels dragging the whole exposure, matching FSR2's log-average.
+    // The 64 lanes split the 32×32 grid: lane (x, y) takes rows y, y + 8, …
+    // and in each row columns x, x + 8, x + 16, x + 24, so 16 taps a lane with
+    // the serial form's UVs and per-tap math. Only the summation order differs
+    // (16-tap lane sums, then a 64-way tree). The row loop keeps the uniform
+    // bound that holds DXC's compile time down (docs/windows-followups.md); the
+    // column loop is 4 constant steps. gid is the local id: one workgroup runs.
+    var logSum = 0.0;
+    for (var y = gid.y; y < C.exposureTaps; y = y + EXPOSURE_LANES) {
+        for (var i = 0u; i < EXPOSURE_TAPS / EXPOSURE_LANES; i = i + 1u) {
+            let x = gid.x + i * EXPOSURE_LANES;
+            let uv = (vec2f(f32(x), f32(y)) + 0.5) / f32(EXPOSURE_TAPS);
+            let c = textureSampleLevel(inputColor, linearSampler, uv, 0.0).rgb;
+            logSum = logSum + log2(max(luma(c), 1.0e-4));
+        }
+    }
+    laneLogSums[lane] = logSum;
+    workgroupBarrier();
+    for (var stride = 32u; stride > 0u; stride = stride >> 1u) {
+        if (lane < stride) {
+            laneLogSums[lane] = laneLogSums[lane] + laneLogSums[lane + stride];
+        }
+        workgroupBarrier();
+    }
+
+    // Both returns come after the last barrier, which every lane must reach.
+    if (any(vec2f(gid.xy) >= C.displaySize)) { return; }
+    if (lane != 0u) { return; }
+    logSum = laneLogSums[0];
+
+` + EXPOSURE_PUBLISH,
+);
+
+/**
+ * The single-invocation form that shipped until the parallel metering above:
+ * invocation (0,0) takes all 1024 taps in row-major order while the other 63
+ * lanes return. Frozen for the bench identity `exposure-serial-v1`, the
+ * frozen candidate bundles and scripts/measure-exposure-parallel.mjs
+ * (bench/docs/NEXT-STEPS.md §16). Its metering loop is frozen; the shared head
+ * and epilogue are not, so it carries the GPU reset signal (binding 7, the
+ * resolved reset in .a, issue #102) like every exposure form — the late stage
+ * binds it whichever form runs, and shading change / accumulate read that .a.
+ */
+export const LUMINANCE_PYRAMID_SERIAL_SHADER = assembleShader(
+    EXPOSURE_CONSTANTS,
+    WGSL_COLOR,
+    EXPOSURE_HEAD + /* wgsl */ `
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) gid : vec3u) {
+    if (any(vec2f(gid.xy) >= C.displaySize)) { return; }
+    // Single-thread reduction — the other 63 lanes of the lone workgroup idle.
+    if (any(gid.xy != vec2u(0u))) { return; }
+
+    // Geometric mean of luminance (average in log space) resists a few bright
+    // pixels dragging the whole exposure, matching FSR2's log-average.
+    var logSum = 0.0;
+    for (var y = 0u; y < C.exposureTaps; y = y + 1u) {
+        for (var x = 0u; x < EXPOSURE_TAPS; x = x + 1u) {
+            let uv = (vec2f(f32(x), f32(y)) + 0.5) / f32(EXPOSURE_TAPS);
+            let c = textureSampleLevel(inputColor, linearSampler, uv, 0.0).rgb;
+            logSum = logSum + log2(max(luma(c), 1.0e-4));
+        }
+    }
+` + EXPOSURE_PUBLISH,
 );

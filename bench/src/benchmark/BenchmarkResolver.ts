@@ -21,6 +21,7 @@ import {
     RCAS_SHADER,
     RCAS_TONEMAP_SPACE_SHADER,
 } from '@pmndrs/upscaler-core/shaders/rcas';
+import { LUMINANCE_PYRAMID_SERIAL_SHADER } from '@pmndrs/upscaler-core/shaders/luminancePyramid';
 
 interface BenchmarkTimerBridge {
     readonly enabled: boolean;
@@ -192,6 +193,7 @@ function createProductionUpscaler(
     shadingChangeShader?: string,
     crossFrameReconstruct?: CrossFrameReconstruct,
     depthClipShader?: string,
+    exposureShader?: string,
 ): Upscaler {
     // The bench always times: its HUD and the benchmark protocol read the timer.
     const options = {
@@ -202,6 +204,7 @@ function createProductionUpscaler(
         _shadingChangeShader: shadingChangeShader,
         _crossFrameReconstruct: crossFrameReconstruct,
         _depthClipShader: depthClipShader,
+        _exposureShader: exposureShader,
     };
     return new Upscaler(options);
 }
@@ -232,6 +235,7 @@ export class BaselineBenchmarkResolver extends BenchmarkResolverAdapter {
         shadingChangeShader?: string,
         crossFrameReconstruct?: CrossFrameReconstruct,
         depthClipShader?: string,
+        exposureShader?: string,
     ) {
         super(
             createProductionUpscaler(
@@ -241,6 +245,7 @@ export class BaselineBenchmarkResolver extends BenchmarkResolverAdapter {
                 shadingChangeShader,
                 crossFrameReconstruct,
                 depthClipShader,
+                exposureShader,
             ),
             metadata,
         );
@@ -448,5 +453,29 @@ export function createDepthClipVariantResolver(
         undefined,
         undefined,
         buildDepthClipVariant(options),
+    );
+}
+
+/**
+ * Creates the `exposure-serial-v1` identity: the `baseline` pipeline (same
+ * frozen temporal RCAS, production spatial RCAS) with the exposure pass on the
+ * frozen single-invocation metering it replaced (NEXT-STEPS §16).
+ * @param renderer - Initialized three WebGPU renderer
+ * @param metadata - Registry metadata carrying the experiment identity
+ * @returns One experiment resolver instance
+ */
+export function createExposureSerialResolver(
+    renderer: unknown,
+    metadata: BenchmarkVariantMetadata,
+): BenchmarkResolver {
+    return new BaselineBenchmarkResolver(
+        renderer as THREE.WebGPURenderer,
+        metadata,
+        RCAS_LEGACY_SHADER,
+        RCAS_SHADER,
+        undefined,
+        undefined,
+        undefined,
+        LUMINANCE_PYRAMID_SERIAL_SHADER,
     );
 }
