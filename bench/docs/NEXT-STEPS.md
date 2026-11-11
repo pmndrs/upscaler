@@ -1671,6 +1671,98 @@ motion does.
 cross-frame identity disoccludes **44.4%** of the interior (80% of pixels young, mean age
 0.21); production **0.49%** (mean age 0.75).
 
+## 16. Auto-exposure metering on one lane — DONE on Metal, Windows PENDING (2026-11-11)
+
+**Problem.** `luminancePyramid.ts` dispatched one 8×8 workgroup, and invocation (0,0)
+took all 1024 bilinear metering taps (32×32 grid, `log2(max(luma, 1e-4))`) in row-major
+order while the other 63 lanes returned. That serial chain is the whole cost of the
+pass: ~0.03–0.06 ms on the RTX 3060 Laptop and ~0.17 ms in-pipeline (0.34–0.38 ms
+isolated) on the Intel UHD.
+
+**Change.** Every lane takes 16 of the same taps: lane (x, y) takes rows y, y + 8, …
+and in each row columns x, x + 8, x + 16, x + 24. UVs and per-tap math are unchanged.
+A 6-step workgroup-memory tree sums the 64 partials, then invocation 0 runs the
+unchanged adaptation, override and pre-exposure code. The row loop keeps the uniform
+`C.exposureTaps` bound behind the DXC compile fix
+([windows-followups](../../docs/windows-followups.md)); the column loop is 4 constant
+steps. The grid guard moves after the last barrier. The old form is frozen,
+source-identical (fingerprint `30144ae9`), as `LUMINANCE_PYRAMID_SERIAL_SHADER`: bench
+identity `exposure-serial-v1` (`baseline` with only that pass swapped, through a
+bench-only `_exposureShader`) and the frozen candidate bundles.
+
+**Correctness.** Only the order of the f32 additions changes, so the log-sum differs in
+its last bits. An order-preserving parallel form would need a serial pass over 1024
+values anyway, so none was built. `scripts/measure-exposure-parallel.mjs` checks the
+difference three ways (Apple M5 Pro, Metal-3):
+
+- *Synthetic inputs, shipped rgba16float:* 26 inputs (log-uniform noise 2^-14–2^10,
+  smooth lit fields ±4 stops, a gradient, sparse 50.0 emitters on black, black, grey,
+  the compile script's 64×64 fixture; 960×540 and 1920×1080) × 5 flag cases (auto reset,
+  auto adapt, manual, external, host pre-exposure). All 130 read back **bit-identical**
+  to the serial form (0 f16 ulps on every channel).
+- *The same, in an rgba32float copy:* exposure max relative difference 1.0e-5, avg luma
+  6.7e-5 (black and sparse inputs, whose 1024 equal large-negative logs accumulate the
+  most rounding). Smooth fields stay under 7e-7. All of these are under f16's half-ulp
+  (2.4e-4), so they round away. f16 identity is likely, not guaranteed: a value close
+  to an f16 rounding boundary can still move by 1 ulp.
+- *Which order is closer to exact:* a tap-dump shader hands the CPU the GPU's own 1024
+  per-tap values. The CPU reproduces both forms' f32 sums bit-exactly in all 130 cases.
+  Against the exact (f64) sum, the serial form's log-sum is off by up to 0.10 and the
+  parallel form's by up to 0.0021. The tree is the more accurate order.
+- *Bench scenes:* Q0, Q1, Q3, Q9 (exposure steps), Q10 (cut + resize) and Q11 (host
+  pre-exposure), 240 frames each at ratio 2, 1920×1080, `baseline` vs
+  `exposure-serial-v1`, with the published exposure guide read back after every frame.
+  Exposure (.r) and host pre-exposure (.b) are **identical on all 1440 frames**. Avg luma
+  (.g, which no shader reads; it is published in `guides.exposure`) differs by 1 f16 ulp
+  on 4 frames (Q0 1, Q3 2, Q10 1). Every downstream pass reads only .r and .b, so the
+  upscaled frames on these runs are unchanged.
+- *Captures:* `run-benchmark.mjs --mode capture --smoke --ratios 2 --scenarios
+  Q0,Q1,Q3,Q9,Q10,Q11 --reloads 1 --variant baseline --comparison exposure-serial-v1`:
+  649 of 652 A-B PNGs are byte-identical. The other 3 (Q9 f184 locks view, Q11 f149
+  and f179 final, at most a few pixels) were captured again with `--reloads 2`, and
+  all 48 A-B, 12 A-A and 12 B-B pairs of those tuples came back byte-identical. The
+  first-pass differences were capture noise under load, not the change.
+
+**Timing** (Apple M5 Pro, worktree, other agents' GPU jobs running, so same-run ratios
+only; 1-minute load average 13–21 during the isolated runs, 10–13 during the pipeline
+runs). Isolated pass: `measure-exposure-parallel.mjs`, 7 runs × 128 ABBA timestamp
+samples per form. Pipeline: `run-benchmark.mjs --smoke --blocks 1 --warmup 240
+--samples 300 --variant baseline --comparison exposure-serial-v1`, 3 invocations per
+ratio at 1920×1080 display. One block per invocation, because longer runs here failed
+at about the 8th page load: Metal could not allocate the timer's query set
+("Cannot allocate sample buffer"). A/B ratios are medians over the 3 blocks.
+
+| measurement | serial | parallel | parallel / serial |
+| --- | ---: | ---: | ---: |
+| isolated pass, 960×540 input | 0.078 ms | 0.012 ms | 0.15 (per-run 0.14–0.23) |
+| isolated pass, 1920×1080 input | 0.055 ms | 0.0070 ms | 0.13 (per-run 0.125–0.133) |
+| pipeline `exposure`, ratio 1 (1920×1080 render) | 0.111 ms | 0.012 ms | 0.11 (0.094–0.116) |
+| pipeline `exposure`, ratio 1.5 | 0.080 ms | 0.011 ms | 0.14 (0.132–0.141) |
+| pipeline `exposure`, ratio 2 | 0.070 ms | 0.010 ms | 0.15 (0.146–0.156) |
+| pipeline `exposure`, ratio 3 | 0.064 ms | 0.0093 ms | 0.15 (0.144–0.151) |
+| pipeline `compute-sum`, ratios 1 / 1.5 / 2 / 3 | | | 0.78 / 1.00 / 0.98 / 0.94 |
+
+In every one of the 12 blocks the exposure pass is 6–10× faster: 55–100 µs saved per
+frame. The whole-pipeline sums do not resolve that saving. Every invocation drifted
+upward through its legs (compute-sum A1 < B1 < B2 < A2, up to +50%), so the noise
+floor was 35–54%. The expected total saving is the pass delta, about 6% of compute
+at ratios 2–3. Re-time the totals from the main checkout on a quiet machine before
+quoting them. Raw: `bench/results/raw/exposure-parallel/` (gitignored).
+
+**Compile time** (cold: fresh profile, plus a per-run constant so the macOS Metal cache
+cannot serve it; 7 runs, rotating order, median excluding each run's first compile):
+serial 181 ms, parallel 179 ms, serial with a constant row bound 170 ms, parallel with a
+constant row bound 178 ms. Metal does not show the DXC effect, so the bound makes no
+difference here. The uniform bound stays.
+
+**Windows: pending, hypothesis.** The serial chain should cost relatively more on the
+3060 and the UHD than on Apple, because one invocation keeps few fetches in flight. The
+expected result is under 0.01 ms (3060) and under 0.08 ms (UHD) for the pass. DXC compile
+time should stay at or below 39 ms, and the f16 readback should match the serial form.
+The commands are in [windows-followups](../../docs/windows-followups.md#2026-11-11-parallel-metering-to-confirm-on-windows).
+Record the results here; revert to the frozen form if a Windows readback differs on the
+`.r` channel of a bench scene.
+
 ## Explicitly not planned (measured against)
 
 - Lanczos2/bicubic history filtering (+47% accumulate, no visible win).

@@ -64,6 +64,39 @@ node scripts/audit-windows.mjs --demos 14-pathtracer-alpha --exercise
 npm test
 ```
 
+### 2026-11-11: parallel metering (to confirm on Windows)
+
+The pass now spreads the same 1024 taps over the workgroup's 64 lanes (16 each)
+and tree-sums them in workgroup memory; [NEXT-STEPS §16](../bench/docs/NEXT-STEPS.md)
+has the change and the Apple M5 Pro evidence. The row loop keeps the uniform bound;
+the column loop is 4 constant steps. The single-lane form is frozen, unchanged, as
+`LUMINANCE_PYRAMID_SERIAL_SHADER` (bench identity `exposure-serial-v1`).
+
+This relaxes the bit-identity requirement above in one respect: the summation order
+changes, so the f32 log-sum differs in its last bits. The two orders still read back
+identical rgba16float exposure in every synthetic case and every bench frame measured
+on Metal. The rolled/unrolled check above still compares one order with itself and
+must stay bit-identical.
+
+**Hypothesis, not yet measured on Windows:** the pass drops from 0.031 ms isolated
+(~0.06 ms in the bench) to under 0.01 ms on the RTX 3060 Laptop, and from ~0.17 ms
+in-pipeline (0.34–0.38 ms isolated) to under 0.08 ms on the Intel UHD. DXC compile
+time stays at or below the shipped form's 39 ms. With only 16 taps per lane, the constant-bound form should no longer
+approach 338 ms, but the uniform bound stays. The f16 readback should match the
+serial form in all 130 synthetic cases. Run on each adapter:
+
+```powershell
+node scripts/measure-exposure-parallel.mjs --power-preference high-performance --expected-vendor nvidia
+node scripts/measure-exposure-parallel.mjs --power-preference low-power --expected-vendor intel
+node scripts/measure-exposure-compile.mjs
+node scripts/run-benchmark.mjs --smoke --ratios 1,1.5,2,3 --blocks 4 --warmup 240 --samples 300 --variant baseline --comparison exposure-serial-v1
+```
+
+Each `measure-exposure-parallel` run writes
+`bench/results/raw/exposure-parallel/<timestamp>/results.json`. Its summary reports compile medians for the four forms, ABBA GPU medians at 960×540 and
+1920×1080, the f16 and f32 readback deltas, and the exposure-guide deltas per bench scene.
+Record the numbers in NEXT-STEPS §16.
+
 ## Evidence and remaining boundaries
 
 The final gallery sweep captured all 20 Chrome demos, cold and warm, with zero

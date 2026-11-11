@@ -717,14 +717,16 @@ SPD and coordinated resolver variants, not as a standalone toggle in the local b
 #### Luma and exposure analysis (`luminancePyramid.ts`)
 
 - **Current status:** Custom scalar replacement; despite its filename, it is not a pyramid.
-- **Local implementation:** Serially samples a fixed 32×32 grid and reduces it to one
-  log-average exposure value.
+- **Local implementation:** Samples a fixed 32×32 grid, 16 taps on each of the one
+  workgroup's 64 lanes, and tree-sums them in workgroup memory to one log-average exposure
+  value (until 2026-11-11 one lane took all 1024 taps; that form is frozen as
+  `LUMINANCE_PYRAMID_SERIAL_SHADER`, `bench/docs/NEXT-STEPS.md` §16).
 - **FSR 3.1.5 behavior:** Prepare-inputs writes current luma and farthest depth. Luma SPD
   writes `FrameInfo`, stored coarse log-luma/luma, and half-resolution farthest depth.
   Shading-change SPD is a separate signed-difference pyramid.
 - **Why it differs / evidence confidence — Rationale unclear; structural effect
-  verified:** The scalar path avoids SPD resources and work. It is also serial and
-  undersampled, and cannot feed source spatial luma/depth signals. No evidence establishes
+  verified:** The scalar path avoids SPD resources and work. It is also undersampled
+  and cannot feed source spatial luma/depth signals. No evidence establishes
   that performance motivated the replacement, and avoided work does not establish a
   measured speedup.
 

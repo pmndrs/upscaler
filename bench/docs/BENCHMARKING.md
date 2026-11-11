@@ -331,6 +331,7 @@ several runs — or several worktrees — can share a machine without colliding.
 | `measure-emitter-retention.mjs` | bench, `http://127.0.0.1:5199` | `--port` (9333) |
 | `measure-shading-restart.mjs` | bench, `http://127.0.0.1:5199` | `--port` (9333) |
 | `measure-receding-disocclusion.mjs` | bench, `http://127.0.0.1:5199` | `--port` (9333) |
+| `measure-exposure-parallel.mjs` | examples `--examples-url` (`http://127.0.0.1:5312`) and bench `--bench-url` (`http://127.0.0.1:5313`) | `--port` (9352) |
 | `measure-reference-quality.mjs` | bench, `http://127.0.0.1:5199` | `--port` (9333) |
 | `verify-packed-guides.mjs` | its own `vite preview` on `--port` (a free port) | `--cdp-port` (a free port) |
 

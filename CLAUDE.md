@@ -121,6 +121,11 @@ node scripts/measure-alpha-convergence.mjs --ratio 3
 # three sizes, exact rgba16float readback vs native, per conditioning exposure.
 node scripts/measure-exposure-ceiling.mjs --exposures auto,80,8,1
 
+# Exposure metering A/B (NEXT-STEPS §16): frozen single-lane form vs the
+# 64-lane tree sum: cold compile time, f16/f32 readback deltas on synthetic
+# inputs and per-frame exposure on bench scenes, ABBA GPU timestamps.
+node scripts/measure-exposure-parallel.mjs
+
 # GPU-timing overhead (issue #70): wall-clock throughput with gpuTiming on vs
 # off, ABBA-interleaved with a noise floor. A 4th condition field decomposes the
 # cost (writes | resolve | sampled:N | none = A/A control). Needs a quiet GPU;
