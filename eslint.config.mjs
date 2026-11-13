@@ -38,6 +38,20 @@ export default tseslint.config(
         },
     },
     {
+        // The motion lab's analysis runs on a bare GPUDevice like the core; its
+        // GPU-free tests may use three's math to build reference matrices.
+        files: ['packages/motion/**/*.ts'],
+        ignores: ['packages/motion/**/*.test.ts'],
+        rules: {
+            'no-restricted-imports': ['error', {
+                patterns: [{
+                    group: ['three', 'three/*', '@babylonjs/*', 'pixi.js', 'pixi.js/*', '@pmndrs/upscaler-three*', '@pmndrs/upscaler-babylon*', '@pmndrs/upscaler-pixi*'],
+                    message: 'packages/motion must stay engine-free (it may import @pmndrs/upscaler-core).',
+                }],
+            }],
+        },
+    },
+    {
         // Each adapter depends on the core and its own engine only.
         files: ['packages/three/**/*.ts'],
         rules: {

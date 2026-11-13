@@ -132,6 +132,11 @@ node scripts/measure-timer-overhead.mjs --conditions temporal:2:dispatch,tempora
 # accumulation-age views, per variant, summarized per segment.
 node scripts/measure-receding-disocclusion.mjs --variants baseline,reconstruct-cross-frame-v1
 
+# Motion lab (EXPERIMENTAL, docs/research/MOTION.md): camera motion from depth,
+# an audit of three's velocity (warp residuals per candidate motion), output
+# warping error per upscale path, and histogram cut detection. Exact GPU readback.
+node scripts/measure-motion.mjs --url http://127.0.0.1:5611
+
 # Sub-pixel emitter retention (issue #51): Q17 per-emitter output energy vs the
 # input's own coverage, flicker, lock/disocclusion/shading activity and a
 # switch-off ghost. Use auto-exposure off for attribution (AE pins at its cap here).
@@ -190,6 +195,10 @@ packages/
     src/internal/babylonWebGPU.ts — the two private Babylon fields (engine._device, _hardwareTexture.underlyingResource)
     src/internal/conventions.ts — flipped-RTT jitter sign + motionScale [-1,-1] + FrameCamera (docs/babylon.md)
     src/internal/textureAllocator.ts — wrapWebGPUTexture + updateWrappedWebGPUTexture (the wrap alone has no sampling view)
+  motion/              — @pmndrs/upscaler-motion (private, EXPERIMENTAL, bench-only — not bundled): engine-free motion analysis
+                         (cameraMotion / motionResidual / lumaHistogram passes + MotionAnalyzer); driven by bench/motion-lab.html
+                         Incubating to split into its own repo: spec, phases + decision gates in docs/research/MOTION-VECTORS-PLAN.md.
+                         MUST NOT import @pmndrs/upscaler-* beyond the one TextureAllocator type (removed in Phase 1).
   pixi/                — @pmndrs/upscaler-pixi (private, EXPERIMENTAL): pixi.js v8 WebGPURenderer adapter, spatial path verified
     src/Upscaler.ts    — wraps UpscalerCore: getGpuSource() lookup; dispatch() between renders, encode() inside one
                          (finishRenderPass + pixi's frame encoder); the temporal path needs app-supplied depth/motion/FrameCamera

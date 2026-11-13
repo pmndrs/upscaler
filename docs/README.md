@@ -68,6 +68,12 @@ Live records, kept current as findings land:
 - [Albedo demodulation (design draft)](research/ALBEDO-DEMODULATION.md): an optional
   albedo input so the temporal path accumulates lighting and texture in separate
   histories; the first step toward a fused GI/denoise path. Proposal, not started.
+- [Motion lab (experimental)](research/MOTION.md): motion vectors without a
+  velocity buffer, an audit of three's `velocity`, reference-free warping error, and
+  cut detection. Measurements and what is worth building next.
+- [Motion vectors: spec and plan](research/MOTION-VECTORS-PLAN.md): the shared
+  motion package incubating here (contract, three velocity node, phases, and the
+  split decision gate).
 - [Paper notes](research/PAPER-NOTES.md): a running tracker of write-up-worthy
   findings (*surprised us + measured + others would hit it*) and what each still needs
   for publication ([#10](https://github.com/pmndrs/upscaler/issues/10)).
