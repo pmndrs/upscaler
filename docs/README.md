@@ -68,6 +68,10 @@ Live records, kept current as findings land:
 - [Albedo demodulation (design draft)](research/ALBEDO-DEMODULATION.md): an optional
   albedo input so the temporal path accumulates lighting and texture in separate
   histories; the first step toward a fused GI/denoise path. Proposal, not started.
+- Motion vectors moved to [pmndrs/motion-vectors](https://github.com/pmndrs/motion-vectors) (2026-11-14): the motion
+  contract, the lab that scores three's `velocity` against an exact oracle, the
+  findings (`docs/MOTION.md`) and the plan (`docs/PLAN.md`). The upscaler keeps
+  only its consumer probe (`scripts/measure-motion-upscaler.mjs`).
 - [Paper notes](research/PAPER-NOTES.md): a running tracker of write-up-worthy
   findings (*surprised us + measured + others would hit it*) and what each still needs
   for publication ([#10](https://github.com/pmndrs/upscaler/issues/10)).

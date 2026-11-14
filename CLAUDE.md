@@ -132,6 +132,10 @@ node scripts/measure-timer-overhead.mjs --conditions temporal:2:dispatch,tempora
 # accumulation-age views, per variant, summarized per segment.
 node scripts/measure-receding-disocclusion.mjs --variants baseline,reconstruct-cross-frame-v1
 
+# Upscaler motion probe (EXPERIMENTAL): warping error per upscale path and cut
+# resets on Q19/Q10. The motion lab itself moved to pmndrs/motion-vectors.
+node scripts/measure-motion-upscaler.mjs
+
 # Sub-pixel emitter retention (issue #51): Q17 per-emitter output energy vs the
 # input's own coverage, flicker, lock/disocclusion/shading activity and a
 # switch-off ghost. Use auto-exposure off for attribution (AE pins at its cap here).
@@ -190,6 +194,8 @@ packages/
     src/internal/babylonWebGPU.ts — the two private Babylon fields (engine._device, _hardwareTexture.underlyingResource)
     src/internal/conventions.ts — flipped-RTT jitter sign + motionScale [-1,-1] + FrameCamera (docs/babylon.md)
     src/internal/textureAllocator.ts — wrapWebGPUTexture + updateWrappedWebGPUTexture (the wrap alone has no sampling view)
+  motion/              — @pmndrs/upscaler-motion (private, FROZEN copy of pmndrs/motion-vectors src/, not bundled):
+                         only for bench/motion-upscaler.html. Don't edit here; replaced by the npm package at 0.x.
   pixi/                — @pmndrs/upscaler-pixi (private, EXPERIMENTAL): pixi.js v8 WebGPURenderer adapter, spatial path verified
     src/Upscaler.ts    — wraps UpscalerCore: getGpuSource() lookup; dispatch() between renders, encode() inside one
                          (finishRenderPass + pixi's frame encoder); the temporal path needs app-supplied depth/motion/FrameCamera
