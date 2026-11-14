@@ -197,7 +197,7 @@ packages/
     src/internal/textureAllocator.ts — wrapWebGPUTexture + updateWrappedWebGPUTexture (the wrap alone has no sampling view)
   motion/              — @pmndrs/upscaler-motion (private, EXPERIMENTAL, bench-only — not bundled): engine-free motion analysis
                          (cameraMotion / motionResidual / lumaHistogram passes + MotionAnalyzer); driven by bench/motion-lab.html
-                         Incubating to split into its own repo: spec, phases + decision gates in docs/research/MOTION-VECTORS-PLAN.md.
+                         Moves to pmndrs/motion-vectors (@pmndrs/motion-vectors) right after Phase 1 (decided 2026-11-14): spec, phases + gates in docs/research/MOTION-VECTORS-PLAN.md.
                          MUST NOT import @pmndrs/upscaler-* beyond the one TextureAllocator type (removed in Phase 1).
   pixi/                — @pmndrs/upscaler-pixi (private, EXPERIMENTAL): pixi.js v8 WebGPURenderer adapter, spatial path verified
     src/Upscaler.ts    — wraps UpscalerCore: getGpuSource() lookup; dispatch() between renders, encode() inside one

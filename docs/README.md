@@ -72,8 +72,9 @@ Live records, kept current as findings land:
   velocity buffer, an audit of three's `velocity`, reference-free warping error, and
   cut detection. Measurements and what is worth building next.
 - [Motion vectors: spec and plan](research/MOTION-VECTORS-PLAN.md): the shared
-  motion package incubating here (contract, three velocity node, phases, and the
-  split decision gate).
+  motion package, incubating here until it moves to
+  [pmndrs/motion-vectors](https://github.com/pmndrs/motion-vectors) after Phase 1
+  (contract, three velocity node, phases and gates).
 - [Paper notes](research/PAPER-NOTES.md): a running tracker of write-up-worthy
   findings (*surprised us + measured + others would hit it*) and what each still needs
   for publication ([#10](https://github.com/pmndrs/upscaler/issues/10)).
