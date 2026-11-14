@@ -33,6 +33,7 @@ import { CDP } from './cdp-client.mjs';
 import {
     DEFAULT_BENCH_URL,
     parsePort,
+    closeOwnedCdpBrowser,
     removeTempDirectory,
     resolveServerUrl,
     spawnVite,
@@ -127,7 +128,8 @@ async function main() {
         console.log(failed ? 'FAIL' : 'PASS: one encoder renders what two submits render');
         process.exitCode = failed ? 1 : 0;
     } finally {
-        client?.close();
+        // On Windows the browser can outlive its launcher process, so close it over CDP first.
+        await closeOwnedCdpBrowser(client);
         await stopChild(chrome);
         await removeTempDirectory(profile, 'Chrome profile');
         await stopChild(viteServer);
