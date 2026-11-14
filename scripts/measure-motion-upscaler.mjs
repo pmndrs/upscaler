@@ -3,7 +3,7 @@
  * Upscaler motion meter (EXPERIMENTAL): the upscaler's consumer of the motion
  * package. Drives bench/motion-upscaler.html over CDP and reads every number back
  * exactly from the GPU. The motion lab itself (oracle comparisons, its own
- * scenes) is packages/motion/scripts/measure-motion.mjs.
+ * scenes) lives in pmndrs/motion-vectors (scripts/measure-motion.mjs).
  *
  * Experiments (--experiments, comma-separated):
  * - audit-q19: how well zero motion, three's `velocity` and camera motion from

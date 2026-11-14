@@ -20,8 +20,7 @@ import { getBenchmarkScenario } from '../benchmark/scenarios';
 /**
  * Upscaler motion probe (EXPERIMENTAL), driven by `scripts/measure-motion-upscaler.mjs`
  * over CDP: the upscaler's consumer of the motion package. The motion lab
- * itself (oracle comparisons, its own scenes) lives in `packages/motion/lab`
- * and moves with the package to pmndrs/motion-vectors.
+ * itself (oracle comparisons, its own scenes) lives in pmndrs/motion-vectors.
  *
  * Renders a bench scenario through one upscale path and measures, per frame,
  * with exact GPU readback:

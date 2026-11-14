@@ -1,6 +1,6 @@
 /**
  * The engine seam for the textures this package publishes. A deliberate copy
- * of the upscaler core's `TextureAllocator` contract (MOTION-VECTORS-PLAN §3.4:
+ * of the upscaler core's `TextureAllocator` contract (pmndrs/motion-vectors docs/PLAN.md §3.4:
  * small glue is copied, not shared), so the package depends on no other
  * project. The shapes match, so an upscaler allocator can be passed as-is.
  */

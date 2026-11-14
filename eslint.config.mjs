@@ -38,15 +38,14 @@ export default tseslint.config(
         },
     },
     {
-        // The motion package leaves for its own repo (pmndrs/motion-vectors)
-        // after Phase 1 of docs/research/MOTION-VECTORS-PLAN.md: nothing in it,
-        // lab and scripts included, may import the upscaler.
+        // A frozen copy of pmndrs/motion-vectors' src (packages/motion/README.md):
+        // nothing in it may import the upscaler.
         files: ['packages/motion/**/*.{ts,mjs}'],
         rules: {
             'no-restricted-imports': ['error', {
                 patterns: [{
                     group: ['@pmndrs/upscaler', '@pmndrs/upscaler/*', '@pmndrs/upscaler-*', '**/packages/*/src/**', '**/bench/**', '**/scripts/*.mjs'],
-                    message: 'packages/motion must not import the upscaler (it moves to pmndrs/motion-vectors).',
+                    message: 'packages/motion (a frozen copy of pmndrs/motion-vectors) must not import the upscaler.',
                 }],
             }],
         },

@@ -1,7 +1,6 @@
 /**
- * EXPERIMENTAL motion analysis (motion lab). Engine-free; incubating in the
- * upscaler repo until it moves to pmndrs/motion-vectors. Contract draft:
- * packages/motion/CONTRACT.md; findings: docs/research/MOTION.md.
+ * FROZEN copy of pmndrs/motion-vectors' analysis passes, for the bench's
+ * upscaler motion probe only (packages/motion/README.md). Change them there.
  */
 export { MotionAnalyzer, decodeCompare, decodeStats, RESIDUAL_SLOTS, HISTOGRAM_SLOTS } from './MotionAnalyzer';
 export type {

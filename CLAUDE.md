@@ -132,11 +132,8 @@ node scripts/measure-timer-overhead.mjs --conditions temporal:2:dispatch,tempora
 # accumulation-age views, per variant, summarized per segment.
 node scripts/measure-receding-disocclusion.mjs --variants baseline,reconstruct-cross-frame-v1
 
-# Motion lab (EXPERIMENTAL, docs/research/MOTION.md; moves to pmndrs/motion-vectors):
-# three's velocity vs an exact per-object oracle in the lab's own scenes, camera
-# motion from depth, cut detection. Exact GPU readback; serves itself on :5611.
-node packages/motion/scripts/measure-motion.mjs
-# The upscaler's side of it: warping error per upscale path, cut resets (Q19/Q10).
+# Upscaler motion probe (EXPERIMENTAL): warping error per upscale path and cut
+# resets on Q19/Q10. The motion lab itself moved to pmndrs/motion-vectors.
 node scripts/measure-motion-upscaler.mjs
 
 # Sub-pixel emitter retention (issue #51): Q17 per-emitter output energy vs the
@@ -197,10 +194,8 @@ packages/
     src/internal/babylonWebGPU.ts — the two private Babylon fields (engine._device, _hardwareTexture.underlyingResource)
     src/internal/conventions.ts — flipped-RTT jitter sign + motionScale [-1,-1] + FrameCamera (docs/babylon.md)
     src/internal/textureAllocator.ts — wrapWebGPUTexture + updateWrappedWebGPUTexture (the wrap alone has no sampling view)
-  motion/              — @pmndrs/upscaler-motion (private, EXPERIMENTAL, not bundled): motion analysis + its own lab
-                         src/ (engine-free passes + MotionAnalyzer), lab/ (own scenes + exact oracle), scripts/, CONTRACT.md.
-                         Phase 1 done 2026-11-14; moves to pmndrs/motion-vectors (Phase E): docs/research/MOTION-VECTORS-PLAN.md.
-                         MUST NOT import the upscaler (eslint): glue is copied. The upscaler's consumer side is bench/motion-upscaler.html.
+  motion/              — @pmndrs/upscaler-motion (private, FROZEN copy of pmndrs/motion-vectors src/, not bundled):
+                         only for bench/motion-upscaler.html. Don't edit here; replaced by the npm package at 0.x.
   pixi/                — @pmndrs/upscaler-pixi (private, EXPERIMENTAL): pixi.js v8 WebGPURenderer adapter, spatial path verified
     src/Upscaler.ts    — wraps UpscalerCore: getGpuSource() lookup; dispatch() between renders, encode() inside one
                          (finishRenderPass + pixi's frame encoder); the temporal path needs app-supplied depth/motion/FrameCamera

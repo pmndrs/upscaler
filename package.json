@@ -65,7 +65,6 @@
         "bench:capture": "node scripts/run-benchmark.mjs --mode capture",
         "bench:compare:rcas": "node scripts/compare-rcas.mjs",
         "examples": "vite --config examples/vite.config.ts",
-        "motion:lab": "vite --config packages/motion/lab/vite.config.ts",
         "examples:build": "vite build --config examples/vite.config.ts",
         "build": "vite build && rollup -c rollup.dts.config.mjs && node scripts/verify-artifacts.mjs",
         "verify:packed-guides": "node scripts/verify-packed-guides.mjs --build-only",
