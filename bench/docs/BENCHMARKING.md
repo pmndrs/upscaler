@@ -332,6 +332,7 @@ several runs — or several worktrees — can share a machine without colliding.
 | `measure-shading-restart.mjs` | bench, `http://127.0.0.1:5199` | `--port` (9333) |
 | `measure-receding-disocclusion.mjs` | bench, `http://127.0.0.1:5199` | `--port` (9333) |
 | `measure-reference-quality.mjs` | bench, `http://127.0.0.1:5199` | `--port` (9333) |
+| `verify-split-encoder.mjs` | bench, `http://127.0.0.1:5199` | `--port` (9333) |
 | `verify-packed-guides.mjs` | its own `vite preview` on `--port` (a free port) | `--cdp-port` (a free port) |
 
 ```bash
