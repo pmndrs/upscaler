@@ -1,11 +1,21 @@
 import { Matrix4, PerspectiveCamera, Vector3 } from 'three';
 import { describe, expect, it } from 'vitest';
 
-import { decodeStats, HISTOGRAM_SLOTS, RESIDUAL_SLOTS } from './MotionAnalyzer';
+import { decodeCompare, decodeStats, HISTOGRAM_SLOTS, RESIDUAL_SLOTS } from './MotionAnalyzer';
 import { earthMovers, jensenShannon } from './math/histogram';
 import { cameraMotionAt } from './math/reprojection';
 import { CAMERA_MOTION_SHADER } from './shaders/cameraMotion';
 import { HISTOGRAM_BINS, LUMA_HISTOGRAM_SHADER } from './shaders/lumaHistogram';
+import {
+    COMPARE_CANDIDATE_WORDS,
+    COMPARE_CAP_PIXELS,
+    COMPARE_FIXED_POINT,
+    COMPARE_HEADER_WORDS,
+    COMPARE_OBJECT_STRIDE,
+    COMPARE_OBJECTS,
+    COMPARE_WORDS,
+    MOTION_COMPARE_SHADER,
+} from './shaders/motionCompare';
 import { CANDIDATE_FIELDS, MAX_CANDIDATES, MOTION_RESIDUAL_SHADER, STATS_STRIDE } from './shaders/motionResidual';
 
 //* Camera Helpers
@@ -127,6 +137,26 @@ describe('decodeStats', () => {
         expect(slot.candidates[1]).toMatchObject({ valid: 0.5, best: 0.4, unexplained: 0.05, beaten: 0.02, moving: 0.3 });
         expect(stats.histograms[0]).toBeNull();
         expect(stats.histograms[1]![3]).toBe(7);
+        expect(stats.compare).toBeNull();
+    });
+
+    it('decodes the oracle comparison per object, after the histograms', () => {
+        const offset = RESIDUAL_SLOTS * STATS_STRIDE + HISTOGRAM_SLOTS * HISTOGRAM_BINS;
+        const words = new Uint32Array(offset + COMPARE_WORDS);
+        const base = offset + 3 * COMPARE_OBJECT_STRIDE;
+        // Object 3: 200 valid pixels moving 1.5 px; candidate 1 errs 0.25 px on average.
+        words.set([200, 4, 200 * 1.5 * COMPARE_FIXED_POINT], base);
+        words.set([200 * 0.25 * COMPARE_FIXED_POINT, 50, 10], base + COMPARE_HEADER_WORDS + COMPARE_CANDIDATE_WORDS);
+        const compare = decodeStats(words, new Set(), new Set(), true).compare!;
+        expect(compare).toHaveLength(COMPARE_OBJECTS);
+        expect(compare[0].valid).toBe(0);
+        expect(compare[3]).toMatchObject({ valid: 200, noPrevious: 4, meanMotion: 1.5 });
+        expect(compare[3].candidates[1]).toEqual({ meanError: 0.25, over025: 0.25, over1: 0.05 });
+        expect(decodeCompare(words.subarray(offset))[3].valid).toBe(200);
+    });
+
+    it('cannot overflow the capped sums of a full frame up to 1920×1080', () => {
+        expect(1920 * 1080 * COMPARE_CAP_PIXELS * COMPARE_FIXED_POINT).toBeLessThan(2 ** 32);
     });
 });
 
@@ -137,6 +167,7 @@ describe('motion shader structure', () => {
         ['cameraMotion', CAMERA_MOTION_SHADER, 4],
         ['motionResidual', MOTION_RESIDUAL_SHADER, 11],
         ['lumaHistogram', LUMA_HISTOGRAM_SHADER, 3],
+        ['motionCompare', MOTION_COMPARE_SHADER, 6],
     ])('%s: 8×8 main entry, contiguous bindings, uniform at 0', (_name, code, count) => {
         expect(code).toMatch(/@compute @workgroup_size\(8, 8\)\s*\nfn main\(/);
         expect(bindings(code)).toEqual(Array.from({ length: count }, (_, i) => i));

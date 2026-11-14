@@ -25,6 +25,6 @@
             "@pmndrs/upscaler/pixi": ["src/pixi.ts"]
         }
     },
-    "include": ["src", "packages/*/src", "bench/src", "examples", "test"],
-    "exclude": ["node_modules", "dist", "examples/vite.config.ts", "examples/pixi3d/hello", "examples/pixi3d/vendor"]
+    "include": ["src", "packages/*/src", "packages/motion/lab", "bench/src", "examples", "test"],
+    "exclude": ["node_modules", "dist", "examples/vite.config.ts", "packages/motion/lab/vite.config.ts", "examples/pixi3d/hello", "examples/pixi3d/vendor"]
 }

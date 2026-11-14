@@ -1,7 +1,18 @@
-import { createDeviceTextureAllocator, type CoreTexture, type TextureAllocator } from '@pmndrs/upscaler-core/textures';
+import { createDeviceTextureAllocator, type MotionTexture, type TextureAllocator } from './textures';
 
 import { CAMERA_MOTION_SHADER, MOTION_CONSTANTS_BYTES } from './shaders/cameraMotion';
 import { HISTOGRAM_BINS, LUMA_HISTOGRAM_SHADER } from './shaders/lumaHistogram';
+import {
+    COMPARE_CANDIDATE_WORDS,
+    COMPARE_CANDIDATES,
+    COMPARE_CONSTANTS_BYTES,
+    COMPARE_FIXED_POINT,
+    COMPARE_HEADER_WORDS,
+    COMPARE_OBJECT_STRIDE,
+    COMPARE_OBJECTS,
+    COMPARE_WORDS,
+    MOTION_COMPARE_SHADER,
+} from './shaders/motionCompare';
 import {
     CANDIDATE_FIELDS,
     MAX_CANDIDATES,
@@ -56,10 +67,34 @@ export interface ResidualStats {
     pixels: number;
 }
 
+/** One candidate's endpoint error against the oracle, for one object. */
+export interface CompareCandidateStats {
+    /** Mean endpoint error in render pixels (per-pixel values capped at 64). */
+    meanError: number;
+    /** Share of the object's valid pixels with an error above 0.25 px. */
+    over025: number;
+    /** Share of the object's valid pixels with an error above 1 px. */
+    over1: number;
+}
+
+/** Oracle comparison for one object id. */
+export interface CompareObjectStats {
+    /** Pixels with a valid oracle (the surface point had a previous position). */
+    valid: number;
+    /** Covered pixels with no previous position. */
+    noPrevious: number;
+    /** Mean oracle motion in render pixels: how much the object actually moved. */
+    meanMotion: number;
+    /** Index 0 is zero motion; 1–3 follow the `motions` order passed in. */
+    candidates: CompareCandidateStats[];
+}
+
 /** Statistics read back for one frame. */
 export interface MotionFrameStats {
     residuals: (ResidualStats | null)[];
     histograms: (Uint32Array | null)[];
+    /** Per object id; null when {@link MotionAnalyzer.encodeCompare} did not run. */
+    compare: CompareObjectStats[] | null;
 }
 
 /** Arguments of {@link MotionAnalyzer.encodeResidual}. */
@@ -84,6 +119,7 @@ export interface ResidualRequest {
 
 const STATS_WORDS = RESIDUAL_SLOTS * STATS_STRIDE;
 const HISTOGRAM_WORDS = HISTOGRAM_SLOTS * HISTOGRAM_BINS;
+const COMPARE_OFFSET = STATS_WORDS + HISTOGRAM_WORDS;
 
 /**
  * EXPERIMENTAL engine-free motion analysis on a bare `GPUDevice` (motion lab).
@@ -101,6 +137,9 @@ export class MotionAnalyzer<THandle = GPUTexture> {
     private _cameraPipeline: GPUComputePipeline | null = null;
     private _residualPipeline: GPUComputePipeline | null = null;
     private _histogramPipeline: GPUComputePipeline | null = null;
+    private _comparePipeline: GPUComputePipeline | null = null;
+    private readonly _compareConstants: GPUBuffer;
+    private _usedCompare = false;
     private readonly _sampler: GPUSampler;
     private readonly _motionConstants: GPUBuffer;
     private readonly _residualConstants: GPUBuffer[];
@@ -109,14 +148,14 @@ export class MotionAnalyzer<THandle = GPUTexture> {
     private readonly _readback: GPUBuffer;
     private _width = 0;
     private _height = 0;
-    private _cameraMotion: CoreTexture<THandle> | null = null;
+    private _cameraMotion: MotionTexture<THandle> | null = null;
     private _linearDepth: GPUTexture[] = [];
     private _depthIndex = 0;
     private _hasPrevious = false;
     private _prevViewProjection = new Float32Array(16);
     private _prevViewZRow = new Float32Array(4);
     private readonly _snapshots = new Map<string, GPUTexture>();
-    private readonly _debug = new Map<string, CoreTexture<THandle>>();
+    private readonly _debug = new Map<string, MotionTexture<THandle>>();
     private readonly _dummy: GPUTexture;
     private readonly _usedResiduals = new Set<number>();
     private readonly _usedHistograms = new Set<number>();
@@ -150,7 +189,12 @@ export class MotionAnalyzer<THandle = GPUTexture> {
                 usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
             }),
         );
-        const bytes = (STATS_WORDS + HISTOGRAM_WORDS) * 4;
+        this._compareConstants = device.createBuffer({
+            label: 'motion-compare-constants',
+            size: COMPARE_CONSTANTS_BYTES,
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        });
+        const bytes = (COMPARE_OFFSET + COMPARE_WORDS) * 4;
         this._stats = device.createBuffer({
             label: 'motion-stats',
             size: bytes,
@@ -169,7 +213,7 @@ export class MotionAnalyzer<THandle = GPUTexture> {
         });
     }
 
-    /** Compiles the three pipelines. */
+    /** Compiles the pipelines. */
     async init(): Promise<void> {
         const compile = (label: string, code: string) =>
             this.device.createComputePipelineAsync({
@@ -177,15 +221,16 @@ export class MotionAnalyzer<THandle = GPUTexture> {
                 layout: 'auto',
                 compute: { module: this.device.createShaderModule({ label, code }), entryPoint: 'main' },
             });
-        [this._cameraPipeline, this._residualPipeline, this._histogramPipeline] = await Promise.all([
+        [this._cameraPipeline, this._residualPipeline, this._histogramPipeline, this._comparePipeline] = await Promise.all([
             compile('motion-camera', CAMERA_MOTION_SHADER),
             compile('motion-residual', MOTION_RESIDUAL_SHADER),
             compile('motion-histogram', LUMA_HISTOGRAM_SHADER),
+            compile('motion-compare', MOTION_COMPARE_SHADER),
         ]);
     }
 
     /** Camera motion at render resolution (rgba16float; see `cameraMotion.ts`). */
-    get cameraMotion(): CoreTexture<THandle> {
+    get cameraMotion(): MotionTexture<THandle> {
         if (!this._cameraMotion) throw new Error('MotionAnalyzer: configure() first.');
         return this._cameraMotion;
     }
@@ -231,7 +276,7 @@ export class MotionAnalyzer<THandle = GPUTexture> {
      * @param height - Analysis height
      * @returns The engine handle + raw texture
      */
-    debugTexture(width: number, height: number): CoreTexture<THandle> {
+    debugTexture(width: number, height: number): MotionTexture<THandle> {
         const key = `${width}x${height}`;
         let texture = this._debug.get(key);
         if (!texture) {
@@ -263,6 +308,7 @@ export class MotionAnalyzer<THandle = GPUTexture> {
         encoder.clearBuffer(this._stats);
         this._usedResiduals.clear();
         this._usedHistograms.clear();
+        this._usedCompare = false;
     }
 
     /**
@@ -395,6 +441,45 @@ export class MotionAnalyzer<THandle = GPUTexture> {
     }
 
     /**
+     * Endpoint error of up to three motion fields (plus zero motion) against an
+     * oracle field rendered in the same pass; see `shaders/motionCompare.ts`.
+     * One comparison per frame.
+     * @param encoder - Command encoder
+     * @param oracle - Oracle motion (rgba16float: motion, coverage marker, object id)
+     * @param motions - Candidate fields (three `velocity` convention), the oracle's size
+     */
+    encodeCompare(encoder: GPUCommandEncoder, oracle: GPUTexture, motions: GPUTexture[]): void {
+        const pipeline = this._ready(this._comparePipeline);
+        if (motions.length > COMPARE_CANDIDATES - 1) throw new Error('At most three motion candidates.');
+        for (const motion of motions)
+            if (motion.width !== oracle.width || motion.height !== oracle.height)
+                throw new Error('Motion candidates must match the oracle size.');
+        const buffer = new ArrayBuffer(COMPARE_CONSTANTS_BYTES);
+        new Float32Array(buffer).set([oracle.width, oracle.height]);
+        new Uint32Array(buffer)[2] = motions.length;
+        this.device.queue.writeBuffer(this._compareConstants, 0, buffer);
+        this._usedCompare = true;
+        const view = (texture: GPUTexture | undefined) =>
+            (texture ?? this._dummy).createView({ baseMipLevel: 0, mipLevelCount: 1 });
+        const bindGroup = this.device.createBindGroup({
+            layout: pipeline.getBindGroupLayout(0),
+            entries: [
+                { binding: 0, resource: { buffer: this._compareConstants } },
+                { binding: 1, resource: view(oracle) },
+                { binding: 2, resource: view(motions[0]) },
+                { binding: 3, resource: view(motions[1]) },
+                { binding: 4, resource: view(motions[2]) },
+                { binding: 5, resource: { buffer: this._stats, offset: COMPARE_OFFSET * 4 } },
+            ],
+        });
+        const pass = encoder.beginComputePass({ label: 'motion-compare' });
+        pass.setPipeline(pipeline);
+        pass.setBindGroup(0, bindGroup);
+        pass.dispatchWorkgroups(Math.ceil(oracle.width / 8), Math.ceil(oracle.height / 8));
+        pass.end();
+    }
+
+    /**
      * Copies `source` so next frame's {@link previous}(key) returns it. Encode
      * after every pass that reads this frame's previous image.
      * @param encoder - Command encoder
@@ -433,7 +518,7 @@ export class MotionAnalyzer<THandle = GPUTexture> {
         await this._readback.mapAsync(GPUMapMode.READ);
         const words = new Uint32Array(this._readback.getMappedRange().slice(0));
         this._readback.unmap();
-        return decodeStats(words, this._usedResiduals, this._usedHistograms);
+        return decodeStats(words, this._usedResiduals, this._usedHistograms, this._usedCompare);
     }
 
     /** Releases every GPU resource. */
@@ -446,6 +531,7 @@ export class MotionAnalyzer<THandle = GPUTexture> {
         this._stats.destroy();
         this._readback.destroy();
         this._motionConstants.destroy();
+        this._compareConstants.destroy();
         for (const buffer of [...this._residualConstants, ...this._histogramConstants]) buffer.destroy();
     }
 
@@ -461,12 +547,14 @@ export class MotionAnalyzer<THandle = GPUTexture> {
  * @param words - Residual slots followed by histogram slots
  * @param residualSlots - Slots written this frame
  * @param histogramSlots - Histogram slots written this frame
+ * @param compareUsed - Whether the oracle comparison ran this frame
  * @returns Decoded statistics
  */
 export function decodeStats(
     words: Uint32Array,
     residualSlots: ReadonlySet<number>,
     histogramSlots: ReadonlySet<number>,
+    compareUsed = false,
 ): MotionFrameStats {
     const residuals: (ResidualStats | null)[] = [];
     for (let slot = 0; slot < RESIDUAL_SLOTS; slot++) {
@@ -497,5 +585,30 @@ export function decodeStats(
         const start = STATS_WORDS + slot * HISTOGRAM_BINS;
         histograms.push(histogramSlots.has(slot) ? words.slice(start, start + HISTOGRAM_BINS) : null);
     }
-    return { residuals, histograms };
+    return { residuals, histograms, compare: compareUsed ? decodeCompare(words.subarray(COMPARE_OFFSET)) : null };
+}
+
+/**
+ * Decodes the oracle-comparison words (exported for tests).
+ * @param words - `COMPARE_WORDS` words, object-major
+ * @returns Per object id
+ */
+export function decodeCompare(words: Uint32Array): CompareObjectStats[] {
+    const objects: CompareObjectStats[] = [];
+    for (let id = 0; id < COMPARE_OBJECTS; id++) {
+        const base = id * COMPARE_OBJECT_STRIDE;
+        const valid = words[base];
+        const per = (value: number) => (valid ? value / valid : 0);
+        const candidates: CompareCandidateStats[] = [];
+        for (let k = 0; k < COMPARE_CANDIDATES; k++) {
+            const offset = base + COMPARE_HEADER_WORDS + k * COMPARE_CANDIDATE_WORDS;
+            candidates.push({
+                meanError: per(words[offset] / COMPARE_FIXED_POINT),
+                over025: per(words[offset + 1]),
+                over1: per(words[offset + 2]),
+            });
+        }
+        objects.push({ valid, noPrevious: words[base + 1], meanMotion: per(words[base + 2] / COMPARE_FIXED_POINT), candidates });
+    }
+    return objects;
 }

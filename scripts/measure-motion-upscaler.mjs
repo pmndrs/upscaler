@@ -1,16 +1,13 @@
 #!/usr/bin/env node
 /**
- * Motion lab meter (EXPERIMENTAL). Drives bench/motion-lab.html over CDP and
- * reads every number back exactly from the GPU (packages/motion).
+ * Upscaler motion meter (EXPERIMENTAL): the upscaler's consumer of the motion
+ * package. Drives bench/motion-upscaler.html over CDP and reads every number back
+ * exactly from the GPU. The motion lab itself (oracle comparisons, its own
+ * scenes) is packages/motion/scripts/measure-motion.mjs.
  *
  * Experiments (--experiments, comma-separated):
- * - audit-deformers: lab `deformers` scene, native path (no jitter), one run
- *   per object. How well zero motion, three's `velocity` and camera motion
- *   from depth each warp the previous frame onto the current one. Objects:
- *   static `material.positionNode` displacement, animated displacement, a
- *   morph target, a rigid rotating box (control) and a ball that leaves the
- *   frustum and re-enters elsewhere.
- * - audit-q19: the same on Q19's camera/object motion segments.
+ * - audit-q19: how well zero motion, three's `velocity` and camera motion from
+ *   depth warp the previous input onto the current one, per Q19 segment.
  * - warp: Q19 through native / bilinear / spatial / temporal (+ temporal fed
  *   camera motion instead of three's velocity): output warping error (temporal
  *   stability under motion) and mean |output − 2×2 SSAA reference|, per segment.
@@ -19,7 +16,7 @@
  *   cut with history reset by the scenario, never, or by the detector.
  *
  * Usage:
- *   node scripts/measure-motion.mjs [--experiments audit-deformers,audit-q19,warp,cut]
+ *   node scripts/measure-motion-upscaler.mjs [--experiments audit-q19,warp,cut]
  *     [--ratio 2] [--width 1280] [--height 720] [--label motion]
  *     [--url http://127.0.0.1:5199] [--port 9334]
  *
@@ -44,8 +41,8 @@ import {
 } from './local-processes.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
-const USAGE = `Usage: node scripts/measure-motion.mjs [options]
-  --experiments <list>   audit-deformers,audit-q19,warp,cut (default: all)
+const USAGE = `Usage: node scripts/measure-motion-upscaler.mjs [options]
+  --experiments <list>   audit-q19,warp,cut (default: all)
   --ratio <n>            upscale ratio for warp / cut (default 2)
   --width <px> --height <px>   display size (default 1280x720)
   --label <name>         output folder (default motion)
@@ -55,7 +52,7 @@ const USAGE = `Usage: node scripts/measure-motion.mjs [options]
   --name <file>          with probe: screenshot name (default probe)
 Writes bench/results/raw/motion/<label>/.`;
 const cli = parseCliOrExit(process.argv.slice(2), ['experiments', 'ratio', 'width', 'height', 'label', 'url', 'port', 'request', 'name'], USAGE);
-const experiments = (cli.experiments ?? 'audit-deformers,audit-q19,warp,cut').split(',').filter(Boolean);
+const experiments = (cli.experiments ?? 'audit-q19,warp,cut').split(',').filter(Boolean);
 const ratio = Number(cli.ratio ?? 2);
 const width = Number(cli.width ?? 1280);
 const height = Number(cli.height ?? 720);
@@ -143,10 +140,10 @@ async function main() {
         await Promise.all([client.send('Page.enable'), client.send('Runtime.enable'), client.send('Log.enable')]);
         // Pin the viewport to the canvas, or headless chrome clips its bottom rows.
         await client.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
-        await client.send('Page.navigate', { url: `${server.origin}/motion-lab.html` });
+        await client.send('Page.navigate', { url: `${server.origin}/motion-upscaler.html` });
         for (let attempt = 0; ; attempt++) {
             if ((await client.evaluate('window.__motionLab?.ready === true')) === true) break;
-            if (attempt > 600) throw new Error(`Timed out waiting for the motion lab.\n${logs(client).join('\n')}`);
+            if (attempt > 600) throw new Error(`Timed out waiting for the upscaler motion probe.\n${logs(client).join('\n')}`);
             await new Promise((resolveWait) => setTimeout(resolveWait, 100));
         }
 
@@ -172,8 +169,7 @@ async function main() {
             const started = Date.now();
             console.log(`\n== ${experiment}`);
             let record;
-            if (experiment === 'audit-deformers') record = await auditDeformers(run, screenshot);
-            else if (experiment === 'audit-q19') record = await auditQ19(run, screenshot);
+            if (experiment === 'audit-q19') record = await auditQ19(run, screenshot);
             else if (experiment === 'warp') record = await warp(run, screenshot);
             else if (experiment === 'cut') record = await cut(run, screenshot);
             else if (experiment === 'probe') record = await probe(run, screenshot);
@@ -218,32 +214,6 @@ async function probe(run, screenshot) {
     }
     await screenshot(cli.name ?? 'probe');
     return Array.isArray(parsed) ? results : results[0];
-}
-
-async function auditDeformers(run, screenshot) {
-    const objects = ['rigid', 'displaced', 'wave', 'morph', 'reentry'];
-    const result = {};
-    for (const object of objects) {
-        const { frames } = await run({ scenario: 'deformers', path: 'native', start: 1, end: 239, objects: [object] });
-        result[object] = { summary: candidateSummary(frames, 'audit'), frames };
-        printCandidates(object, result[object].summary);
-        if (object === 'reentry') {
-            // The frame the ball is drawn again after leaving the frustum.
-            const spikes = frames
-                .map((frame) => ({ frame: frame.frame, beaten: frame.audit?.candidates[1].beaten ?? 0 }))
-                .sort((a, b) => b.beaten - a.beaten)
-                .slice(0, 3);
-            console.log(`    top engine-beaten frames: ${spikes.map((s) => `${s.frame} (${pct(s.beaten, 3, 0)}%)`).join(', ')}`);
-            result[object].spikes = spikes;
-        }
-    }
-    for (const view of ['audit', 'output']) {
-        await run({ scenario: 'deformers', path: 'native', end: 140, view });
-        await screenshot(`deformers-${view}-f140`);
-    }
-    await run({ scenario: 'deformers', path: 'native', end: 140, view: 'audit-heat', heatCandidate: 1 });
-    await screenshot('deformers-engine-heat-f140');
-    return result;
 }
 
 async function auditQ19(run, screenshot) {

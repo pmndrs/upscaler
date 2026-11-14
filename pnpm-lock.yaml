@@ -90,11 +90,7 @@ importers:
 
   packages/core: {}
 
-  packages/motion:
-    dependencies:
-      '@pmndrs/upscaler-core':
-        specifier: workspace:*
-        version: link:../core
+  packages/motion: {}
 
   packages/pixi:
     dependencies:

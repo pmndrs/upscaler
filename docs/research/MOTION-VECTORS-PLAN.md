@@ -1,7 +1,7 @@
 # Motion vectors — spec and plan
 
-**Status (2026-11-14): decided — its own repo, extracted right after Phase 1.**
-Phase 1 runs here; everything after it runs in the new repo,
+**Status (2026-11-14): Phase 1 done; Phase E (extraction) is next.** Phase 0
+and 1 ran here; everything after them runs in the new repo,
 [pmndrs/motion-vectors](https://github.com/pmndrs/motion-vectors) (created
 2026-11-14, private and empty until Phase E), published as
 `@pmndrs/motion-vectors`. The evidence this plan
@@ -62,6 +62,10 @@ through dependencies instead.
 
 ### 3.1 Motion contract
 
+The maintained draft is [`packages/motion/CONTRACT.md`](../../packages/motion/CONTRACT.md)
+(Phase 1), which adds the frame semantics and the oracle conformance bars. The
+table below is its summary.
+
 | Property | Contract |
 |---|---|
 | Value | NDC delta, **current − previous**, y up (three's `velocity` convention). A consumer converts to UV with `motionScale` (three: `(0.5, −0.5)`), and `prevUV = uv − motion · scale`. |
@@ -99,7 +103,7 @@ Requirements. Each one maps to a measured failure (MOTION.md) and a lab test (§
 | Product | Spec |
 |---|---|
 | Motion from depth | Depth + jittered inverse view-projection + current/previous unjittered view-projection → the §3.1 contract. Exact for static geometry, zero for object motion (flagged). Works for every engine that has depth. Built: `cameraMotion.ts`. |
-| Cut detection | A luma histogram compared with earth mover's distance, **entirely on the GPU** (no readback). Writes a 1×1 flag a consumer reads in the same frame to reset its history. Default threshold from the lab (EMD 0.5; the cut read 1.28, camera motion at most 0.18), re-measured on more cut types. Built today with a CPU comparison: `lumaHistogram.ts`. |
+| Cut detection | **Changed in Phase 1:** keyed on the depth-consistency share (pixels where no motion candidate lands on a matching previous depth), **entirely on the GPU** (no readback), writing a 1×1 flag a consumer reads in the same frame to reset its history. The lab's in-scene cuts read 44–99 %, fades, flashes, pans and a fast dolly at most 5 % (MOTION.md §7). The luma histogram (EMD) is the fallback for depth-less inputs only: it missed both in-scene cuts (EMD 0.34) and fired on a flash (14.2). Built today: the share is the warp residual's `noneValid`; the histogram is `lumaHistogram.ts` with a CPU comparison. |
 | Warping error | A reference-free temporal-stability metric with an occlusion mask, as a measurement export for benches. Not a runtime feature. Built: `motionResidual.ts`. |
 | Motion audit | Score candidate motion fields against the image (zero / engine / depth-derived / future flow). The lab's oracle; also usable by consumers to validate an engine. Built. |
 
@@ -148,43 +152,50 @@ file) rather than writing its own reductions.
 
 ## 4. Acceptance harness
 
-The motion lab (here: `bench/motion-lab.html`, `scripts/measure-motion.mjs`;
-in the new repo: its own bench) is the oracle. Every requirement passes only on a
-measured number.
+The motion lab (`packages/motion/lab/`, driven by
+`packages/motion/scripts/measure-motion.mjs`; it moves to the new repo as is) is
+the oracle. Every requirement passes only on a measured number.
 
-Cases to add in Phase 1, each with a **hand-written oracle velocity** (the
-correct previous position written analytically for that scene):
+Built in Phase 1, each with a **hand-written oracle velocity** (the correct
+previous position written analytically for that scene) scored as endpoint error
+in render pixels (MOTION.md §7):
 
 - **Animated wave** (`sin(kx + t)`): the node's motion matches the oracle and beats zero motion.
 - **A→B move through `positionNode`, then a hold at B**: the per-frame step while moving, 0 while holding.
 - **Morph weight ramp, then a hold**: matches the oracle; 0 while holding.
-- **Several renders in one animation-loop tick**: matches a one-render-per-tick run.
-- **Turning jitter on after warm-up**: no motion on a still scene.
+- **Several renders in one animation-loop tick**: matches a one-render-per-tick run (`ticks`).
+- **Turning jitter on after warm-up**: no motion on a still scene (`jitter`).
 - **Water**: an animated wave plane with a sun glint and a scrolling normal map. This splits geometric motion from shading motion, and it is the scene for D3.
 - **A Q19-style camera track** (dolly, orbit, slide, scene receding) in the lab's
   own scene, replacing today's reuse of the upscaler's bench scenes.
 
-Pass bars carried over from MOTION.md: on camera motion, three's velocity and
-motion from depth agree (0.0040 on Q19's dolly/orbit segments); on the rigid box,
-three's velocity beats zero motion (0.0004 vs 0.0010). The new camera track's own
-numbers become the bar from Phase 1 on.
+Pass bars (Phase 1, three r186.1): the oracle and three's velocity agree to
+0.000 px on every camera-track segment and on every rigid object, which validates
+the oracle. Our node must hold that (≤ 0.01 px mean) on the same cases and bring
+every case where three fails (MOTION.md §7: 3–64+ px) to the same bar. Phase 0's
+warp-residual bars (Q19 0.0040 / rigid box 0.0004) are superseded.
 
-Cut detection adds a fade, a flash, a fast pan and a cut between similar shots,
-with zero false positives on the camera track.
+Cut detection: the `cuts` timeline has two in-scene cuts, a cut back after a pan,
+a fade, a one-frame flash and a fast pan; a detector must fire on exactly the
+three cut frames there and on none of the camera track's.
 
 ## 5. Code layout
 
-**Until extraction (Phase 1, here):**
+**Until extraction (after Phase 1, here):** everything that moves is under one folder.
 
 ```
-packages/motion/          → the new repo's src/ (core + /webgpu)
-bench/motion-lab.html …   → the new repo's bench
-scripts/measure-motion.mjs
+packages/motion/src/        → the new repo's src/ (core + /webgpu)
+packages/motion/lab/        → its lab (own scenes, oracle, three glue)
+packages/motion/scripts/    → its driver + copied CDP helpers
+packages/motion/CONTRACT.md → its contract
 ```
 
-- `packages/motion` **never imports `@pmndrs/upscaler-*`**. The one existing
-  import (the `TextureAllocator` type) gets its own copy in Phase 1; an eslint
-  rule enforces it.
+- Nothing under `packages/motion` imports the upscaler (`@pmndrs/upscaler*`,
+  `bench/`, the upscaler's `scripts/`); an eslint rule enforces it. Small glue
+  (texture allocator, GPU-texture lookup, CDP helpers) is copied.
+- The upscaler keeps its consumer side: `bench/motion-upscaler.html` and
+  `scripts/measure-motion-upscaler.mjs` (warping error on upscaled output, cut
+  resets), importing the package like any consumer.
 - Nothing in the published upscaler `dist/` touches it.
 
 **After extraction:** the new repo in the §3.4 shape. The upscaler keeps no copy;
@@ -197,22 +208,26 @@ dependency once it ships a feature that uses it.
 Motion from depth, the audit, warping error and CPU cut detection built and
 GPU-verified. Findings are in MOTION.md. Committed `f2e6b0b`.
 
-### Phase 1: get ready to leave (here; size: S)
-- Copy the allocator type; add the eslint rule from §5.
-- Give the lab its own scenes: the §4 oracle cases, water, and the Q19-style
-  camera track, so nothing depends on the upscaler's `BenchScene` or scenarios.
-- Write the contract (§3.1) as a draft doc next to the package.
-- ~~Decide the name and scope (§9).~~ Done 2026-11-14: `pmndrs/motion-vectors`.
+### Phase 1: get ready to leave (done, 2026-11-14)
+- Copied the allocator type; added the eslint rule from §5.
+- Gave the lab its own scenes (deformers, move-then-hold cases, water, a courtyard
+  track and a cut timeline) with per-object oracles and an exact endpoint-error
+  pass (`motionCompare.ts`), and moved it into `packages/motion/lab`.
+- Wrote the contract draft: `packages/motion/CONTRACT.md`.
+- Named it: `pmndrs/motion-vectors`.
 
-**Exit:** the lab runs every §4 case on its own scenes, three's numbers next to
-each oracle; `packages/motion` and the lab import nothing from the upscaler.
+**Exit (met):** the lab runs every §4 case on its own scenes with three's
+numbers next to each oracle (MOTION.md §7); nothing under `packages/motion`
+imports the upscaler. Finding that changes the spec: cut detection keys on
+depth consistency, not the histogram (§3.3).
 
 ### Phase E: extraction (size: S–M)
 1. Scaffold the (already created, empty) repo like the downsampler (§3.4): one package,
    subpath exports, optional peers, typecheck → test (GPU-free + SwiftShader GPU)
    → build → pack check in CI, plus the CDP harness for real-GPU runs.
-2. Move `packages/motion`, the lab and `measure-motion.mjs` **with history**
-   (`git filter-repo` or a subtree split).
+2. Move `packages/motion` (src, lab, scripts, contract) **with history**
+   (`git filter-repo --subdirectory-filter packages/motion`, plus the history of
+   the files that lived elsewhere before Phase 1).
 3. Move MOTION.md, this plan and the motion part of `engine-contract.md`;
    leave links in the upscaler.
 4. Remove the incubating copies from the upscaler. Its motion experiments
@@ -294,6 +309,8 @@ ships from there.
 | 2026-11-14 | Own repo, separate from the upscaler and the downsampler; extract right after Phase 1 | Agreed |
 | 2026-11-14 | Package shape follows the downsampler: one package, subpath per engine, optional peers | Agreed |
 | 2026-11-14 | Name: repo `pmndrs/motion-vectors`, package `@pmndrs/motion-vectors`; repo created under `pmndrs`, private until 0.x | Done |
+| 2026-11-14 | Phase 1 done: lab self-contained under `packages/motion`, exact oracle, contract draft | Done |
+| 2026-11-14 | Cut detection keys on depth consistency; the histogram is the depth-less fallback | Proposed (measured, MOTION.md §7) |
 | — | D1: `positionNode` previous feasibility | Pending (Phase 2) |
 | — | P: publish 0.x | Pending (review by 2026-12-15, proposed) |
 | — | D3: optical flow | Pending (Phase 5) |

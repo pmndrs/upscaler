@@ -38,15 +38,29 @@ export default tseslint.config(
         },
     },
     {
-        // The motion lab's analysis runs on a bare GPUDevice like the core; its
-        // GPU-free tests may use three's math to build reference matrices.
-        files: ['packages/motion/**/*.ts'],
+        // The motion package leaves for its own repo (pmndrs/motion-vectors)
+        // after Phase 1 of docs/research/MOTION-VECTORS-PLAN.md: nothing in it,
+        // lab and scripts included, may import the upscaler.
+        files: ['packages/motion/**/*.{ts,mjs}'],
+        rules: {
+            'no-restricted-imports': ['error', {
+                patterns: [{
+                    group: ['@pmndrs/upscaler', '@pmndrs/upscaler/*', '@pmndrs/upscaler-*', '**/packages/*/src/**', '**/bench/**', '**/scripts/*.mjs'],
+                    message: 'packages/motion must not import the upscaler (it moves to pmndrs/motion-vectors).',
+                }],
+            }],
+        },
+    },
+    {
+        // Its analysis runs on a bare GPUDevice; the GPU-free tests may use
+        // three's math for reference matrices, and the lab is the three harness.
+        files: ['packages/motion/src/**/*.ts'],
         ignores: ['packages/motion/**/*.test.ts'],
         rules: {
             'no-restricted-imports': ['error', {
                 patterns: [{
-                    group: ['three', 'three/*', '@babylonjs/*', 'pixi.js', 'pixi.js/*', '@pmndrs/upscaler-three*', '@pmndrs/upscaler-babylon*', '@pmndrs/upscaler-pixi*'],
-                    message: 'packages/motion must stay engine-free (it may import @pmndrs/upscaler-core).',
+                    group: ['three', 'three/*', '@babylonjs/*', 'pixi.js', 'pixi.js/*', '@pmndrs/upscaler', '@pmndrs/upscaler/*', '@pmndrs/upscaler-*'],
+                    message: 'packages/motion/src must stay engine-free and must not import the upscaler.',
                 }],
             }],
         },

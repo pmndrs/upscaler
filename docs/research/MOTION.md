@@ -4,9 +4,13 @@ Can we do better than three's `velocity` node, and what does motion analysis buy
 the upscaler beyond pixi? This lab measures it before anything ships. Nothing
 here is in the published package.
 
-**Status (2026-11-13, Apple Metal-3, three r186.1):** analysis passes and the lab
+**Status (2026-11-14, Apple Metal-3, three r186.1):** analysis passes and the lab
 are built and GPU-verified; every number below comes from exact GPU readback.
-No optical flow yet. That is deliberately gated on the results here (§7).
+Phase 1 (§7) gave the lab its own scenes and an exact per-object oracle, and
+moved it into `packages/motion` so it leaves with the package for
+[pmndrs/motion-vectors](https://github.com/pmndrs/motion-vectors). §2–§6 are
+the Phase 0 record (warp-residual proxy); §7 supersedes them where they overlap.
+No optical flow yet. That is deliberately gated on the results here (§8).
 
 ## 1. What was built
 
@@ -15,18 +19,21 @@ No optical flow yet. That is deliberately gated on the results here (§7).
 | Camera motion from depth | `packages/motion/src/shaders/cameraMotion.ts` | Unprojects render-res depth through the *jittered* inverse view-projection and reprojects through the current and previous *unjittered* ones. The result is three's `velocity` convention (NDC delta, current − previous), so the upscaler can consume it unchanged. Exact for static geometry; blind to object motion by construction. |
 | Warp residual | `packages/motion/src/shaders/motionResidual.ts` | Per pixel and per candidate motion field (zero motion is always candidate 0), warps the previous image by bilinear sampling and compares conditioned luma `l/(1+l)`. An occlusion test compares the previous linear depth at the warped position with the static-scene expectation (5 % relative). Per-workgroup reduction gives the mean residual plus valid / best / unexplained (> 0.02) / beaten / moving shares. Debug views: classification, per-candidate heat, per-candidate motion. |
 | Luma histogram | `packages/motion/src/shaders/lumaHistogram.ts` | 64 bins of conditioned luma, the cheapest form of FidelityFX Optical Flow's scene-change signal. Compared on the CPU (`math/histogram.ts`: Jensen–Shannon, earth mover's distance). |
-| `MotionAnalyzer` | `packages/motion/src/MotionAnalyzer.ts` | Engine-free orchestration on a bare `GPUDevice` (core's `TextureAllocator` seam). |
-| Lab page | `bench/motion-lab.html`, `bench/src/probes/motionLab.ts` | Runs bench scenarios (Q3/Q4/Q10/Q19 …) or its own `deformers` scene through native / bilinear / spatial / temporal paths. The upscaler can be fed three's velocity or camera motion. |
-| Driver | `scripts/measure-motion.mjs` | Experiments `audit-deformers`, `audit-q19`, `warp`, `cut`, plus `probe` for ad-hoc requests. |
+| Oracle comparison | `packages/motion/src/shaders/motionCompare.ts` | Per object id, endpoint error in render pixels of each candidate against an oracle rendered in the same pass (§7). |
+| `MotionAnalyzer` | `packages/motion/src/MotionAnalyzer.ts` | Engine-free orchestration on a bare `GPUDevice` (its own copy of the `TextureAllocator` seam). |
+| Motion lab | `packages/motion/lab/` | The package's own scenes (deformers, move-then-hold cases, water, a courtyard camera track and a cut timeline) with oracle materials. No upscaler. |
+| Lab driver | `packages/motion/scripts/measure-motion.mjs` | Experiments `oracle`, `deformers`, `cases`, `ticks`, `jitter`, `water`, `track`, `cuts`, plus `probe`. |
+| Upscaler probe | `bench/motion-upscaler.html`, `bench/src/probes/motionUpscaler.ts`, `scripts/measure-motion-upscaler.mjs` | The upscaler's consumer of the package: Q19/Q10 through native / bilinear / spatial / temporal (`audit-q19`, `warp`, `cut`). Stays in the upscaler. |
 
 ```bash
-node scripts/measure-motion.mjs --url http://127.0.0.1:5611   # all experiments, ~20 s
-node scripts/measure-motion.mjs --experiments probe \
-  --request '{"scenario":"deformers","path":"native","end":140,"view":"audit-motion","heatCandidate":1}'
+node packages/motion/scripts/measure-motion.mjs          # the lab, all experiments, ~2 min
+node packages/motion/scripts/measure-motion.mjs --experiments probe --request '{"scene":"water","view":"audit-heat","heatCandidate":3}'
+node scripts/measure-motion-upscaler.mjs                  # upscaler experiments (§4–§6)
 ```
 
-Raw output lands in `bench/results/raw/motion/<label>/` (gitignored); rerun the
-command to regenerate it.
+Raw output lands in `packages/motion/results/<label>/` and
+`bench/results/raw/motion/<label>/` (both gitignored); rerun the command to
+regenerate it.
 
 ### Reading the metrics
 
@@ -154,7 +161,103 @@ reference:
 Without a reset, the previous view ghosts for ~1 s. Today the upscaler relies
 on the app to call `resetHistory()` on cuts.
 
-## 7. What's worth building next
+## 7. Phase 1: an exact oracle in the lab's own scenes (2026-11-14)
+
+Every lab object now carries an **oracle**: a material output that re-evaluates
+the scene's analytic state at the previous frame (its own unjittered camera
+matrices, its own previous model matrices, deformations re-run at last frame's
+time) and writes the exact contract value. Oracle and candidates are written for
+the same rasterized point, so `motionCompare.ts` measures each candidate's error
+in render pixels, with no warping, aliasing or occlusion in the way. The warp
+residual (§2) stays for what the oracle can't see: shading motion.
+
+1280×720, no jitter unless stated. "Moved" is the oracle's mean motion; errors
+are means over the object's pixels (per-pixel errors capped at 64 px, so a capped
+mean is a lower bound).
+
+### The oracle is right where three is known to be
+
+Courtyard camera track (Q19's motion types in the lab's own scene, up to
+33 px/frame): three's `velocity` and motion from depth both read **0.000 px**
+against the oracle on every camera segment, for static geometry and for
+instrumented props. On moving props, motion from depth misses all of it
+(1.68 px error = 1.68 px moved), as designed. This is the new bar for the camera
+track; per-segment numbers are in the `track` experiment.
+
+### three's `velocity` against the oracle
+
+| Case | Moved | Zero motion | three | three > 1 px |
+|---|---|---|---|---|
+| Static `positionNode` displacement | 0 | 0 | **3.24 px** | 88 % |
+| Animated displacement `sin(5x + 3t)` | 0.16 px | 0.16 | **3.14** | 85 % |
+| Morph target, oscillating | 0.09 | 0.09 | **4.87** | 73 % |
+| Rigid rotating box (control) | 2.37 | 2.37 | 0.000 | 0 % |
+| Ball re-entering the frustum | 14.5 | 14.5 | 0.024 (64+ on frame 163) | 0 % |
+| `positionNode` A→B, while moving | 3.12 | 3.12 | **51.9** | 98 % |
+| … then holding at B | 0 | 0 | **64+ (cap)** | 100 % |
+| Morph ramp 0→1, while ramping | 0.19 | 0.19 | **5.70** | 79 % |
+| … then holding at 1 | 0 | 0 | **11.6** | 95 % |
+| Rigid A→B, moving / holding (control) | 3.12 / 0 | | 0.000 / 0.000 | 0 % |
+| Water swell (geometric) | 0.39 | 0.39 | **11.8** | 94 % |
+| Bobbing buoy (rigid) | 0.29 | 0.29 | 0.000 | 0 % |
+
+So for deformation, three is not just imprecise: it is **worse than reporting no
+motion at all**, by 1–2 orders of magnitude, and the error doesn't fade when the
+deformation stops. It reports the total offset from the undeformed geometry, so a
+held pose or a static displacement looks like fast motion forever.
+
+### Frame history and jitter
+
+| Case | Moved | three | three > 0.25 px |
+|---|---|---|---|
+| Camera track, 1 render per tick | 7.47 px | 0.000 | 0 % |
+| 2 renders per tick | 7.47 | **10.55** | 98 % |
+| 4 renders per tick | 7.47 | **23.93** | 98 % |
+| Still scene, jitter switched on at frame 10, one stable matrix | 0 | 0.000 | 0 % |
+| Same, materials built under `setProjectionMatrix(null)` first | 0 | **0.364** | 90 % |
+
+With several renders per tick it's worse than "stale": three rolls the previous
+camera only on a new tick, so within a tick the previous camera stays pinned to
+the tick before last while the current one keeps moving, and the error grows by
+one frame of motion per render (≈ 1.5 frames of motion on average at 2 per tick).
+The jitter trap reproduces §3's finding exactly: about half a pixel of jitter
+reported as motion on every pixel of a still scene.
+
+### Water: shading motion
+
+On the water scene the oracle explains the geometry exactly, but its warp
+residual is no better than zero motion's (0.0013 vs 0.0013; 1.06 % vs 1.01 %
+unexplained): at 0.39 px/frame of swell, what changes in the image is the glint
+and the scrolling ripples, which no motion vector carries. three's motion makes
+the image *worse* (0.0058, 1.71 % unexplained). This is the D3 scene: flow is
+justified only if it cuts that unexplained share.
+
+### Cut detection: the histogram fails inside one scene
+
+The lab's cut timeline cuts between views of the **same** courtyard, which is the
+common case in practice (shot/reverse shot, a camera switch in a game). The
+histogram can't tell those cuts from a lighting change:
+
+| Event | EMD (bins) | JS (bits) | Pixels no candidate can reproject |
+|---|---|---|---|
+| Hard cut to another angle (frame 30) | 0.344 | 0.037 | **44.4 %** |
+| Cut between similar shots (frame 60) | 0.355 | 0.039 | **66.5 %** |
+| Cut back after a pan (frame 270) | 0.915 | 0.141 | **98.5 %** |
+| Fade to 5 % and back (max per frame) | 0.346 | 0.228 | 0.0 % |
+| One-frame ×6 flash | **14.19** | 0.748 | 0.0 % |
+| Fast pan, 3°/frame | 0.066 | 0.004 | 1.3 % |
+| Courtyard track, worst motion segment (fast dolly) | — | — | 4.95 % |
+
+Phase 0's EMD threshold of 0.5 (fit on Q10, where the cut changes the whole
+palette) misses both in-scene cuts and fires on the flash; no histogram threshold
+separates cuts from fades here. The **depth-consistency share** does: the
+fraction of pixels where neither the engine's motion nor zero motion lands on a
+matching previous depth. It reads 44–99 % on every cut and at most 5 % on
+everything else (≈ 9× margin), because a cut is exactly the frame where geometry
+stops being continuous. Lighting changes don't touch depth at all. It needs
+depth, so the histogram stays the fallback for depth-less inputs (pixi, video).
+
+## 8. What's worth building next
 
 The agreed spec and phased plan, with decision gates and the intended split
 into its own package, is [MOTION-VECTORS-PLAN.md](MOTION-VECTORS-PLAN.md).
@@ -162,10 +265,12 @@ into its own package, is [MOTION-VECTORS-PLAN.md](MOTION-VECTORS-PLAN.md).
 Ranked by value over cost. Each needs its cost measured (GPU timing) before it
 ships.
 
-1. **Automatic cut detection in the upscaler.** It's a clear win and cheap. Port
-   the histogram and EMD to the GPU (no readback; the reset feeds the next
-   frame's history weight) and gate it behind an option. Test cuts other than
-   Q10, plus a fade and a flash, to set the threshold.
+1. **Automatic cut detection in the upscaler.** It's a clear win and cheap.
+   Phase 1 (§7) changed the signal: key it on the depth-consistency share
+   (pixels no motion candidate can reproject), not the luma histogram, which
+   misses cuts inside one scene and fires on flashes. Compute it on the GPU (no
+   readback; the reset feeds the next frame's history weight), behind an option.
+   The upscaler's own disocclusion pass may already hold most of this signal.
 2. **A depth-only motion mode** (`velocity` omitted → camera motion from depth)
    for static scenes. Measure the saved MRT and vertex cost, and document the
    object-motion limit.

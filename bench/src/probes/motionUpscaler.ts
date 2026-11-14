@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { checker, color as colorNode, mix, mrt, normalLocal, output, positionLocal, sin, texture, uniform, uv, velocity } from 'three/tsl';
+import { mrt, output, texture, velocity } from 'three/tsl';
 
 import { Upscaler, type RuntimeSettings } from '@pmndrs/upscaler';
 import { createThreeTextureAllocator } from '@pmndrs/upscaler-three/internal/textureAllocator';
@@ -18,10 +18,13 @@ import { createBenchScene } from '../BenchScene';
 import { getBenchmarkScenario } from '../benchmark/scenarios';
 
 /**
- * Motion lab (EXPERIMENTAL), driven by `scripts/measure-motion.mjs` over CDP.
+ * Upscaler motion probe (EXPERIMENTAL), driven by `scripts/measure-motion-upscaler.mjs`
+ * over CDP: the upscaler's consumer of the motion package. The motion lab
+ * itself (oracle comparisons, its own scenes) lives in `packages/motion/lab`
+ * and moves with the package to pmndrs/motion-vectors.
  *
- * Renders a bench scenario (or the lab's own `deformers` scene) through one
- * upscale path and measures, per frame, with exact GPU readback:
+ * Renders a bench scenario through one upscale path and measures, per frame,
+ * with exact GPU readback:
  *
  * - **audit** (render res): how well zero motion, three's `velocity` and
  *   camera-motion-from-depth each warp the previous *input* onto the current
@@ -43,7 +46,6 @@ import { getBenchmarkScenario } from '../benchmark/scenarios';
 
 type LabPath = 'native' | 'bilinear' | 'spatial' | 'temporal';
 type LabView = 'output' | 'audit' | 'warp' | 'audit-heat' | 'warp-heat' | 'audit-motion' | 'warp-motion';
-type DeformerName = 'displaced' | 'wave' | 'morph' | 'rigid' | 'reentry';
 
 interface LabRequest {
     scenario: string;
@@ -63,10 +65,6 @@ interface LabRequest {
     heatCandidate?: number;
     reference?: boolean;
     settings?: Partial<RuntimeSettings>;
-    /** Deformers subset (default: all). */
-    objects?: DeformerName[];
-    /** Deformers cast shadows (default true). */
-    castShadows?: boolean;
 }
 
 interface FrameRecord {
@@ -114,113 +112,8 @@ const camera = new THREE.PerspectiveCamera(50, 16 / 9, 0.1, 200);
 camera.layers.enable(1);
 const bench = createBenchScene();
 
-//* Deformers Scene — each object trips (or controls for) one velocity gap
-const labTime = uniform(0);
-const deformers = new THREE.Scene();
-deformers.background = new THREE.Color(0x1b2030);
-const checkerColor = (a: number, b: number, scale: number) =>
-    mix(colorNode(a), colorNode(b), checker(uv().mul(scale)));
-function checkerMaterial(a: number, b: number, scale: number): THREE.MeshStandardNodeMaterial {
-    const material = new THREE.MeshStandardNodeMaterial({ roughness: 0.6, metalness: 0 });
-    material.colorNode = checkerColor(a, b, scale);
-    return material;
-}
-{
-    deformers.add(new THREE.HemisphereLight(0xbcd0ff, 0x40362c, 0.8));
-    const sun = new THREE.DirectionalLight(0xffffff, 2.6);
-    sun.position.set(4, 9, 5);
-    sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
-    Object.assign(sun.shadow.camera, { left: -10, right: 10, top: 10, bottom: -10 });
-    deformers.add(sun);
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), checkerMaterial(0x8a8f99, 0x30343c, 40));
-    floor.rotation.x = -Math.PI / 2;
-    floor.receiveShadow = true;
-    deformers.add(floor);
-}
-const deformerObjects = new Map<DeformerName, THREE.Object3D>();
-{
-    // Static displacement through material.positionNode: nothing moves, but
-    // three's positionPrevious is the undisplaced geometry.
-    const displaced = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 2.4, 96, 96), checkerMaterial(0xe0c060, 0x404850, 10));
-    (displaced.material as THREE.MeshStandardNodeMaterial).positionNode = positionLocal.add(
-        normalLocal.mul(sin(positionLocal.x.mul(5)).mul(0.3)),
-    );
-    displaced.position.set(-4.6, 1.5, 0);
-    displaced.rotation.y = 0.55;
-    // Animated displacement: real motion three cannot see.
-    const wave = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 2.4, 96, 96), checkerMaterial(0x60c0e0, 0x404850, 10));
-    (wave.material as THREE.MeshStandardNodeMaterial).positionNode = positionLocal.add(
-        normalLocal.mul(sin(positionLocal.x.mul(5).add(labTime.mul(3))).mul(0.3)),
-    );
-    wave.position.set(-1.6, 1.5, 0);
-    wave.rotation.y = 0.2;
-    // Morph target: same gap via morphAttributes.
-    const sphere = new THREE.SphereGeometry(0.9, 96, 64);
-    const base = sphere.attributes.position;
-    const target = new Float32Array(base.count * 3);
-    for (let i = 0; i < base.count; i++) {
-        const x = base.getX(i);
-        const y = base.getY(i);
-        const z = base.getZ(i);
-        const bulge = 1 + 0.35 * Math.sin(y * 6);
-        target.set([x * bulge, y, z * bulge], i * 3);
-    }
-    sphere.morphAttributes.position = [new THREE.Float32BufferAttribute(target, 3)];
-    const morph = new THREE.Mesh(sphere, checkerMaterial(0xd070a0, 0x403040, 12));
-    morph.updateMorphTargets();
-    morph.position.set(1.5, 1.4, 0);
-    morph.castShadow = true;
-    // Rigid control: three's velocity is exact here.
-    const rigid = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.4, 1.4), checkerMaterial(0x80d080, 0x304030, 6));
-    rigid.position.set(4.4, 1.3, 0);
-    rigid.castShadow = true;
-    // Leaves the frustum on the right, travels down off-screen, comes back
-    // lower: three's previous matrix is "last drawn", not "last frame".
-    const reentry = new THREE.Mesh(new THREE.SphereGeometry(0.45, 48, 32), checkerMaterial(0xf08040, 0x502010, 8));
-    reentry.castShadow = true;
-    for (const [name, object] of [
-        ['displaced', displaced],
-        ['wave', wave],
-        ['morph', morph],
-        ['rigid', rigid],
-        ['reentry', reentry],
-    ] as const) {
-        object.name = name;
-        deformerObjects.set(name, object);
-        deformers.add(object);
-    }
-}
-
-function applyDeformers(frame: number): void {
-    const t = frame / 60;
-    labTime.value = t;
-    const morph = deformerObjects.get('morph') as THREE.Mesh;
-    morph.morphTargetInfluences![0] = 0.5 + 0.5 * Math.sin(t * 2);
-    const rigid = deformerObjects.get('rigid')!;
-    // ~3 px/frame at the corners: below ~1 px, bilinear resampling error on aliased
-    // edges equals the error of not moving, and the audit cannot tell them apart.
-    rigid.rotation.set(t * 1.2, t * 2.4, 0);
-    // Re-entry path (frames): 0–79 right along y 3.2, 80–119 down off-screen, 120+ back left at y 0.7.
-    const reentry = deformerObjects.get('reentry')!;
-    const f = frame % 240;
-    if (f < 80) reentry.position.set(-2 + (f / 80) * 13, 3.2, 1.5);
-    else if (f < 120) reentry.position.set(11 + ((f - 80) / 40) * 1, 3.2 - ((f - 80) / 40) * 2.5, 1.5);
-    else reentry.position.set(12 - ((f - 120) / 120) * 14, 0.7, 1.5);
-    camera.position.set(0, 3.2, 9);
-    camera.up.set(0, 1, 0);
-    camera.lookAt(0, 1.4, 0);
-}
-
 //* Scene State
 function applyFrame(scenario: string, frame: number): { scene: THREE.Scene; resetHistory: boolean } {
-    if (scenario === 'deformers') {
-        applyDeformers(frame);
-        camera.updateProjectionMatrix();
-        camera.updateMatrixWorld(true);
-        deformers.updateMatrixWorld(true);
-        return { scene: deformers, resetHistory: false };
-    }
     const definition = getBenchmarkScenario(scenario as BenchmarkScenarioId);
     const state = definition.frame(Math.min(frame, definition.endFrame));
     camera.position.fromArray(state.cameraPosition);
@@ -315,10 +208,6 @@ async function run(request: LabRequest): Promise<{ frames: FrameRecord[]; render
         await upscaler.prepare();
         upscaler.resetHistory();
     }
-    for (const [name, object] of deformerObjects) {
-        object.visible = !request.objects || request.objects.includes(name);
-        object.castShadow = request.castShadows ?? (name !== 'displaced' && name !== 'wave');
-    }
     bench.resetDeterministicState();
     analyzer.reset();
 
@@ -343,7 +232,7 @@ async function run(request: LabRequest): Promise<{ frames: FrameRecord[]; render
         const color = inputTarget!.textures[0];
         const engineVelocity = inputTarget!.textures[1];
         const view4 = camera.matrixWorldInverse;
-        const early = device.createCommandEncoder({ label: 'motion-lab-early' });
+        const early = device.createCommandEncoder({ label: 'motion-upscaler-early' });
         analyzer.beginFrame(early);
         analyzer.encodeCameraMotion(early, gpu(inputTarget!.depthTexture!), {
             viewProjection: new THREE.Matrix4().multiplyMatrices(unjittered, view4).elements,
@@ -389,7 +278,7 @@ async function run(request: LabRequest): Promise<{ frames: FrameRecord[]; render
         }
 
         //* Analysis
-        const late = device.createCommandEncoder({ label: 'motion-lab-late' });
+        const late = device.createCommandEncoder({ label: 'motion-upscaler-late' });
         const motions = [gpu(engineVelocity), analyzer.cameraMotion.gpu];
         const previousInput = analyzer.previous('input');
         const previousOutput = analyzer.previous('output');

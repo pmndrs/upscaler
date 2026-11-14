@@ -2,15 +2,12 @@
     "name": "@pmndrs/upscaler-motion",
     "version": "0.0.0",
     "private": true,
-    "description": "EXPERIMENTAL engine-free motion analysis for @pmndrs/upscaler: camera motion from depth, motion-vector audit (warp residuals), luma histograms for cut detection. Bench-only; not part of the published package.",
+    "description": "EXPERIMENTAL motion vectors for any WebGPU pipeline: camera motion from depth, motion-vector audit, cut detection, and the GPU lab. Incubating here; moves to pmndrs/motion-vectors (@pmndrs/motion-vectors) after Phase 1 (docs/research/MOTION-VECTORS-PLAN.md).",
     "license": "MIT",
     "type": "module",
     "sideEffects": false,
     "exports": {
         ".": "./src/index.ts",
         "./*": "./src/*.ts"
-    },
-    "dependencies": {
-        "@pmndrs/upscaler-core": "workspace:*"
     }
 }
