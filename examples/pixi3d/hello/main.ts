@@ -13,12 +13,12 @@ import { Application, RenderTexture, Sprite, Texture } from 'pixi.js';
 import { QualityMode, Upscaler, type UpscalePath } from '@pmndrs/upscaler/pixi';
 
 /**
- * The pixi adapter under a pixi-3d scene (closed beta, examples/pixi3d/README.md):
+ * The pixi adapter under a pixi-3d scene (`@pixi/3d` from npm, examples/pixi3d/README.md):
  * a View3D renders into a reduced-size RenderTexture, the spatial path (FSR1:
  * EASU + RCAS) upscales it between pixi renders, and a Sprite on the stage
- * presents the output. pixi-3d has no motion vectors or projection jitter yet,
- * so this is the color-only path; once it does, the same adapter runs the
- * temporal path (docs/pixi.md#temporal).
+ * presents the output. pixi-3d 0.1.0 has projection jitter (`camera.jitter`) but
+ * its velocity is camera motion only, so this is the color-only path; with object
+ * motion the same adapter runs the temporal path (docs/pixi.md#temporal).
  */
 
 type Mode = 'spatial' | 'bilinear' | 'native';

@@ -2,7 +2,7 @@
 
 `@pmndrs/upscaler/pixi` runs the upscaler on pixi.js v8's `WebGPURenderer`. It is
 the same `UpscalerCore` the three and Babylon adapters wrap. It's **experimental**
-and verified on pixi.js 8.22 on Chrome. It **ships the spatial (FSR1) path**
+and verified on pixi.js 8.22 and 8.23 on Chrome. It **ships the spatial (FSR1) path**
 for now: pixi has no depth, motion vectors or camera of its own, and the temporal
 path needs all three (see [Temporal](#temporal)).
 
@@ -89,12 +89,13 @@ display-ready and the presenting `Sprite` needs nothing more. Don't
 dynamically imports a backend chunk during `init()`, and in a production build
 that chunk imports back from the entry chunk, so the two wait on each other and
 the app never starts (dev serves modules separately and hides it). Start from an
-`async function main()` instead, as the example does. pixi-3d is in
-closed beta and isn't on npm; the example runs once the beta tarball is unpacked
-locally ([examples/pixi3d/README.md](../examples/pixi3d/README.md)). Verified on
-`@pixi/3d` 0.1.0-beta.2, pixi.js 8.22, Chrome, 2026-10-24: spatial, bilinear and
-native render upright with no WebGPU or pixi warnings, and FSR1 is visibly
-sharper than bilinear on the fence slats.
+`async function main()` instead, as the example does. `@pixi/3d` is on npm
+(0.1.0, MIT) and a devDependency of this repo. First verified on the closed beta
+(`@pixi/3d` 0.1.0-beta.2, pixi.js 8.22, Chrome, 2026-10-24): spatial, bilinear
+and native render upright with no WebGPU or pixi warnings, and FSR1 is visibly
+sharper than bilinear on the fence slats. Re-verified on the npm `@pixi/3d` 0.1.0
+with pixi.js 8.23, Chrome, 2026-11-16: the same in all three modes, and the plain
+pixi example (P1) unchanged.
 
 ## Temporal
 
@@ -116,30 +117,26 @@ guessing.
 
 ### What pixi-3d still needs
 
-Checked against the `@pixi/3d` beta source on 2026-10-24 (beta.2). The camera
-facts are there and depth is close; jitter and motion vectors need pixi-3d
-changes.
+Updated for the public `@pixi/3d` 0.1.0 on 2026-11-16, from its published API and
+types. 0.1.0 closed the jitter gap and added camera-only motion vectors; object
+and deformation motion are still missing. None of this is GPU-verified through
+the upscaler yet.
 
-| Input | pixi-3d today | Gap |
+| Input | pixi-3d 0.1.0 | Gap |
 | --- | --- | --- |
 | Camera facts | `Camera3D` has public `near`, `far` and `mode` (`'perspective'`/`'orthographic'`); depth is standard (`less`), not reversed | none |
-| Depth | the render graph keeps scene depth (`depth24plus-stencil8`) and hands a `Pass3D` an `opaqueDepth` copy | no public way to reach its `GPUTexture` from app code; the core already takes stencil formats (it binds a depth-only view) |
-| Jitter | — | `buildProjection()` rebuilds `camera.projection` from the camera's settings on every render, with no hook for a sub-pixel offset afterwards |
-| Motion vectors | — | no previous-frame model or view-projection matrices, and no velocity output. Skinned, morphed and particle meshes need their own previous-frame data |
+| Depth | scene depth (`depth24plus-stencil8`) reaches a `Pass3D` as a graph handle; inside a render, `graph.getTexture(handle, session)` plus `renderer.texture.getGpuSource()` gives the `GPUTexture` | only from inside a pass, so a temporal driver runs as a `Pass3D`; the core already takes stencil formats (it binds a depth-only view) |
+| Jitter | `camera.jitter` (a `Point`, in scene pixels, `+x` right, `+y` down); only the drawn image moves, the matrices ignore it | none on pixi-3d's side; the sign against `beginFrame()`'s jitter still needs the A/B against native |
+| Motion vectors | `velocityOutput` (`@pixi/3d/extras`): `rg16float` UV delta clamped to ±1, camera motion only (a moving object reads zero), jitter cancelled | object and deformation motion. [`@pmndrs/motion-vectors`](https://github.com/pmndrs/motion-vectors) has an experimental pixi-3d scene output with object motion for tracked meshes, and engine-side proposals are drafted |
 
-Once pixi-3d has a jitter hook and a velocity output, our side is small: the
-adapter already takes depth, motion and a `FrameCamera`. What's left is an
-example plus GPU checks of the jitter sign and the motion convention
-(`motionScale`), A/B'd against native the way the Babylon adapter was. Two
-settings change for temporal input: `View3D({ toneMapping: 'none' })` into an
-`rgba16float` target (the upscaler accumulates linear HDR, so tone-map after it),
-and `antialias: false`, because the temporal path is the anti-aliaser.
-
-A camera-viewport shift could fake the jitter today: `buildProjection()` keeps
-every pixel in place when the viewport rect moves, so a sub-pixel move of
-`camera.viewport` would shift the image by that amount. It's untested, and it
-clips a sub-pixel strip at one edge each frame. It still leaves motion vectors
-missing, so it isn't a path to temporal on its own.
+With camera motion only, every moving object would ghost, so the temporal path
+waits for object motion. After that our side is small: the adapter already takes
+depth, motion and a `FrameCamera`. What's left is an example plus GPU checks of
+the jitter sign and the motion convention (`motionScale`), A/B'd against native
+the way the Babylon adapter was. Two settings change for temporal input:
+`View3D({ toneMapping: 'none' })` into an `rgba16float` target (the upscaler
+accumulates linear HDR, so tone-map after it), and `antialias: false`, because
+the temporal path is the anti-aliaser.
 
 ## pixi APIs the adapter depends on
 
