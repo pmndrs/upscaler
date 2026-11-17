@@ -1,15 +1,9 @@
-import { existsSync, readFileSync } from 'fs';
 import { resolve } from 'path';
 import { defineConfig } from 'vite';
 
 // Standalone examples gallery. Serves this folder; the library is consumed
 // straight from ../src so shader/pipeline edits hot-reload (same as the bench).
 const root = __dirname;
-// The pixi-3d closed beta isn't on npm and must not be committed: its examples
-// run only when a beta tester has unpacked the release tarball here
-// (examples/pixi3d/README.md). Without it they build as a setup notice.
-const pixi3d = resolve(root, 'pixi3d/vendor');
-const hasPixi3d = existsSync(resolve(pixi3d, 'package.json'));
 
 export default defineConfig(({ mode }) => {
     const packageConsumer = mode === 'package-consumer';
@@ -34,16 +28,6 @@ export default defineConfig(({ mode }) => {
                 },
             },
         }, {
-            // Without the beta, a pixi-3d example's main.ts loads as the setup notice.
-            // Its source, not an import of it: the root package.json's
-            // `sideEffects: false` lets the build drop a side-effect-only import.
-            name: 'pixi3d-optional',
-            load(id: string) {
-                if (hasPixi3d) return;
-                const path = id.split('?')[0].replaceAll('\\', '/');
-                if (/\/pixi3d\/[^/]+\/main\.ts$/.test(path)) return readFileSync(resolve(root, 'pixi3d/unavailable.ts'), 'utf8');
-            },
-        }, {
             name: 'pathtracer-texture-source-compat',
             transform(code: string, id: string) {
                 if (!id.split('?')[0].replaceAll('\\', '/').endsWith('/three-gpu-pathtracer/src/uniforms/EquirectHdrInfoUniform.js')) return;
@@ -66,12 +50,6 @@ export default defineConfig(({ mode }) => {
             alias: packageConsumer
                 ? { '@pmndrs/upscaler': packageEntry }
                 : [
-                      ...(hasPixi3d
-                          ? [
-                                { find: /^@pixi\/3d$/, replacement: resolve(pixi3d, 'dist/index.mjs') },
-                                { find: /^@pixi\/3d\/extras$/, replacement: resolve(pixi3d, 'dist/extras/index.mjs') },
-                            ]
-                          : []),
                       { find: /^@pmndrs\/upscaler$/, replacement: resolve(root, '../src/index.ts') },
                       { find: /^@pmndrs\/upscaler\/(core|three|babylon|pixi)$/, replacement: resolve(root, '../src/$1.ts') },
                   ],
