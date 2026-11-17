@@ -49,6 +49,15 @@ and scenes held out from tuning.
   renders without a negative texture mip bias. A finer-LOD (`--scale 2`)
   reference scores Q1's temporal output 1.9 dB lower, which is consistent
   with that. A direct A/B is in progress separately.
+- **Motion gap diagnosed (2026-11-10):** the dominant cause is accumulation
+  length under motion. A 24-frame chain of Catmull-Rom history resamples
+  costs thin high-contrast features 1.6–2.6 dB. Locks, the shading detector,
+  disocclusion, auto-exposure, mip bias and harness alignment each measure
+  ≤ 0.3 dB. A bench-only motion-adaptive cap (`accumulate-motion-cap2-early-v1`)
+  puts temporal at or above FSR1 on every Q4/Q19 motion window with still
+  scenes unchanged, and recovers +0.97 dB on the held-out Q2. Ranking,
+  evidence and commands: `bench/docs/REFERENCE-QUALITY.md`, "Why temporal
+  trails FSR1 in motion".
 
 ---
 
