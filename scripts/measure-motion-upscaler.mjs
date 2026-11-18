@@ -1,19 +1,22 @@
 #!/usr/bin/env node
 /**
- * Upscaler motion meter (EXPERIMENTAL): the upscaler's consumer of the motion
- * package. Drives bench/motion-upscaler.html over CDP and reads every number back
- * exactly from the GPU. The motion lab itself (oracle comparisons, its own
- * scenes) lives in pmndrs/motion-vectors (scripts/measure-motion.mjs).
+ * Upscaler motion meter (EXPERIMENTAL): the upscaler's consumer of
+ * `@pmndrs/motion-vectors` (installed from vendor/motion-vectors/, refreshed by
+ * scripts/update-motion-vectors.mjs). Drives bench/motion-upscaler.html over
+ * CDP and reads every number back exactly from the GPU. The motion lab itself
+ * (oracle comparisons, its own scenes) lives in pmndrs/motion-vectors.
  *
  * Experiments (--experiments, comma-separated):
  * - audit-q19: how well zero motion, three's `velocity` and camera motion from
  *   depth warp the previous input onto the current one, per Q19 segment.
  * - warp: Q19 through native / bilinear / spatial / temporal (+ temporal fed
- *   camera motion instead of three's velocity): output warping error (temporal
- *   stability under motion) and mean |output − 2×2 SSAA reference|, per segment.
- * - cut: Q10's camera cut (frame 60) — histogram distances per frame, the
- *   false-positive margin over Q19's motion, and the temporal path through the
- *   cut with history reset by the scenario, never, or by the detector.
+ *   the package's node, and camera motion from depth): output warping error
+ *   (`WarpingError`, judged through the node) and mean
+ *   |output − 2×2 SSAA reference|, per segment.
+ * - cut: Q10's camera cut (frame 60): the GPU cut detector's share and the
+ *   histogram distances per frame, the false-positive margin over Q19's
+ *   motion, and the temporal path through the cut with history reset by the
+ *   scenario, never, the GPU detector (`auto`) or the histogram.
  *
  * Usage:
  *   node scripts/measure-motion-upscaler.mjs [--experiments audit-q19,warp,cut]
@@ -69,7 +72,7 @@ const Q19_SEGMENTS = [
     ['hold-8', 980, 1039], ['dolly-forward-fast', 1040, 1059], ['hold-9', 1060, 1119],
 ].map(([name, start, end]) => ({ name, start, end }));
 const MOTION_SEGMENTS = Q19_SEGMENTS.filter((segment) => !/^(still|hold)/.test(segment.name));
-const CANDIDATES = ['zero', 'engine', 'camera'];
+const CANDIDATES = ['zero', 'engine', 'camera', 'node'];
 
 //* Helpers
 const mean = (values) => {
@@ -79,7 +82,7 @@ const mean = (values) => {
 const fmt = (value, digits = 4, pad = 9) => (value === null ? '—' : value.toFixed(digits)).padStart(pad);
 const pct = (value, digits = 2, pad = 8) => (value === null ? '—' : (100 * value).toFixed(digits)).padStart(pad);
 
-/** Mean per-candidate stats over frames for one residual slot ('audit' | 'warp'). */
+/** Mean per-candidate stats over frames for the audit residual slot. */
 function candidateSummary(frames, key) {
     return CANDIDATES.map((name, index) => {
         const stats = frames.map((frame) => frame[key]?.candidates[index]).filter(Boolean);
@@ -209,7 +212,9 @@ async function probe(run, screenshot) {
     for (const request of Array.isArray(parsed) ? parsed : [parsed]) {
         const result = await run(request);
         console.log(`  ${JSON.stringify(request)}`);
-        for (const key of ['audit', 'warp']) printCandidates(key, candidateSummary(result.frames, key));
+        printCandidates('audit', candidateSummary(result.frames, 'audit'));
+        const warped = result.frames.filter((f) => f.warp);
+        console.log(`  warp: mean error ${fmt(mean(warped.map((f) => f.warp.meanError)))}, scored ${pct(mean(warped.map((f) => f.warp.scored)))}%`);
         results.push(result);
     }
     await screenshot(cli.name ?? 'probe');
@@ -222,11 +227,11 @@ async function auditQ19(run, screenshot) {
         segment: segment.name,
         candidates: candidateSummary(frames.filter((f) => f.frame >= segment.start && f.frame <= segment.end), 'audit'),
     }));
-    console.log('  segment              engine res   camera res   zero res  | engine valid%  camera valid% | camera beaten%');
+    console.log('  segment              engine res   node res   camera res   zero res  | engine valid%  node valid%  camera valid% | camera beaten%');
     for (const row of segments) {
-        const [zero, engine, cam] = row.candidates;
+        const [zero, engine, cam, node] = row.candidates;
         console.log(
-            `  ${row.segment.padEnd(20)} ${fmt(engine.meanResidual)}    ${fmt(cam.meanResidual)}  ${fmt(zero.meanResidual)}  | ${pct(engine.valid)}      ${pct(cam.valid)}     | ${pct(cam.beaten)}`,
+            `  ${row.segment.padEnd(20)} ${fmt(engine.meanResidual)}  ${fmt(node.meanResidual)}    ${fmt(cam.meanResidual)}  ${fmt(zero.meanResidual)}  | ${pct(engine.valid)}    ${pct(node.valid)}      ${pct(cam.valid)}     | ${pct(cam.beaten)}`,
         );
     }
     for (const frame of [150, 750]) {
@@ -242,6 +247,7 @@ async function warp(run, screenshot) {
         { name: 'bilinear', path: 'bilinear' },
         { name: 'spatial', path: 'spatial' },
         { name: 'temporal', path: 'temporal' },
+        { name: 'temporal-node-mv', path: 'temporal', velocity: 'node' },
         { name: 'temporal-camera-mv', path: 'temporal', velocity: 'camera' },
     ];
     const result = {};
@@ -251,8 +257,8 @@ async function warp(run, screenshot) {
             const slice = frames.filter((f) => f.frame >= segment.start && f.frame <= segment.end);
             return {
                 segment: segment.name,
-                warpEngine: mean(slice.map((f) => f.warp?.candidates[1].meanResidual ?? null)),
-                warpValid: mean(slice.map((f) => f.warp?.candidates[1].valid ?? null)),
+                warp: mean(slice.map((f) => f.warp?.meanError ?? null)),
+                warpScored: mean(slice.map((f) => f.warp?.scored ?? null)),
                 reference: mean(slice.map((f) => f.reference)),
             };
         });
@@ -260,18 +266,19 @@ async function warp(run, screenshot) {
         const motion = segments.filter((s) => MOTION_SEGMENTS.some((m) => m.name === s.segment));
         const holds = segments.filter((s) => /^(still|hold)/.test(s.segment));
         console.log(
-            `  ${condition.name.padEnd(20)} warp motion ${fmt(mean(motion.map((s) => s.warpEngine)))}  warp still ${fmt(mean(holds.map((s) => s.warpEngine)))}` +
+            `  ${condition.name.padEnd(20)} warp motion ${fmt(mean(motion.map((s) => s.warp)))}  warp still ${fmt(mean(holds.map((s) => s.warp)))}` +
                 `  |out−SSAA| motion ${fmt(mean(motion.map((s) => s.reference)))}  still ${fmt(mean(holds.map((s) => s.reference)))}`,
         );
     }
-    console.log('\n  per motion segment: warp error (engine MV) / |out − SSAA|');
+    console.log('\n  per motion segment: warp error (judged through the node) / |out − SSAA|, and the share warp scored');
     console.log(`  ${'segment'.padEnd(20)}${conditions.map((c) => c.name.padStart(22)).join('')}`);
     for (const segment of MOTION_SEGMENTS) {
         const cells = conditions.map((c) => {
             const row = result[c.name].segments.find((s) => s.segment === segment.name);
-            return `${fmt(row.warpEngine, 4, 7)} / ${fmt(row.reference, 4, 7)}`.padStart(22);
+            return `${fmt(row.warp, 4, 7)} / ${fmt(row.reference, 4, 7)}`.padStart(22);
         });
-        console.log(`  ${segment.name.padEnd(20)}${cells.join('')}`);
+        const scored = result.temporal.segments.find((s) => s.segment === segment.name).warpScored;
+        console.log(`  ${segment.name.padEnd(20)}${cells.join('')}   ${pct(scored, 1, 6)}%`);
     }
     for (const path of ['temporal', 'native']) {
         await run({ scenario: 'Q19', path, ratio, end: 400, view: 'warp' });
@@ -282,33 +289,35 @@ async function warp(run, screenshot) {
 
 async function cut(run, screenshot) {
     const q10 = await run({ scenario: 'Q10', path: 'native', start: 1, end: 119 });
-    const series = q10.frames.map((f) => ({ frame: f.frame, js: f.cutJS, emd: f.cutEMD }));
+    const series = q10.frames.map((f) => ({ frame: f.frame, js: f.cutJS, emd: f.cutEMD, depth: f.cut?.share ?? null, depthCut: f.cut?.cut ?? null }));
     const atCut = series.find((s) => s.frame === 60);
     const otherQ10 = series.filter((s) => s.frame !== 60);
     const q19 = await run({ scenario: 'Q19', path: 'native', start: 1, end: 1119 });
-    const q19Max = {
-        js: Math.max(...q19.frames.map((f) => f.cutJS ?? 0)),
-        emd: Math.max(...q19.frames.map((f) => f.cutEMD ?? 0)),
-    };
-    console.log(`  Q10 cut frame 60:      JS ${fmt(atCut?.js)}  EMD ${fmt(atCut?.emd)}`);
-    console.log(`  Q10 other frames max:  JS ${fmt(Math.max(...otherQ10.map((s) => s.js ?? 0)))}  EMD ${fmt(Math.max(...otherQ10.map((s) => s.emd ?? 0)))}`);
-    console.log(`  Q19 motion max:        JS ${fmt(q19Max.js)}  EMD ${fmt(q19Max.emd)}`);
+    const most = (rows, key) => Math.max(...rows.map((row) => row[key] ?? 0));
+    const q19Series = q19.frames.map((f) => ({ frame: f.frame, js: f.cutJS, emd: f.cutEMD, depth: f.cut?.share ?? null, depthCut: f.cut?.cut ?? null }));
+    const q19Max = { js: most(q19Series, 'js'), emd: most(q19Series, 'emd'), depth: most(q19Series, 'depth') };
+    const falseCuts = [...otherQ10, ...q19Series].filter((s) => s.depthCut).length;
+    console.log('                         JS        EMD     depth share (GPU detector, cut > 0.2)');
+    console.log(`  Q10 cut frame 60:   ${fmt(atCut?.js)} ${fmt(atCut?.emd)} ${fmt(atCut?.depth)}  ${atCut?.depthCut ? 'cut' : 'NO CUT'}`);
+    console.log(`  Q10 other frames:   ${fmt(most(otherQ10, 'js'))} ${fmt(most(otherQ10, 'emd'))} ${fmt(most(otherQ10, 'depth'))}  (max)`);
+    console.log(`  Q19 motion:         ${fmt(q19Max.js)} ${fmt(q19Max.emd)} ${fmt(q19Max.depth)}  (max)`);
+    console.log(`  GPU detector false positives: ${falseCuts} of ${otherQ10.length + q19Series.length} frames`);
 
     const resets = {};
-    for (const reset of ['scenario', 'none', 'auto']) {
+    for (const reset of ['scenario', 'none', 'auto', 'auto-histogram']) {
         const { frames } = await run({ scenario: 'Q10', path: 'temporal', ratio, reset, start: 50, end: 119, reference: true });
-        resets[reset] = frames.map((f) => ({ frame: f.frame, reference: f.reference, warp: f.warp?.candidates[1].meanResidual ?? null, reset: f.reset }));
+        resets[reset] = frames.map((f) => ({ frame: f.frame, reference: f.reference, warp: f.warp?.meanError ?? null, reset: f.reset }));
         const after = (from, to) => mean(frames.filter((f) => f.frame >= from && f.frame <= to).map((f) => f.reference));
         const resetFrames = frames.filter((f) => f.reset).map((f) => f.frame);
         console.log(
-            `  temporal reset=${reset.padEnd(9)} |out−SSAA| f60–63 ${fmt(after(60, 63))}  f64–79 ${fmt(after(64, 79))}  f80–119 ${fmt(after(80, 119))}  resets at [${resetFrames.join(', ')}]`,
+            `  temporal reset=${reset.padEnd(14)} |out−SSAA| f60–63 ${fmt(after(60, 63))}  f64–79 ${fmt(after(64, 79))}  f80–119 ${fmt(after(80, 119))}  resets at [${resetFrames.join(', ')}]`,
         );
         if (reset !== 'scenario') {
             await run({ scenario: 'Q10', path: 'temporal', ratio, reset, end: 62 });
             await screenshot(`q10-reset-${reset}-f62`);
         }
     }
-    return { q10: series, q19Max, resets };
+    return { q10: series, q19: q19Series, q19Max, falseCuts, resets };
 }
 
 main().catch((error) => {
