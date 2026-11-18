@@ -17,15 +17,15 @@ importers:
       '@pixi/3d':
         specifier: 0.1.0
         version: 0.1.0(pixi.js@8.23.0)
+      '@pmndrs/motion-vectors':
+        specifier: file:vendor/motion-vectors/pmndrs-motion-vectors-0.0.0-bf3594c82c.tgz
+        version: file:vendor/motion-vectors/pmndrs-motion-vectors-0.0.0-bf3594c82c.tgz(@pixi/3d@0.1.0(pixi.js@8.23.0))(pixi.js@8.23.0)(three@0.187.0)
       '@pmndrs/upscaler-babylon':
         specifier: workspace:*
         version: link:packages/babylon
       '@pmndrs/upscaler-core':
         specifier: workspace:*
         version: link:packages/core
-      '@pmndrs/upscaler-motion':
-        specifier: workspace:*
-        version: link:packages/motion
       '@pmndrs/upscaler-pixi':
         specifier: workspace:*
         version: link:packages/pixi
@@ -92,8 +92,6 @@ importers:
         version: 9.31.0
 
   packages/core: {}
-
-  packages/motion: {}
 
   packages/pixi:
     dependencies:
@@ -368,6 +366,21 @@ packages:
     resolution: {integrity: sha512-6mwC1nD4pDRix9QVl8aRDSHeMZtqb00vKiKb6U5cFeaYxZbwEnn9gXJphnk9udQKqf0jz2z8YUXaGudsACLaOQ==}
     peerDependencies:
       pixi.js: ^8.23.0
+
+  '@pmndrs/motion-vectors@file:vendor/motion-vectors/pmndrs-motion-vectors-0.0.0-bf3594c82c.tgz':
+    resolution: {integrity: sha512-cil26v0EfqKQRxAt6+ISVQbl9yynrtYpdM2834L3Ccx9ob7BRq87uaVF1Y7xKxftcDnbOuJAJ33R5w4SswYwtA==, tarball: file:vendor/motion-vectors/pmndrs-motion-vectors-0.0.0-bf3594c82c.tgz}
+    version: 0.0.0
+    peerDependencies:
+      '@pixi/3d': '>=0.1.0'
+      pixi.js: ^8.23.0
+      three: '>=0.184.0'
+    peerDependenciesMeta:
+      '@pixi/3d':
+        optional: true
+      pixi.js:
+        optional: true
+      three:
+        optional: true
 
   '@rollup/rollup-android-arm-eabi@4.62.2':
     resolution: {integrity: sha512-6o7ZLZK+BeenkZCFNDXqpbjw9bD6nuWonvS/lwQJp7NoVVxm6p3qE7qQ5jGuBjiFsgvqjD8mZAU5oWxTmbOeOg==}
@@ -1407,6 +1420,12 @@ snapshots:
     dependencies:
       meshoptimizer: 1.3.0
       pixi.js: 8.23.0
+
+  '@pmndrs/motion-vectors@file:vendor/motion-vectors/pmndrs-motion-vectors-0.0.0-bf3594c82c.tgz(@pixi/3d@0.1.0(pixi.js@8.23.0))(pixi.js@8.23.0)(three@0.187.0)':
+    optionalDependencies:
+      '@pixi/3d': 0.1.0(pixi.js@8.23.0)
+      pixi.js: 8.23.0
+      three: 0.187.0
 
   '@rollup/rollup-android-arm-eabi@4.62.2':
     optional: true
