@@ -8,7 +8,18 @@ import { DEBUG_SHADER } from './debug';
 import * as easuModule from './easu';
 import { EASU_SHADER } from './easu';
 import { GENERATE_REACTIVE_SHADER } from './generateReactive';
-import { LUMINANCE_PYRAMID_SERIAL_SHADER, LUMINANCE_PYRAMID_SHADER } from './luminancePyramid';
+import { createScalarKernel } from '@pmndrs/downsampler/webgpu';
+
+import { everyTexelExposureLayout } from '../internal/EveryTexelExposure';
+import {
+    EXPOSURE_EVERY_QUAD_BINDINGS,
+    EXPOSURE_EVERY_QUAD_LOAD,
+    EXPOSURE_EVERY_TEXEL_BINDINGS,
+    EXPOSURE_EVERY_TEXEL_LOAD,
+    LUMINANCE_PYRAMID_SERIAL_SHADER,
+    LUMINANCE_PYRAMID_SHADER,
+    exposureEveryTexelFinish,
+} from './luminancePyramid';
 import { MOMENTS_SHADER } from './moments';
 import * as rcasModule from './rcas';
 import {
@@ -480,6 +491,62 @@ describe('parallel exposure metering', () => {
     it('shares everything after the metering with the serial form', () => {
         const tail = (source: string) => source.slice(source.indexOf('    // Meter host-invariantly'));
         expect(tail(LUMINANCE_PYRAMID_SHADER)).toBe(tail(LUMINANCE_PYRAMID_SERIAL_SHADER));
+    });
+});
+
+describe('every-texel exposure metering', () => {
+    // NEXT-STEPS §17: the same epilogue as `finish` of a @pmndrs/downsampler
+    // ScalarReduction, whose generated kernel owns @group(0).
+    const tail = (source: string) => source.slice(source.indexOf('    // Meter host-invariantly'));
+    const finish = exposureEveryTexelFinish();
+    const bindingsOf = (wgsl: string) =>
+        [...wgsl.matchAll(/@group\((\d)\) @binding\((\d+)\)/g)].map(([, group, binding]) => `${group}:${binding}`);
+
+    it('runs the production epilogue with the log average in place of the tap sum', () => {
+        expect(tail(finish)).toBe(
+            tail(LUMINANCE_PYRAMID_SHADER).replace(
+                'exp2(logSum / f32(EXPOSURE_TAPS * EXPOSURE_TAPS))',
+                'exp2(logAverage)',
+            ),
+        );
+        expect(finish).toContain('let logAverage = value.x;');
+        expect(finish).toContain('> ADAPT_DEADBAND_STOPS');
+    });
+
+    it('drops only the dead-band when asked', () => {
+        const open = exposureEveryTexelFinish(false);
+        expect(open).toContain('abs(log2(targetExposure / prev)) > 0.0) {');
+        expect(open.replace('prev)) > 0.0) {', 'prev)) > ADAPT_DEADBAND_STOPS) {')).toBe(finish);
+    });
+
+    it('declares group 1 only, in the layout the reduction is built with', () => {
+        for (const form of ['texel', 'quad'] as const) {
+            const wgsl = form === 'quad' ? EXPOSURE_EVERY_QUAD_BINDINGS : EXPOSURE_EVERY_TEXEL_BINDINGS;
+            const declared = bindingsOf(wgsl).sort();
+            const layout = everyTexelExposureLayout(form).map((entry) => `1:${entry.binding}`).sort();
+            expect(declared).toEqual(layout);
+        }
+        expect(bindingsOf(EXPOSURE_EVERY_TEXEL_BINDINGS)).not.toContain('1:2');
+    });
+
+    it('assembles with the generated kernel without name collisions', () => {
+        for (const form of ['texel', 'quad'] as const) {
+            const wgsl = createScalarKernel({
+                reduction: ['average', 'sum', 'sum', 'sum'],
+                bindings: {
+                    wgsl: form === 'quad' ? EXPOSURE_EVERY_QUAD_BINDINGS : EXPOSURE_EVERY_TEXEL_BINDINGS,
+                    entries: [],
+                },
+                load: form === 'quad' ? EXPOSURE_EVERY_QUAD_LOAD : EXPOSURE_EVERY_TEXEL_LOAD,
+                finish,
+            });
+            for (const name of ['load', 'finish', 'partials', 'combine'])
+                expect(wgsl.match(new RegExp(`\\bfn ${name}\\(`, 'g'))).toHaveLength(1);
+            // Only the generator's own declarations sit in group 0.
+            expect(bindingsOf(wgsl).filter((b) => b.startsWith('0:')).sort()).toEqual(['0:0', '0:1']);
+        }
+        for (const ours of [EXPOSURE_EVERY_TEXEL_BINDINGS, EXPOSURE_EVERY_QUAD_BINDINGS, finish])
+            expect(ours).not.toMatch(/\bds_/);
     });
 });
 

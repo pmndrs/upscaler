@@ -717,10 +717,15 @@ SPD and coordinated resolver variants, not as a standalone toggle in the local b
 #### Luma and exposure analysis (`luminancePyramid.ts`)
 
 - **Current status:** Custom scalar replacement; despite its filename, it is not a pyramid.
-- **Local implementation:** Samples a fixed 32×32 grid, 16 taps on each of the one
-  workgroup's 64 lanes, and tree-sums them in workgroup memory to one log-average exposure
-  value (until 2026-11-11 one lane took all 1024 taps; that form is frozen as
-  `LUMINANCE_PYRAMID_SERIAL_SHADER`, `bench/docs/NEXT-STEPS.md` §16).
+- **Local implementation:** Up to 2^19 render texels (960×540), the log-average of every
+  render texel: a `@pmndrs/downsampler` `ScalarReduction` (64×64-texel workgroup
+  partials, then a one-workgroup combine whose `finish` is the epilogue below;
+  `internal/EveryTexelExposure.ts`, `bench/docs/NEXT-STEPS.md` §17). Above that, a fixed
+  32×32 grid, 16 taps on each of the one workgroup's 64 lanes, tree-summed in workgroup
+  memory (until 2026-11-11 one lane took all 1024 taps; that form is frozen as
+  `LUMINANCE_PYRAMID_SERIAL_SHADER`, §16). The taps' log-average wobbles with the jitter
+  phase as the render shrinks; at 640×360 it crossed the 1/16-stop dead-band and moved
+  the exposure on still scenes, which every texel does not.
 - **FSR 3.1.5 behavior:** Prepare-inputs writes current luma and farthest depth. Luma SPD
   writes `FrameInfo`, stored coarse log-luma/luma, and half-resolution farthest depth.
   Shading-change SPD is a separate signed-difference pyramid.
@@ -973,7 +978,8 @@ more permissive locks can increase trails; stricter locks can reduce their inten
 
 ### Local exposure conditioning
 
-`luminancePyramid.ts` reduces a fixed 32×32 scene sample grid to one log-average value,
+`luminancePyramid.ts` reduces every render texel (up to 2^19 texels) or a fixed 32×32
+scene sample grid (above) to one log-average value,
 maps it to an auto-exposure target, clamps that target, and eases toward it. Fixed
 `settings.exposure` and external `exposureTexture` values are selected as supplied rather
 than passed through the auto-target clamp. This local conditioning `exposure` should not be

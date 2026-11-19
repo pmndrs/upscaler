@@ -118,5 +118,8 @@
         "typescript-eslint": "^8.20.0",
         "vite": "^6.1.0",
         "vitest": "^3.0.0"
+    },
+    "dependencies": {
+        "@pmndrs/downsampler": "^0.1.0"
     }
 }

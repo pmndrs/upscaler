@@ -49,6 +49,7 @@ type UpscalerInternalOptions = UpscalerOptions & {
     _shadingChangeShader?: string;
     _depthClipShader?: string;
     _exposureShader?: string;
+    _exposureMetering?: 'taps' | 'every-texel' | 'every-texel-no-deadband' | 'every-quad' | 'every-quad-no-deadband';
     _crossFrameReconstruct?: { shader: string; cameraCompensated: boolean };
 };
 

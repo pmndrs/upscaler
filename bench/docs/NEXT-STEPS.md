@@ -1763,6 +1763,129 @@ The commands are in [windows-followups](../../docs/windows-followups.md#2026-11-
 Record the results here; revert to the frozen form if a Windows readback differs on the
 `.r` channel of a bench scene.
 
+## 17. Every-texel exposure metering on small renders — DONE (2026-11-20)
+
+**Problem.** The 1024 metering taps (§16) read the *jittered* input at fixed UVs, so on
+a still scene their log-average follows the jitter phase. The 1/16-stop dead-band
+(2026-10-08) holds the stored exposure while that wobble stays inside it. The wobble
+grows as the render shrinks. On Q12 at 640×360 (1920×1080 display, ratio 3) the taps'
+peak-to-peak reached 0.095 stops: the exposure stepped one f16 ulp every ~27 frames,
+11 times in 256 frames, and never settled. Each step re-conditions the history, which
+the still-scene meter reads as a phase-locked residual 2–22× above the fixed-exposure
+floor (table below, renders of 640×360 and 427×240).
+
+**Change.** FSR 3's shape: the log-average of **every render texel**, on
+`@pmndrs/downsampler` 0.1's `ScalarReduction` (64×64-texel workgroup partials, then one
+256-invocation combine whose `finish` is our epilogue, unchanged: key, clamp, easing,
+dead-band, manual/external overrides, host pre-exposure, the `.r/.g/.b` guide). Unlike
+AMD's pyramid it covers the whole image, not the top-left `2^mips` window. It costs more
+as the render grows, and the taps are steady there, so production is **size-gated**:
+every texel up to 2^19 render texels (960×540 and below), the taps above
+(`EVERY_TEXEL_MAX_TEXELS` in `UpscalerCore.ts`; `internal/EveryTexelExposure.ts`). A
+device without 256-invocation workgroups (compatibility mode) keeps the taps everywhere.
+Both forms compile up front, so a `configure()` across the gate never waits on a compile
+(it resets history, so exposure snaps to the new form's target).
+
+Bench identities, all on `baseline`'s pipeline with only the exposure form changed:
+`exposure-taps-v1` (taps at every size: production before this item),
+`exposure-every-texel-v1` (every texel at every size), `-no-deadband` forms of both,
+and `exposure-every-quad-v1` (each 2×2 quad's box average, one bilinear tap, before
+the log). `exposure-serial-v1` now also pins the taps at every size.
+
+**Metering wobble** (`measure-exposure-parallel.mjs --part scenes --variants …`, which
+now takes a variant list and reports stability; 1920×1080 display, frames 30–125 or
+30–173; peak-to-peak of the metered log2 average, in stops, and stored-exposure moves).
+Q16 and Q17 meter far below `EXPOSURE_MAX`'s target and pin there, so their wobble
+cannot move the exposure.
+
+| scene | ratio | taps | every texel | every quad |
+| --- | ---: | ---: | ---: | ---: |
+| Q1 | 1 / 1.5 / 2 / 3 | 0.019 / 0.016 / 0.014 / 0.013 | 0.003 / 0.005 / 0.008 / 0.012 | – / – / 0.007 / 0.012 |
+| Q12 | 1 / 1.5 / 2 / 3 | 0.003 / 0.006 / 0.008 / **0.095, 6 moves** | 0.006 / 0.012 / 0.012 / 0.027 | – / – / 0.006 / 0.011 |
+| Q18 | 1 / 1.5 / 2 / 3 | 0.036 / 0.054 / 0.079 / 0.067 | 0.000 / 0.007 / 0.005 / 0.029 | – / – / 0.006 / 0.031 |
+| Q16 (pinned) | 1 / 2 | 0.016 / 0.036 | 0.004 / 0.011 | – / 0.021 |
+| Q17 (pinned) | 2 / 3 | 0.006 / 0.007 | 0.044 / – | 0.074 / **0.126** |
+
+Every texel stays under 0.045 stops everywhere measured (dead-band: 0.0625). Its one
+weak case is sub-render-texel emitters over black (Q17): a point sample sees each
+emitter appear and vanish with the jitter phase, where a bilinear tap rarely lands on
+one. The quad form averages before the log but is worse there (0.126 at ratio 3), so it
+was not taken.
+
+**Still-scene flicker** (`measure-convergence.mjs`, 1280×720 display, settle 180,
+34 / 74 pairs at ratio 2 / 3, so the phase-locked pair is one jitter period apart; runs
+are deterministic, repeated runs read identically). Phase-locked residual / mean
+consecutive diff, 0–255. The control runs auto-exposure **off** at each form's resting
+exposure: the floor for that conditioning value with no exposure movement at all.
+
+| scene, render | taps | every texel | fixed at taps' value | fixed at every-texel's value |
+| --- | --- | --- | --- | --- |
+| Q12 r2, 640×360 | **0.0154** / 0.0158 (max 0.0235) | 0.0007 / 0.0152 (max 0.0175) | 0.0007 / 0.0152 | 0.0007 / 0.0152 |
+| Q12 r3, 427×240 | **0.0078** / 0.0237 | 0.0016 / 0.0237 | 0.0016 / 0.0237 | 0.0016 / 0.0237 |
+| Q18 r3, 427×240 | **0.0748** / 4.387 | 0.0347 / 4.402 | 0.0341 / 4.386 | 0.0343 / 4.404 |
+| Q18 r2, 640×360 | 0.0268 / 2.407 | 0.0279 / 2.402 | 0.0270 / 2.404 | 0.0279 / 2.402 |
+| Q1 r2, 640×360 | 0.0235 / 0.1078 | 0.0186 / 0.1071 | 0.0197 / 0.1086 | 0.0176 / 0.1050 |
+
+Every texel sits on its fixed-exposure floor in all five; the taps sit 2–22× above
+theirs on Q12 and Q18 r3. The one cell where every texel reads higher than the taps
+(Q18 r2, +0.0011) is the conditioning value itself: the fixed run at every texel's
+exposure (2.47) reads the identical 0.0279, and the taps' exposure did not move there.
+
+**The dead-band stays.** Without it, every texel still drifted: Q12 r3 0.0027 / 0.0278
+(max 0.0441), Q12 r2 phase-locked 0.0479, exposure moves 4 per 143 frames on Q12 and
+Q18 r3. The taps without it are worse again (Q12 r3 0.0142 / 0.0464).
+
+**Other checks** (`exposure-every-texel-v1` against the taps):
+- *Drift lag* (`measure-drift-lag.mjs`, Q15, ratio 2, auto-exposure on, full stride):
+  full-frame meanAbs 3.510 → 3.521, ghost fraction 0.269 → 0.269.
+- *Highlight ceiling* (`measure-exposure-ceiling.mjs --exposures auto`, which now
+  takes `--metering`): black background identical (both pin at 8); background 0.05,
+  exposure 3.305 → 3.295, 16 px / 3 px / 0.5 px rows within 1–3 %.
+- *Q11* (host pre-exposure): the stored exposure stays flat through the 2.5× host step
+  and its ramp in both forms (3.30 taps, 3.42 every texel), so the detector sees no
+  conditioning change. *Q9*: the same adaptation curve, ~3 % higher throughout.
+  *Q10*: the cut snaps in both; the resize moves exposure 5.14 → 5.07 against the
+  taps' 5.05 → 4.88 → 4.92.
+- *Gate*: on Q10 and Q12, `baseline` reads back bit-identical to `exposure-taps-v1` at
+  ratio 1 (1920×1080 and 1280×720 renders) and to `exposure-every-texel-v1` at ratio 2.
+  `exposure-serial-v1` vs `exposure-taps-v1` stays bit-identical (§16).
+
+**Timing** (M5 Pro, worktree, other agents' GPU jobs running; ABBA medians of the
+exposure pass, `run-benchmark.mjs --smoke --blocks 1 --warmup 240 --samples 300`, one
+block per invocation; worktree absolutes read ~3× slow, compare only within a row):
+
+| ratio (render) | taps | every texel | every quad | runs, load average |
+| --- | ---: | ---: | ---: | --- |
+| 1 (1920×1080) | 12.4 µs | 51.4 µs (+39.1) | 47.0 µs (+35.1) | 4 + 3, ~25 |
+| 1.5 (1280×720) | 11.5 µs | 26.0 µs (+14.5) | – | 3, ~60 |
+| 2 (960×540) | 9.9 µs | 14.1 µs (+4.3) | 14.2 µs (+4.0) | 4 + 3, ~25 |
+| 3 (640×360) | 9.3 µs | 12.7 µs (+3.3) | – | 4, ~25 |
+
+Every texel reads the full color texture (8 bytes a texel), so its cost tracks the
+render's bytes; the quad form's sampler reads the same bytes and saves nothing. The
+gate keeps the cost inside the measured +3–4 µs and spends it where the taps wobble.
+Gated production against `exposure-taps-v1`, 3 reps each: ratio 1 +0.4 µs and 1.5
++1.4 µs (both meter with the taps; load average 250–310, noise), ratio 2 10.4 → 17.1 µs
+(median delta +5.6) and ratio 3 10.5 → 13.2 µs (+2.5) at load average ~30, where the
+compute sums read 1015 → 1130 µs and 1066 → 1092 µs, inside their own noise (per-rep
+ratios 0.92–1.49).
+
+**Packaging.** `@pmndrs/downsampler` is a regular `dependency` (`^0.1.0`) of the
+published package and of `packages/core`, and **external** in both the JS and the
+`.d.ts` builds: it is engine-free with no dependencies of its own, an app that already
+uses it shares one copy (and its per-device pipeline cache), and its MIT code is not
+re-shipped inside ours. `verify-packed-subpaths` allows `@pmndrs/downsampler/webgpu`
+from every entry (the shared chunk reaches it) and installs it in each consumer. A
+0.1.x patch that changed the generated WGSL would change our exposure without a release
+of ours; downsampler checks its kernels byte-for-byte against golden WGSL, and the
+shader tests here assert the assembled kernel's shape.
+
+**Open.** Windows (DXC compile of the scalar kernel; the library builds it with
+synchronous `createComputePipeline`, inside an error scope that preparation awaits)
+and a quiet-machine re-time of ratios 2–3. Folding the metering into a pass that
+already reads every texel (the shading-change detector) would remove its bandwidth at
+any size, at one frame of metering latency.
+
 ## Explicitly not planned (measured against)
 
 - Lanczos2/bicubic history filtering (+47% accumulate, no visible win).

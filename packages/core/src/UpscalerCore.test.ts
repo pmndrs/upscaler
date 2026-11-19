@@ -9,6 +9,8 @@ import type { CoreTexture, CoreTextureDescriptor } from './textures';
 
 function mockDevice() {
     const writes: Uint32Array[] = [];
+    // Per compute pass: its label and the workgroup counts of its dispatches.
+    const passes: Array<{ label?: string; dispatches: number[][] }> = [];
     const resource = (descriptor: { size?: number; label?: string } = {}) => ({
         label: descriptor.label,
         width: 16,
@@ -22,12 +24,27 @@ function mockDevice() {
         destroy: vi.fn(),
     });
     const encoder = {
-        beginComputePass: () => ({ setPipeline() {}, setBindGroup() {}, dispatchWorkgroups() {}, end() {} }),
+        beginComputePass: (descriptor: { label?: string } = {}) => {
+            const pass = { label: descriptor.label, dispatches: [] as number[][] };
+            passes.push(pass);
+            return {
+                setPipeline() {}, setBindGroup() {}, end() {},
+                dispatchWorkgroups: (...counts: number[]) => { pass.dispatches.push(counts); },
+            };
+        },
         finish: () => ({}),
     };
     const device = {
         lost: new Promise<GPUDeviceLostInfo>(() => {}),
         features: new Set<string>(),
+        limits: { maxComputeInvocationsPerWorkgroup: 256, maxComputeWorkgroupSizeX: 256, maxBindGroups: 4 },
+        // The every-texel metering (@pmndrs/downsampler) compiles synchronously
+        // inside a validation scope.
+        pushErrorScope: vi.fn(),
+        popErrorScope: vi.fn(async () => null),
+        createBindGroupLayout: resource,
+        createPipelineLayout: resource,
+        createComputePipeline: vi.fn(resource),
         queue: {
             writeBuffer: vi.fn((_buffer: unknown, _offset: number, data: ArrayBuffer) => {
                 writes.push(new Uint32Array(data.slice(0)));
@@ -43,7 +60,7 @@ function mockDevice() {
         createBindGroup: resource,
         createCommandEncoder: vi.fn(() => encoder),
     };
-    return { device, writes, encoder, gpu: (label: string) => resource({ label }) as unknown as GPUTexture };
+    return { device, writes, encoder, passes, gpu: (label: string) => resource({ label }) as unknown as GPUTexture };
 }
 
 // The flags word of the most recent constants upload (ConstantsBuffer u32[20]).
@@ -53,6 +70,7 @@ describe('UpscalerCore without an engine', () => {
     beforeEach(() => {
         vi.stubGlobal('GPUBufferUsage', { MAP_READ: 1, COPY_SRC: 4, COPY_DST: 8, UNIFORM: 64, STORAGE: 128 });
         vi.stubGlobal('GPUTextureUsage', { COPY_SRC: 1, COPY_DST: 2, TEXTURE_BINDING: 4, STORAGE_BINDING: 8 });
+        vi.stubGlobal('GPUShaderStage', { COMPUTE: 4 });
     });
 
     afterEach(() => {
@@ -132,6 +150,39 @@ describe('UpscalerCore without an engine', () => {
         expect(core.guidesPending).toBe(false);
         expect(device.createCommandEncoder).not.toHaveBeenCalled();
         expect(device.queue.submit).not.toHaveBeenCalled();
+    });
+
+    it('meters every texel up to 2^19 render texels and the taps above (NEXT-STEPS §17)', async () => {
+        const { device, passes, gpu } = mockDevice();
+        const core = new UpscalerCore({ device: device as unknown as GPUDevice });
+        const camera = { near: 0.1, far: 100, perspective: true };
+        const inputs = { color: gpu('color'), depth: gpu('depth'), velocity: gpu('velocity') };
+        const exposureDispatches = () => passes.filter((p) => p.label === 'upscale-exposure').at(-1)!.dispatches;
+
+        // 1920×1080 at ratio 2: 960×540 renders, every texel. 64×64-texel
+        // partials (15×9 workgroups), then the one-workgroup combine.
+        core.configure({ displayWidth: 1920, displayHeight: 1080, customUpscaleRatio: 2 });
+        await core.prepare();
+        core.dispatch(inputs, camera);
+        expect(exposureDispatches()).toEqual([[15, 9, 1], [1, 1, 1]]);
+        expect(device.pushErrorScope).toHaveBeenCalledWith('validation');
+
+        // 1280×720 renders (ratio 1.5): the taps' single 8×8 workgroup.
+        core.configure({ displayWidth: 1920, displayHeight: 1080, customUpscaleRatio: 1.5 });
+        await core.prepare();
+        core.dispatch(inputs, camera);
+        expect(exposureDispatches()).toEqual([[1, 1]]);
+    });
+
+    it('keeps the taps at every size without 256-invocation workgroups', async () => {
+        const { device, passes, gpu } = mockDevice();
+        device.limits.maxComputeInvocationsPerWorkgroup = 128;
+        const core = new UpscalerCore({ device: device as unknown as GPUDevice });
+        core.configure({ displayWidth: 64, displayHeight: 32, customUpscaleRatio: 2 });
+        await core.prepare();
+        core.dispatch({ color: gpu('color'), depth: gpu('depth'), velocity: gpu('velocity') }, { near: 0.1, far: 100, perspective: true });
+        expect(passes.find((p) => p.label === 'upscale-exposure')!.dispatches).toEqual([[1, 1]]);
+        expect(device.createComputePipeline).not.toHaveBeenCalled();
     });
 
     it('advances jitter only on the temporal path with jitter on', async () => {

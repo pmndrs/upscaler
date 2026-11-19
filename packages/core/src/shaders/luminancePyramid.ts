@@ -216,3 +216,75 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
     }
 ` + EXPOSURE_PUBLISH,
 );
+
+//* Every-Texel Metering (NEXT-STEPS §17) ======================================
+// Production below 2^19 render texels (UpscalerCore's EVERY_TEXEL_MAX_TEXELS):
+// the hooks of a @pmndrs/downsampler ScalarReduction (internal/EveryTexelExposure).
+// The taps above wobble with the jitter phase as the render shrinks; the log
+// average of every texel holds still scenes well inside the dead-band.
+
+// The production head without the sampler: every texel is read with
+// textureLoad, so binding 2 has nothing to do.
+const EVERY_TEXEL_HEAD = EXPOSURE_HEAD.replace('@group(0) @binding(2) var linearSampler : sampler;\n', '');
+const TAP_AVERAGE = 'exp2(logSum / f32(EXPOSURE_TAPS * EXPOSURE_TAPS))';
+if (EVERY_TEXEL_HEAD === EXPOSURE_HEAD || !EXPOSURE_PUBLISH.includes(TAP_AVERAGE)) {
+    throw new Error('luminancePyramid.ts: every-texel metering no longer matches the production head or epilogue.');
+}
+
+/**
+ * Every-texel metering, `@group(1)`: the production pass's declarations
+ * (constants, color, previous/next exposure, external and host exposure, the
+ * reset signal) for `@pmndrs/downsampler`'s `ScalarReduction`, which owns
+ * `@group(0)`. Binding numbers match production, minus the sampler (2).
+ */
+export const EXPOSURE_EVERY_TEXEL_BINDINGS = assembleShader(EXPOSURE_CONSTANTS, WGSL_COLOR, EVERY_TEXEL_HEAD)
+    .replaceAll('@group(0)', '@group(1)');
+
+/**
+ * Every-texel metering, the scalar's `load`: channel x is the taps'
+ * `log2(max(luma, 1e-4))` of one render texel (y–w unused, summed as 0).
+ */
+export const EXPOSURE_EVERY_TEXEL_LOAD = /* wgsl */ `
+fn load(texel : vec2i, layer : u32) -> vec4f {
+    let c = textureLoad(inputColor, texel, 0).rgb;
+    return vec4f(log2(max(luma(c), 1.0e-4)), 0.0, 0.0, 0.0);
+}
+`;
+
+/**
+ * Every-quad metering, `@group(1)`: the production declarations with the
+ * sampler (2) kept, for {@link EXPOSURE_EVERY_QUAD_LOAD}.
+ */
+export const EXPOSURE_EVERY_QUAD_BINDINGS = assembleShader(EXPOSURE_CONSTANTS, WGSL_COLOR, EXPOSURE_HEAD)
+    .replaceAll('@group(0)', '@group(1)');
+
+/**
+ * Every-quad metering, the scalar's `load` over a ⌈w/2⌉×⌈h/2⌉ grid: one
+ * bilinear tap at the shared corner of each 2×2 render-texel quad, i.e. the
+ * quad's box average, then the taps' log. Every texel still counts once, but
+ * like the taps' bilinear footprint it averages before the log, so a sub-texel
+ * emitter or a dither pattern that a jitter phase moves on or off a texel
+ * swings the log-average less than point samples at the 1e-4 floor do.
+ */
+export const EXPOSURE_EVERY_QUAD_LOAD = /* wgsl */ `
+fn load(texel : vec2i, layer : u32) -> vec4f {
+    let uv = (vec2f(texel) * 2.0 + 1.0) / vec2f(textureDimensions(inputColor));
+    let c = textureSampleLevel(inputColor, linearSampler, uv, 0.0).rgb;
+    return vec4f(log2(max(luma(c), 1.0e-4)), 0.0, 0.0, 0.0);
+}
+`;
+
+/**
+ * Every-texel metering, the scalar's `finish`: the production epilogue (host
+ * pre-exposure, target, dead-band easing, manual and external overrides, the
+ * store) verbatim. `value.x`, the log2 average over every render texel,
+ * replaces the taps' `logSum / 1024`.
+ * @param deadband - Keep the 1/16-stop adaptation dead-band (production); false
+ * eases toward every new target, to measure whether the dead-band is still needed
+ * @returns WGSL defining `fn finish(value, weight)`
+ */
+export function exposureEveryTexelFinish(deadband = true): string {
+    let body = EXPOSURE_PUBLISH.replace(TAP_AVERAGE, 'exp2(logAverage)');
+    if (!deadband) body = body.replace('> ADAPT_DEADBAND_STOPS', '> 0.0');
+    return '\nfn finish(value : vec4f, weight : f32) {\n    let logAverage = value.x;\n' + body;
+}

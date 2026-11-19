@@ -35,6 +35,10 @@ function fixture() {
             maxComputeWorkgroupStorageSize: 16384,
         },
         queue: { writeBuffer: vi.fn(), writeTexture: vi.fn(), submit: vi.fn() },
+        // The every-texel metering (@pmndrs/downsampler) compiles synchronously
+        // inside a validation scope.
+        pushErrorScope: vi.fn(), popErrorScope: vi.fn(async () => null),
+        createBindGroupLayout: resource, createPipelineLayout: resource, createComputePipeline: resource,
         createShaderModule: vi.fn(resource),
         createComputePipelineAsync: vi.fn((descriptor: GPUComputePipelineDescriptor) =>
             new Promise<GPUComputePipeline>((resolve, reject) => jobs.push({ label: descriptor.label!, resolve, reject }))),
@@ -58,6 +62,7 @@ describe('Upscaler preparation', () => {
     beforeEach(() => {
         vi.stubGlobal('GPUBufferUsage', { UNIFORM: 64, COPY_DST: 8, STORAGE: 128 });
         vi.stubGlobal('GPUTextureUsage', { TEXTURE_BINDING: 4, STORAGE_BINDING: 8, COPY_DST: 2 });
+        vi.stubGlobal('GPUShaderStage', { COMPUTE: 4 });
         vi.spyOn(console, 'error').mockImplementation(() => {});
         vi.spyOn(console, 'warn').mockImplementation(() => {});
     });
