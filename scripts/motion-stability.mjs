@@ -4,7 +4,9 @@
 // map PNG. No GPU, so motion-stability.test.mjs runs in CI.
 import { encodePng } from './image-metrics.mjs';
 
-export const MODES = ['native', 'bilinear', 'spatial', 'temporal'];
+// reference: the probe's 2×2-supersampled render as the output (no upscaler):
+// the meter's floor for a sharp, jitter-free image of the same motion.
+export const MODES = ['native', 'bilinear', 'spatial', 'temporal', 'reference'];
 
 /** A segment is a hold (camera and scene still) when its name says so. */
 export const isHold = (segment) => /^(still|hold)/.test(segment.name);
@@ -39,7 +41,7 @@ export function scenarioPlan(id, registry) {
 }
 
 /**
- * Expands modes × variants into runs. native has no upscaler, so it runs once
+ * Expands modes × variants into runs. native and reference have no upscaler, so they run once
  * whatever the variants; with one variant the condition is named by its mode.
  * @param {string[]} modes - Subset of {@link MODES}
  * @param {string[]} variants - One or two bench variant ids
@@ -52,7 +54,7 @@ export function expandConditions(modes, variants) {
     const conditions = [];
     for (const mode of modes) {
         if (!MODES.includes(mode)) throw new Error(`Unknown mode ${mode} (${MODES.join(', ')}).`);
-        if (mode === 'native') conditions.push({ name: 'native', path: 'native', variant: null });
+        if (mode === 'native' || mode === 'reference') conditions.push({ name: mode, path: mode, variant: null });
         else
             for (const variant of variants)
                 conditions.push({ name: variants.length > 1 ? `${mode}@${variant}` : mode, path: mode, variant });

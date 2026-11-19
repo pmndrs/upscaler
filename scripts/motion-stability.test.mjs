@@ -56,6 +56,14 @@ describe('expandConditions', () => {
         ]);
     });
 
+    test('reference, like native, has no upscaler and runs once', () => {
+        expect(expandConditions(['reference', 'temporal'], ['a', 'b'])).toEqual([
+            { name: 'reference', path: 'reference', variant: null },
+            { name: 'temporal@a', path: 'temporal', variant: 'a' },
+            { name: 'temporal@b', path: 'temporal', variant: 'b' },
+        ]);
+    });
+
     test('rejects unknown modes and repeated variants', () => {
         expect(() => expandConditions(['taa'], ['a'])).toThrowError(/Unknown mode taa/);
         expect(() => expandConditions(['temporal'], ['a', 'a'])).toThrowError(/Repeated variant/);

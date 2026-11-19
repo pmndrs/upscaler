@@ -17,6 +17,12 @@
  * with the motion one of the compared outputs was built from
  * (pmndrs/motion-vectors docs/MOTION.md §10).
  *
+ * Two caveats (bench/docs/NEXT-STEPS.md §17): the warp resamples bilinearly,
+ * so a sharper output reads higher (`--warp error` warps the error against the
+ * 2×2 reference instead), and the default judge is the input render's, which
+ * is jittered on the temporal path (`--judge display` renders it unjittered at
+ * display resolution for every mode).
+ *
  * Drives bench/motion-upscaler.html (bench/src/probes/motionUpscaler.ts) with
  * `metrics: 'warp'`; the upscaler is a bench variant built through the
  * bench's own registry, so `--variant A --comparison B` is a one-command A/B.
@@ -25,8 +31,8 @@
  *   node scripts/measure-motion-stability.mjs [--scenario Q19] [--ratio 2]
  *     [--modes temporal] [--variant production] [--comparison <id>]
  *     [--settings '{"lockThinFeatures":false}'] [--heat [frames]]
- *     [--end <frame>] [--label stability]
- *     [--url http://127.0.0.1:5199] [--port 9335]
+ *     [--end <frame>] [--judge input|display] [--warp output|error]
+ *     [--label stability] [--url http://127.0.0.1:5199] [--port 9335]
  *
  * Writes bench/results/raw/motion-stability/<label>-<scenario>-<ratio>x/:
  * summary.json (per condition: segment rows + aggregates), per-frame JSON per
@@ -66,13 +72,20 @@ const USAGE = `Usage: node scripts/measure-motion-stability.mjs [options]
   --scenario <id>        Q19 (default; segmented camera + object motion), Q4 (camera
                          orbit/truck/hold) or Q3 (object motion, still camera)
   --ratio <n>            upscale ratio (default 2; native always renders at 1)
-  --modes <list>         ${MODES.join(',')} (default temporal)
+  --modes <list>         ${MODES.join(',')} (default temporal; reference =
+                         the 2×2-supersampled render, no upscaler)
   --variant <id>         bench variant for the upscaled modes (default production)
   --comparison <id>      a second variant: every upscaled mode runs both, with deltas
   --settings <json>      RuntimeSettings merged over the probe's defaults
   --heat [frames]        save heat maps (comma-separated frames; bare = the middle
                          of each motion segment)
   --end <frame>          stop early (smoke runs); default the scenario's end
+  --judge <input|display>  motion the warp judges with: the input render's (default;
+                         render-res, jittered on the temporal path) or an unjittered
+                         display-res render of the same node, identical for every mode
+  --warp <output|error>  what is warped: the output (default; sharper reads higher) or
+                         its conditioned-luma error against the 2×2 reference, so shared
+                         content cancels and only the error's change along motion counts
   --width <px> --height <px>   display size (default 1280x720)
   --label <name>         output folder prefix (default stability)
   --url <origin>         bench origin (default ${DEFAULT_BENCH_URL}); started if nothing answers
@@ -80,7 +93,7 @@ const USAGE = `Usage: node scripts/measure-motion-stability.mjs [options]
 Writes bench/results/raw/motion-stability/<label>-<scenario>-<ratio>x/.`;
 const cli = parseCliOrExit(
     process.argv.slice(2),
-    ['scenario', 'ratio', 'modes', 'variant', 'comparison', 'settings', 'heat', 'end', 'width', 'height', 'label', 'url', 'port'],
+    ['scenario', 'ratio', 'modes', 'variant', 'comparison', 'settings', 'heat', 'end', 'judge', 'warp', 'width', 'height', 'label', 'url', 'port'],
     USAGE,
 );
 
@@ -209,6 +222,8 @@ async function main() {
                 end,
                 metrics: 'warp',
                 heatFrames,
+                ...(cli.judge ? { judge: cli.judge } : {}),
+                ...(cli.warp ? { warpTarget: cli.warp } : {}),
                 ...(condition.variant ? { variant: condition.variant } : {}),
                 ...(settings ? { settings } : {}),
             };
@@ -264,7 +279,7 @@ async function main() {
         await writeFile(join(outputDirectory, 'browser-log.txt'), `${records.join('\n')}\n`);
         await writeFile(
             join(outputDirectory, 'summary.json'),
-            `${JSON.stringify({ scenario: plan.id, ratio, width, height, start: plan.start, end, settings: settings ?? null, heatFrames, results, comparisons }, null, 2)}\n`,
+            `${JSON.stringify({ scenario: plan.id, ratio, width, height, start: plan.start, end, judge: cli.judge ?? 'input', warp: cli.warp ?? 'output', settings: settings ?? null, heatFrames, results, comparisons }, null, 2)}\n`,
         );
         if (records.some((line) => /error|exception|validation|invalid/i.test(line))) {
             console.warn(`\nbrowser log:\n${records.join('\n')}`);

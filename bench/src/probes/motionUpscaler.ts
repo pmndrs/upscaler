@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { mrt, output, texture, velocity } from 'three/tsl';
+import { clamp, dot, float, max, mrt, output, texture, vec3, vec4, velocity } from 'three/tsl';
 
 import type { RuntimeSettings } from '@pmndrs/upscaler';
 import { createThreeTextureAllocator } from '@pmndrs/upscaler-three/internal/textureAllocator';
@@ -65,7 +65,10 @@ import { SingleVariantRegistry } from '../benchmark/variants';
  * position stage leaves three's motion unchanged.
  */
 
-type LabPath = 'native' | 'bilinear' | 'spatial' | 'temporal';
+// `reference`: the 2×2-supersampled render (see **reference** above) as the
+// output, no upscaler: what the warp meter reads for a sharp, alias-reduced,
+// jitter-free image (its floor for this scene's resampling and shading change).
+type LabPath = 'native' | 'bilinear' | 'spatial' | 'temporal' | 'reference';
 type LabView = 'output' | 'audit' | 'audit-heat' | 'audit-motion' | 'warp';
 type VelocitySource = 'engine' | 'node' | 'camera';
 
@@ -93,6 +96,25 @@ interface LabRequest {
     metrics?: 'all' | 'warp';
     /** Frames whose warping-error heat map is read back for `takeHeat()`. */
     heatFrames?: number[];
+    /**
+     * Motion and depth `WarpingError` judges with. `input` (default): the
+     * input render's own node motion and linear depth, at render resolution
+     * and, on the temporal path, rasterized under the jittered projection, so
+     * near silhouettes the judge itself moves by a jitter step each frame.
+     * `display`: a second, unjittered render of the node motion at display
+     * resolution, the same judge for every path.
+     */
+    judge?: 'input' | 'display';
+    /**
+     * What `WarpingError` warps. `output` (default): the output itself, so a
+     * sharper image reads higher (the warp resamples the previous frame
+     * bilinearly; a stable 2×2-supersampled render reads above native).
+     * `error`: the output's conditioned-luma error against the 2×2 reference
+     * (`reference` is implied), so content the two share cancels and what is
+     * left is how the error itself changes along motion: flicker, crawl and
+     * ghosting, not sharpness.
+     */
+    warpTarget?: 'output' | 'error';
 }
 
 interface HeatSnapshot {
@@ -214,19 +236,48 @@ const quad = new THREE.QuadMesh(new THREE.MeshBasicNodeMaterial({ depthTest: fal
 const quadMaterial = quad.material as THREE.MeshBasicNodeMaterial;
 
 let inputTarget: THREE.RenderTarget | null = null;
+// The display-resolution, unjittered judge (`judge: 'display'`).
+const mrtJudge = mrt({ output, velocity: motionVectors.velocity });
+const judgeDepthMotion = new MotionFromDepthPass(renderer, { cutDetection: false });
+await judgeDepthMotion.init();
+let judgeTarget: THREE.RenderTarget | null = null;
 let referenceTarget: THREE.RenderTarget | null = null;
+let referenceDown: THREE.RenderTarget | null = null;
+// `warpTarget: 'error'`: the conditioned-luma error d = c(out) − c(ref), stored
+// as a grey y whose conditioned luma y / (1 + y) is exactly 0.5 + d, so the
+// package's own WarpingError (mask, counts, fixed point) measures
+// |d − warp(d_prev)|. rgba32float: f16 would quantize d to ~2.5e-4 near y = 1.
+const errorTargetMaterial = new THREE.MeshBasicNodeMaterial({ depthTest: false, depthWrite: false });
+const errorQuad = new THREE.QuadMesh(errorTargetMaterial);
+let errorTarget: THREE.RenderTarget | null = null;
+const conditionedLuma = (c: THREE.Node<'vec3'>) => {
+    const l = dot(max(c, vec3(0)), vec3(0.2126, 0.7152, 0.0722));
+    return l.div(l.add(1));
+};
+// Built once; the output and reference textures are re-pointed per frame
+// (a new colorNode would rebuild the material every frame).
+const errorOutputNode = texture(new THREE.Texture());
+const errorReferenceNode = texture(new THREE.Texture());
+{
+    const d = clamp(conditionedLuma(errorOutputNode.rgb).sub(conditionedLuma(errorReferenceNode.rgb)), -0.49, 0.49);
+    const y = d.add(0.5).div(float(0.5).sub(d));
+    errorTargetMaterial.colorNode = vec4(y, y, y, 1);
+}
+const downsampleMaterial = new THREE.MeshBasicNodeMaterial({ depthTest: false, depthWrite: false });
+const downsampleQuad = new THREE.QuadMesh(downsampleMaterial);
 let configured = '';
 
 function configure(path: LabPath, ratio: number, width: number, height: number, variant: string): { renderWidth: number; renderHeight: number } {
-    // native renders at display size and never builds an upscaler.
-    if (path !== 'native') resolverFor(variant, ratio);
-    const key = `${path}:${ratio}:${width}x${height}:${path === 'native' ? '' : variant}`;
+    // native (and reference) render at display size and never build an upscaler.
+    const upscaled = path !== 'native' && path !== 'reference';
+    if (upscaled) resolverFor(variant, ratio);
+    const key = `${path}:${ratio}:${width}x${height}:${upscaled ? variant : ''}`;
     if (renderer.domElement.width !== width || renderer.domElement.height !== height) renderer.setSize(width, height);
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
     let renderWidth = width;
     let renderHeight = height;
-    if (path !== 'native') {
+    if (upscaled) {
         if (key !== configured)
             upscaler!.configure({ displayWidth: width, displayHeight: height, ratio, path });
         renderWidth = upscaler!.renderWidth;
@@ -243,6 +294,18 @@ function configure(path: LabPath, ratio: number, width: number, height: number, 
         inputTarget.textures[1].name = 'velocity';
         inputTarget.textures[2].name = 'threeVelocity';
         referenceTarget = new THREE.RenderTarget(width * 2, height * 2, { type: THREE.HalfFloatType });
+        referenceDown?.dispose();
+        referenceDown = new THREE.RenderTarget(width, height, { type: THREE.HalfFloatType });
+        downsampleMaterial.colorNode = texture(referenceTarget.texture);
+        downsampleMaterial.needsUpdate = true;
+        errorTarget?.dispose();
+        errorTarget = new THREE.RenderTarget(width, height, { type: THREE.FloatType });
+        judgeTarget?.dispose();
+        const judgeDepth = new THREE.DepthTexture(width, height);
+        judgeDepth.type = THREE.FloatType;
+        judgeTarget = new THREE.RenderTarget(width, height, { count: 2, type: THREE.HalfFloatType, depthTexture: judgeDepth });
+        judgeTarget.textures[0].name = 'output';
+        judgeTarget.textures[1].name = 'velocity';
         analyzer.configure(renderWidth, renderHeight);
         warpHeat?.destroy();
         warpHeat = allocateMotionTexture({ label: 'motion-upscaler-warp-heat', width, height, format: 'rgba8unorm' });
@@ -251,18 +314,22 @@ function configure(path: LabPath, ratio: number, width: number, height: number, 
     return { renderWidth, renderHeight };
 }
 
+let debugActive = false;
+
 function present(view: LabView, outputTexture: THREE.Texture, renderWidth: number, renderHeight: number): void {
     const source = view === 'output' ? outputTexture : view === 'warp' ? warpHeat!.handle : analyzer.debugTexture(renderWidth, renderHeight).handle;
     quadMaterial.colorNode = texture(source);
     quadMaterial.needsUpdate = true;
-    renderer.toneMapping = view === 'output' ? THREE.ACESFilmicToneMapping : THREE.NoToneMapping;
+    // Debug views read as their sRGB encoding, untonemapped (#45).
+    renderer.toneMapping = view === 'output' && !debugActive ? THREE.ACESFilmicToneMapping : THREE.NoToneMapping;
     renderer.setRenderTarget(null);
     quad.render(renderer);
 }
 
 async function run(request: LabRequest): Promise<{ frames: FrameRecord[]; renderWidth: number; renderHeight: number }> {
     const path = request.path ?? 'temporal';
-    const ratio = path === 'native' ? 1 : (request.ratio ?? 2);
+    const upscaled = path !== 'native' && path !== 'reference';
+    const ratio = upscaled ? (request.ratio ?? 2) : 1;
     const width = request.width ?? 1280;
     const height = request.height ?? 720;
     const start = request.start ?? 0;
@@ -270,10 +337,15 @@ async function run(request: LabRequest): Promise<{ frames: FrameRecord[]; render
     const resetMode = request.reset ?? 'scenario';
     const source = request.velocity ?? 'engine';
     const warpOnly = request.metrics === 'warp';
+    const judgeDisplay = request.judge === 'display';
+    debugActive = upscaled && (request.settings?.debugView ?? 0) !== 0;
+    const warpError = request.warpTarget === 'error';
+    if (warpError && !device.features.has('float32-filterable'))
+        throw new Error("warpTarget 'error' needs float32-filterable (the warp samples its rgba32float history bilinearly).");
     const heatFrames = new Set(request.heatFrames ?? []);
     heatSnapshots.length = 0;
     const { renderWidth, renderHeight } = configure(path, ratio, width, height, request.variant ?? 'production');
-    if (path !== 'native') {
+    if (upscaled) {
         Object.assign(upscaler!.settings, { sharpness: 0.8, maxAccumulation: 24, autoExposure: true, exposure: 1, debugView: 0, ...request.settings });
         await upscaler!.prepare();
         upscaler!.reset();
@@ -283,6 +355,7 @@ async function run(request: LabRequest): Promise<{ frames: FrameRecord[]; render
     depthMotion.reset();
     warping.reset();
     motionVectors.reset();
+    judgeDepthMotion.reset();
 
     const frames: FrameRecord[] = [];
     let previousHistogram: Uint32Array | null = null;
@@ -308,6 +381,17 @@ async function run(request: LabRequest): Promise<{ frames: FrameRecord[]; render
         // depth was rendered with.
         depthMotion.update({ depth: inputTarget!.depthTexture!, camera, projectionMatrix: unjittered, motions: [nodeVelocity] });
         if (temporal) upscaler!.endFrame(camera);
+        if (judgeDisplay) {
+            // Same node frame (no beginFrame): the node keeps one previous per
+            // frame however many renders draw it; three's velocity isn't in this
+            // MRT, so its per-draw history is untouched.
+            renderer.setMRT(mrtJudge);
+            renderer.setRenderTarget(judgeTarget);
+            renderer.render(scene, camera);
+            renderer.setRenderTarget(null);
+            renderer.setMRT(null);
+            judgeDepthMotion.update({ depth: judgeTarget!.depthTexture!, camera, projectionMatrix: unjittered });
+        }
 
         const view4 = camera.matrixWorldInverse;
         const early = device.createCommandEncoder({ label: 'motion-upscaler-early' });
@@ -336,11 +420,11 @@ async function run(request: LabRequest): Promise<{ frames: FrameRecord[]; render
             }
             previousHistogram = histogram;
         }
-        if (reset && path !== 'native') upscaler!.reset();
+        if (reset && upscaled) upscaler!.reset();
 
         //* Upscale
         let outputTexture: THREE.Texture = color;
-        if (path !== 'native') {
+        if (upscaled) {
             upscaler!.dispatch(
                 {
                     color,
@@ -355,10 +439,28 @@ async function run(request: LabRequest): Promise<{ frames: FrameRecord[]; render
             upscaler!.takeTimingSamples();
             outputTexture = upscaler!.outputTexture as THREE.Texture;
         }
-        if (request.reference) {
+        if (request.reference || path === 'reference' || warpError) {
             renderer.setRenderTarget(referenceTarget);
             renderer.render(scene, camera);
             renderer.setRenderTarget(null);
+        }
+        if (path === 'reference' || warpError) {
+            // One bilinear tap at each display pixel center = the 2×2 box.
+            renderer.toneMapping = THREE.NoToneMapping;
+            renderer.setRenderTarget(referenceDown);
+            downsampleQuad.render(renderer);
+            renderer.setRenderTarget(null);
+            if (path === 'reference') outputTexture = referenceDown!.texture;
+        }
+        let warpedTexture = outputTexture;
+        if (warpError) {
+            errorOutputNode.value = outputTexture;
+            errorReferenceNode.value = referenceDown!.texture;
+            renderer.toneMapping = THREE.NoToneMapping;
+            renderer.setRenderTarget(errorTarget);
+            errorQuad.render(renderer);
+            renderer.setRenderTarget(null);
+            warpedTexture = errorTarget!.texture;
         }
 
         //* Analysis
@@ -385,9 +487,9 @@ async function run(request: LabRequest): Promise<{ frames: FrameRecord[]; render
         // Judged through the node for every path and velocity source.
         const keepHeat = measured && heatFrames.has(frame);
         warping.encode(late, {
-            current: gpu(outputTexture),
-            motion: gpu(nodeVelocity),
-            linearDepth: depthMotion.linearDepth,
+            current: gpu(warpedTexture),
+            motion: gpu(judgeDisplay ? judgeTarget!.textures[1] : nodeVelocity),
+            linearDepth: judgeDisplay ? judgeDepthMotion.linearDepth : depthMotion.linearDepth,
             heat: view === 'warp' || keepHeat ? warpHeat!.gpu : undefined,
         });
         const heatReadback = keepHeat ? encodeHeatReadback(late, width, height) : null;
