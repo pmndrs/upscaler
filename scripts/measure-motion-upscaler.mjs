@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 /**
  * Upscaler motion meter (EXPERIMENTAL): the upscaler's consumer of
- * `@pmndrs/motion-vectors` (installed from vendor/motion-vectors/, refreshed by
- * scripts/update-motion-vectors.mjs). Drives bench/motion-upscaler.html over
+ * `@pmndrs/motion-vectors` (npm, a bench-only devDependency). Drives bench/motion-upscaler.html over
  * CDP and reads every number back exactly from the GPU. The motion lab itself
  * (oracle comparisons, its own scenes) lives in pmndrs/motion-vectors.
  *

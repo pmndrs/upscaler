@@ -71,8 +71,8 @@ Live records, kept current as findings land:
 - Motion vectors moved to [pmndrs/motion-vectors](https://github.com/pmndrs/motion-vectors) (2026-11-14): the motion
   contract, the lab that scores three's `velocity` against an exact oracle, the
   findings (`docs/MOTION.md`) and the plan (`docs/PLAN.md`). The upscaler keeps
-  only its consumer probe (`scripts/measure-motion-upscaler.mjs`), which installs
-  the package from a packed tarball (`vendor/motion-vectors/`) until 0.x is on npm.
+  only its consumer probe (`scripts/measure-motion-upscaler.mjs`), on the npm
+  package (`@pmndrs/motion-vectors`, a bench-only devDependency).
 - [Paper notes](research/PAPER-NOTES.md): a running tracker of write-up-worthy
   findings (*surprised us + measured + others would hit it*) and what each still needs
   for publication ([#10](https://github.com/pmndrs/upscaler/issues/10)).

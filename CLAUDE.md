@@ -133,7 +133,7 @@ node scripts/measure-timer-overhead.mjs --conditions temporal:2:dispatch,tempora
 node scripts/measure-receding-disocclusion.mjs --variants baseline,reconstruct-cross-frame-v1
 
 # Upscaler motion probe (EXPERIMENTAL): the bench's consumer of @pmndrs/motion-vectors
-# (vendored tarball): warping error per upscale path and velocity source (three,
+# (npm devDependency): warping error per upscale path and velocity source (three,
 # the package's node, camera motion from depth), the GPU cut detector, and cut
 # resets on Q19/Q10. The motion lab itself lives in pmndrs/motion-vectors.
 node scripts/measure-motion-upscaler.mjs
@@ -200,9 +200,6 @@ packages/
     src/Upscaler.ts    — wraps UpscalerCore: getGpuSource() lookup; dispatch() between renders, encode() inside one
                          (finishRenderPass + pixi's frame encoder); the temporal path needs app-supplied depth/motion/FrameCamera
     src/internal/textureAllocator.ts — storage TextureSource, autoGarbageCollect off, freed with unload() (destroy() warns)
-vendor/motion-vectors/ — packed @pmndrs/motion-vectors (private until 0.x, so CI installs it from here), a devDependency
-                         for the bench's motion probe only; never bundled. Refresh: node scripts/update-motion-vectors.mjs
-                         --from <checkout> && pnpm install. Goes when 0.x is on npm.
 bench/                 — Vite test bench (own vite.config.ts, own tsconfig include)
   src/main.ts          — boot, UI state, stats, render loop
   src/BenchPipeline.ts — render target + velocity MRT wiring, dispatch, present quad (THE integration reference)
