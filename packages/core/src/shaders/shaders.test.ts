@@ -674,10 +674,36 @@ describe('reset (issue #102)', () => {
         expect(SHADING_CHANGE_SHADER).toContain('if (frameReset) { return neutral; }');
         expect(SHADING_CHANGE_SHADER).toContain('var moving = select(0.0, 1.0, frameReset);');
         // No pass may honour the CPU flag alone (it would ignore a GPU cut).
-        for (const source of [ACCUMULATE_SHADER, SHADING_CHANGE_SHADER, LUMINANCE_PYRAMID_SHADER, DEPTH_CLIP_SHADER]) {
+        const sources = [
+            ACCUMULATE_SHADER, SHADING_CHANGE_SHADER, LUMINANCE_PYRAMID_SHADER, DEPTH_CLIP_SHADER,
+            LUMINANCE_PYRAMID_SERIAL_SHADER, exposureEveryTexelFinish(), exposureEveryTexelFinish(false),
+        ];
+        for (const source of sources) {
             const uses = [...source.matchAll(/hasFlag\(FLAG_RESET\)([^;{]*)/g)].map((match) => match[1]);
             expect(uses.length).toBeGreaterThan(0);
             for (const rest of uses) expect(rest).toMatch(/\|\| (frameInfo\.a > 0\.5|textureLoad\(resetSignal)/);
+        }
+    });
+
+    it('binds the signal in every exposure form, which all publish the resolved .a', () => {
+        // The late stage binds the reset whichever metering runs (taps, the
+        // frozen serial identity, every texel / every quad in @group(1)), and
+        // the store lives in the shared epilogue, so `finish` inherits it.
+        const store = 'vec4f(exposure, avgLum, host, select(0.0, 1.0, reset))';
+        for (const source of [LUMINANCE_PYRAMID_SHADER, LUMINANCE_PYRAMID_SERIAL_SHADER]) {
+            expect(source).toContain('@group(0) @binding(7) var resetSignal : texture_2d<f32>;');
+            expect(source.match(/textureStore\(exposureOut/g)).toHaveLength(1);
+            expect(source).toContain(store);
+        }
+        for (const bindings of [EXPOSURE_EVERY_TEXEL_BINDINGS, EXPOSURE_EVERY_QUAD_BINDINGS]) {
+            expect(bindings).toContain('@group(1) @binding(7) var resetSignal : texture_2d<f32>;');
+        }
+        for (const form of ['texel', 'quad'] as const) {
+            expect(everyTexelExposureLayout(form).filter((entry) => entry.binding === 7)).toHaveLength(1);
+        }
+        for (const finish of [exposureEveryTexelFinish(), exposureEveryTexelFinish(false)]) {
+            expect(finish.match(/textureStore\(exposureOut/g)).toHaveLength(1);
+            expect(finish).toContain(store);
         }
     });
 });

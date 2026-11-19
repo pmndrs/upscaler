@@ -1688,7 +1688,12 @@ unchanged adaptation, override and pre-exposure code. The row loop keeps the uni
 steps. The grid guard moves after the last barrier. The old form is frozen,
 source-identical (fingerprint `30144ae9`), as `LUMINANCE_PYRAMID_SERIAL_SHADER`: bench
 identity `exposure-serial-v1` (`baseline` with only that pass swapped, through a
-bench-only `_exposureShader`) and the frozen candidate bundles.
+bench-only `_exposureShader`) and the frozen candidate bundles. *Amended 2026-11-20
+(r187 integration with the GPU reset signal, issue #102):* the frozen form shares the
+head and epilogue, so it gained binding 7 and the resolved reset in `.a` like every
+exposure form (the late stage binds it whichever form runs); fingerprint `30144ae9` →
+`a1719dab`, byte-identical to the reset branch's pre-parallel production shader. Its
+metering loop, and so its readback, is unchanged.
 
 **Correctness.** Only the order of the f32 additions changes, so the log-sum differs in
 its last bits. An order-preserving parallel form would need a serial pass over 1024

@@ -111,14 +111,14 @@ async function shaderRun({ shaderUrl, order, samples }) {
     };
     sources['serial-constant-bound'] = sources.serial.replaceAll('C.exposureTaps', 'EXPOSURE_TAPS');
     sources['parallel-constant-bound'] = sources.parallel.replaceAll('C.exposureTaps', 'EXPOSURE_TAPS');
-    // f32 copies publish the raw logSum in .a too.
+    // f32 copies publish the raw logSum in .a (in place of the resolved reset).
     const f32Source = (code) => code
         .replace('var exposureOut : texture_storage_2d<rgba16float, write>', 'var exposureOut : texture_storage_2d<rgba32float, write>')
-        .replace('vec4f(exposure, avgLum, host, 0.0)', 'vec4f(exposure, avgLum, host, logSum)');
+        .replace('vec4f(exposure, avgLum, host, select(0.0, 1.0, reset))', 'vec4f(exposure, avgLum, host, logSum)');
     // Every tap's log2 luma, so the CPU can sum the same 1024 values exactly
     // (f64) and in each form's f32 order.
     const tapSource = sources.serial.slice(0, sources.serial.indexOf('@compute')) + `
-@group(0) @binding(7) var taps : texture_storage_2d<r32float, write>;
+@group(0) @binding(8) var taps : texture_storage_2d<r32float, write>;
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) gid : vec3u) {
     if (any(gid.xy >= vec2u(EXPOSURE_TAPS))) { return; }
@@ -251,7 +251,8 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
         return { name: `${kind}-${width}x${height}${seed ? `-s${seed}` : ''}`, texture, width, height };
     }
     const one = (format = 'rgba16float') => device.createTexture({ size: [1, 1], format, usage });
-    const previous = one(), external = one(), host = one();
+    // reset: the GPU reset signal (binding 7, issue #102), zero = no reset.
+    const previous = one(), external = one(), host = one(), reset = one();
     const output16 = one(), output32 = one('rgba32float');
     const writeOne = (target, values) =>
         device.queue.writeTexture({ texture: target }, new Uint16Array(values.map(half)), {}, [1, 1]);
@@ -270,7 +271,7 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
         return device.createBindGroup({
             layout: pipeline.getBindGroupLayout(0),
             entries: [{ buffer: uniform }, input.texture.createView(), sampler, previous.createView(),
-                out.createView(), external.createView(), host.createView()]
+                out.createView(), external.createView(), host.createView(), reset.createView()]
                 .map((resource, binding) => ({ binding, resource })),
         });
     }
@@ -303,7 +304,7 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
         pass.setBindGroup(0, device.createBindGroup({
             layout: tapPipeline.getBindGroupLayout(0),
             entries: [{ binding: 1, resource: input.texture.createView() }, { binding: 2, resource: sampler },
-                { binding: 7, resource: tapTexture.createView() }],
+                { binding: 8, resource: tapTexture.createView() }],
         }));
         pass.dispatchWorkgroups(4, 4);
         pass.end();
