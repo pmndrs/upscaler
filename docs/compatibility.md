@@ -55,7 +55,8 @@ Every engine is an optional peer dependency of `@pmndrs/upscaler`: install the o
 whose subpath you import (`three` for the root and `/three`, `@babylonjs/core` for
 `/babylon`, `pixi.js` for `/pixi`). `/core` needs none. The one regular dependency,
 `@pmndrs/downsampler` (engine-free, no dependencies of its own), installs with the
-package and is shared with an app that uses it too.
+package. It is pinned to an exact version, because its generated shader is part of the
+upscaler's output.
 
 ## WebGPU
 
