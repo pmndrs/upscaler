@@ -242,7 +242,9 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
     let prevUV = uv - motion;
     let offscreen = any(prevUV < vec2f(0.0)) || any(prevUV > vec2f(1.0));
 
-    if (hasFlag(FLAG_RESET) || offscreen) {
+    // Reset: the CPU flag, or the exposure pass's resolved reset (.a), which
+    // folds in the app's GPU reset signal (a cut detector) without a readback.
+    if (hasFlag(FLAG_RESET) || frameInfo.a > 0.5 || offscreen) {
         textureStore(historyOut, gid.xy, vec4f(current, 1.0 / C.maxAccumulation));
         textureStore(locksOut, gid.xy, vec4f(0.0, 0.0, 0.0, currentAlpha));
         return;

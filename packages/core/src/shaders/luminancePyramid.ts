@@ -33,6 +33,11 @@ import { assembleShader } from './wgsl';
  *      frame's input color). Published in the output's .b so accumulate can
  *      ratio-correct history across a change (FSR3's DeltaPreExposure). A zero
  *      dummy (no input) publishes 1.0, keeping the correction inert.
+ * - 7: reset signal (app-supplied; `.r > 0.5` at texel (0, 0) = this frame is
+ *      a reset, e.g. a GPU cut detector's flag). Folded with FLAG_RESET into
+ *      the output's .a, which every later pass of the frame reads as "reset"
+ *      — so a GPU-side cut needs no readback and no per-pass binding. The
+ *      zero dummy (no input) reads as "no reset", keeping this inert.
  */
 export const LUMINANCE_PYRAMID_SHADER = assembleShader(
     // Exposure names the final reserved slot of the shared 96-byte layout.
@@ -47,6 +52,7 @@ export const LUMINANCE_PYRAMID_SHADER = assembleShader(
 @group(0) @binding(4) var exposureOut : texture_storage_2d<rgba16float, write>;
 @group(0) @binding(5) var externalExposure : texture_2d<f32>;
 @group(0) @binding(6) var hostPreExposure : texture_2d<f32>;
+@group(0) @binding(7) var resetSignal : texture_2d<f32>;
 
 // 32×32 = 1024 bilinear taps across the whole frame — a coarse but stable
 // average for exposure (each tap already averages 4 texels).
@@ -108,11 +114,14 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
 
     let targetExposure = clamp(EXPOSURE_KEY / max(avgLum, 1.0e-4), EXPOSURE_MIN, EXPOSURE_MAX);
 
+    // This frame's resolved reset: the CPU flag or the app's GPU signal.
+    let reset = hasFlag(FLAG_RESET) || textureLoad(resetSignal, vec2i(0), 0).r > 0.5;
+
     // Ease toward the target for eye-adaptation; snap on reset so a stale value
     // doesn't slowly fade in after a camera cut / resize.
     let prev = textureLoad(prevExposure, vec2i(0), 0).r;
     var exposure = targetExposure;
-    if (!hasFlag(FLAG_RESET) && prev > 0.0) {
+    if (!reset && prev > 0.0) {
         exposure = prev;
         if (abs(log2(targetExposure / prev)) > ADAPT_DEADBAND_STOPS) {
             let rate = clamp(1.0 - exp2(-C.deltaTime * ADAPT_SPEED), 0.0, 1.0);
@@ -134,7 +143,8 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
 
     // Host pre-exposure rides along in .b: 0 (the dummy) means "not supplied"
     // and publishes as 1.0 so the accumulate-side ratio correction is inert.
-    textureStore(exposureOut, vec2i(0), vec4f(exposure, avgLum, host, 0.0));
+    // .a is the resolved reset, read by shading change and accumulate.
+    textureStore(exposureOut, vec2i(0), vec4f(exposure, avgLum, host, select(0.0, 1.0, reset)));
 }
 `,
 );

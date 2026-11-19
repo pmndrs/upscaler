@@ -50,6 +50,17 @@ export class UpscalePass {
     private _path: UpscalePath = 'temporal';
     private _reactive: THREE.Texture | null = null;
     private _reactiveOpaque: THREE.Texture | null = null;
+    private _resetTexture: THREE.Texture | null = null;
+
+    /**
+     * Called by {@link draw} right after the scene renders into
+     * {@link renderTarget} and before the upscale dispatches, while the camera
+     * still holds this frame's jittered projection. The place to encode GPU
+     * work on the inputs the upscale should see this frame — e.g. a cut
+     * detector whose flag is set with {@link setResetTexture}
+     * (docs/inputs-and-contracts.md).
+     */
+    onInputsRendered: ((target: THREE.RenderTarget, camera: THREE.Camera) => void) | null = null;
 
     /**
      * @param renderer - An initialized `WebGPURenderer`
@@ -168,6 +179,7 @@ export class UpscalePass {
         this._renderer.render(scene, camera);
         this._renderer.setRenderTarget(null);
         this._renderer.setMRT(null);
+        if (this.upscaler.isReady) this.onInputsRendered?.(rt, camera);
         if (this.upscaler.isReady) this.upscaler.endFrame(camera);
         if (!this.upscaler.isReady) return;
 
@@ -178,6 +190,7 @@ export class UpscalePass {
                 velocity: temporal ? rt.textures[1] : undefined,
                 reactive: this._reactive ?? undefined,
                 reactiveOpaqueColor: this._reactiveOpaque ?? undefined,
+                resetTexture: this._resetTexture ?? undefined,
                 deltaTime,
             },
             camera,
@@ -248,6 +261,18 @@ export class UpscalePass {
      */
     setReactiveOpaqueColor(texture: THREE.Texture | null): void {
         this._reactiveOpaque = texture;
+    }
+
+    /**
+     * Sets a GPU reset signal read by every following {@link draw}: history
+     * drops on any frame where its red texel (0, 0) is above 0.5, decided on
+     * the GPU with no readback. A cut detector's flag (e.g.
+     * `@pmndrs/motion-vectors`' `MotionFromDepthPass.cutFlag`), updated from
+     * {@link onInputsRendered}. Pass `null` to clear.
+     * @param texture - A float texture (1×1 typical), or null
+     */
+    setResetTexture(texture: THREE.Texture | null): void {
+        this._resetTexture = texture;
     }
 
     /**

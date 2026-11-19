@@ -82,6 +82,9 @@ var<workgroup> tileSums : array<vec4f, 64>;
 // 1 where any texel of the thread's 2×2 moved, was disoccluded or reset: the
 // block's memory describes other content and restarts.
 var<workgroup> tileMoving : array<f32, 64>;
+// This frame's reset: the CPU flag or the exposure pass's resolved reset (.a,
+// which folds in the app's GPU reset signal). Set once at the top of main.
+var<private> frameReset : bool;
 
 // Per-scale base noise floors for the relative difference of block means.
 // Only the 4×4 and 8×8 scales contribute to the response — this is the
@@ -132,7 +135,7 @@ fn lumaPair(
 ) -> vec4f {
     let currentSq = currentLuma * currentLuma;
     let neutral = vec4f(currentLuma, currentLuma, currentSq, currentSq);
-    if (hasFlag(FLAG_RESET)) { return neutral; }
+    if (frameReset) { return neutral; }
     let uv = (vec2f(coord) + 0.5) * C.renderSizeInv;
     // Off-screen tested on the motion-only reprojection, as in reconstruct.ts:
     // the jitter shift alone must not push border texels out of detection.
@@ -268,6 +271,7 @@ fn main(
     // Hoisted once per invocation — the source-style candidate reloaded these
     // 1×1 texels inside every reduction tap, which dominated its cost.
     let frameInfo = textureLoad(exposureTex, vec2i(0), 0);
+    frameReset = hasFlag(FLAG_RESET) || frameInfo.a > 0.5;
     let hostPrev = textureLoad(exposurePrevTex, vec2i(0), 0).b;
     let hostRatio = select(1.0, frameInfo.b / hostPrev, hostPrev > 1.0e-4 && frameInfo.b > 1.0e-4);
     let conditioning = max(frameInfo.r, 1.0e-4);
@@ -278,7 +282,7 @@ fn main(
     let origin = vec2i(gid.xy) * 2;
     let maxCoord = vec2i(C.renderSize) - 1;
     var sums0 = vec4f(0.0);
-    var moving = select(0.0, 1.0, hasFlag(FLAG_RESET));
+    var moving = select(0.0, 1.0, frameReset);
     for (var y = 0; y < 2; y++) {
         for (var x = 0; x < 2; x++) {
             let coord = clamp(origin + vec2i(x, y), vec2i(0), maxCoord);

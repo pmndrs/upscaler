@@ -61,7 +61,8 @@ core.encode(encoder, { color, depth, velocity, deltaTime }, { near, far, perspec
 3. Per frame: `beginFrame()`, render your inputs, then one of `dispatch` / `encode`
    (or the split pair, below).
 4. `resetHistory()` on a camera cut or teleport. Passing `reset: true` in the
-   inputs does the same for one frame.
+   inputs does the same for one frame, and `resetTexture` decides it on the GPU
+   (see [Inputs](#inputs)).
 5. `dispose()` when done.
 
 `core.settings` is the live `RuntimeSettings` object (sharpness, auto-exposure,
@@ -84,6 +85,7 @@ multisampled input; it can't bind). All render-resolution inputs are exactly
 | `reactiveOpaqueColor` | as `color` | Optional. The opaque-only render; the core derives a reactive mask from its difference to `color`. |
 | `exposureTexture` | float, `.r` of texel (0, 0) | Optional. Overrides auto/fixed conditioning exposure. |
 | `preExposureTexture` | float, `.r` of texel (0, 0) | Optional. Exposure already baked into `color`; history is corrected when it changes. |
+| `resetTexture` | float, `.r` of texel (0, 0) | Optional. `> 0.5` makes this frame a reset, decided on the GPU (no readback): a cut detector's flag. Also on `dispatchGuides()`; a split frame's late stage reuses the guides stage's. Absent, a zero placeholder is bound and output is unchanged. |
 
 `depth` and `velocity` are required on the `temporal` and `guides` paths; `bilinear`
 and `spatial` read only `color`. `deltaTime` (seconds) drives exposure adaptation.
