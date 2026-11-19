@@ -17,13 +17,19 @@
  * - GPU timestamps, ABBA-interleaved, at two input sizes
  *
  * Part `scenes` (bench dev server): plays bench scenarios frame by frame under
- * `baseline` and `exposure-serial-v1` and reads the published exposure guide
- * (rgba16float: exposure, avg luma, host) back after every frame.
+ * `exposure-serial-v1` and `exposure-taps-v1` (production's taps at every
+ * size, NEXT-STEPS §17; or the --variants list, the first one
+ * the reference) and reads the published exposure guide (rgba16float:
+ * exposure, avg luma, host) back after every frame. Each variant also gets a
+ * stability summary past --settle frames: how often the stored exposure moved
+ * and how much the metered average wobbled (log2 std and largest step), which
+ * on a still scenario is the jitter-phase metering wobble (NEXT-STEPS §17).
  *
  * Usage:
  *   node scripts/measure-exposure-parallel.mjs [--part all|shader|scenes]
  *     [--runs 3] [--samples 256] [--scenarios Q0,Q1,Q3,Q9,Q10,Q11] [--frames 240]
- *     [--ratio 2] [--chrome path] [--output dir]
+ *     [--ratio 2] [--variants exposure-serial-v1,exposure-taps-v1] [--settle 30]
+ *     [--chrome path] [--output dir]
  *     [--examples-url http://127.0.0.1:5312] [--bench-url http://127.0.0.1:5313]
  *     [--port 9352] [--power-preference high-performance|low-power]
  *     [--expected-vendor nvidia|intel]
@@ -58,6 +64,9 @@ const USAGE = `Usage: node scripts/measure-exposure-parallel.mjs [options]
   --scenarios <ids>          bench scenarios for the scenes part (default Q0,Q1,Q3,Q9,Q10,Q11)
   --frames <n>               frames played per scenario (default 240)
   --ratio <n>                bench upscale ratio for the scenes part (default 2)
+  --variants <ids>           bench variants for the scenes part, the first the reference
+                             (default exposure-serial-v1,exposure-taps-v1)
+  --settle <n>               frames skipped before the stability summary (default 30)
   --examples-url <origin>    examples dev server for the shader part (default http://127.0.0.1:5312)
   --bench-url <origin>       bench dev server for the scenes part (default http://127.0.0.1:5313)
   --port <n>                 CDP port of the Chrome this script launches (default 9352)
@@ -68,7 +77,7 @@ const USAGE = `Usage: node scripts/measure-exposure-parallel.mjs [options]
 
 const cli = parseCliOrExit(
     process.argv.slice(2),
-    ['part', 'runs', 'samples', 'scenarios', 'frames', 'ratio', 'examples-url', 'bench-url', 'port',
+    ['part', 'runs', 'samples', 'scenarios', 'frames', 'ratio', 'variants', 'settle', 'examples-url', 'bench-url', 'port',
         'chrome', 'output', 'power-preference', 'expected-vendor'],
     USAGE,
 );
@@ -80,6 +89,9 @@ const samples = Number(cli.samples ?? 256);
 const scenarios = String(cli.scenarios ?? 'Q0,Q1,Q3,Q9,Q10,Q11').split(',').filter(Boolean);
 const frames = Number(cli.frames ?? 240);
 const ratio = Number(cli.ratio ?? 2);
+const sceneVariants = String(cli.variants ?? 'exposure-serial-v1,exposure-taps-v1').split(',').filter(Boolean);
+if (sceneVariants.length < 2) throw new Error('--variants needs at least two ids (the first is the reference).');
+const settle = Number(cli.settle ?? 30);
 const examplesServer = resolveServerUrl(cli['examples-url'], 'http://127.0.0.1:5312');
 const benchServer = resolveServerUrl(cli['bench-url'], 'http://127.0.0.1:5313');
 const cdpPort = parsePort(cli.port, '--port') ?? 9352;
@@ -440,6 +452,32 @@ function deltas(pairs) {
     return { maxAbs: abs, maxRel: rel, differing, of: pairs.length };
 }
 
+/**
+ * Exposure stability past the settle frames: how many frames the stored
+ * exposure (.r) moved, its log2 range, and the metered average's (.g) log2
+ * standard deviation and largest frame-to-frame step.
+ */
+function stability(values) {
+    const rows = values.slice(settle).map((v) => [fromHalf(v[0]), fromHalf(v[1])]);
+    const logLum = rows.map(([, g]) => Math.log2(g));
+    const mean = logLum.reduce((s, x) => s + x, 0) / logLum.length;
+    let exposureMoves = 0, lumStep = 0;
+    for (let i = 1; i < rows.length; i++) {
+        if (rows[i][0] !== rows[i - 1][0]) exposureMoves++;
+        lumStep = Math.max(lumStep, Math.abs(logLum[i] - logLum[i - 1]));
+    }
+    const logExposure = rows.map(([r]) => Math.log2(r));
+    return {
+        frames: rows.length,
+        exposureMoves,
+        exposureLog2Range: Math.max(...logExposure) - Math.min(...logExposure),
+        avgLumLog2Std: Math.sqrt(logLum.reduce((s, x) => s + (x - mean) ** 2, 0) / logLum.length),
+        avgLumLog2MaxStep: lumStep,
+        meanExposure: rows.reduce((s, [r]) => s + r, 0) / rows.length,
+        meanAvgLum: rows.reduce((s, [, g]) => s + g, 0) / rows.length,
+    };
+}
+
 /** Runtime.evaluate without CDP.evaluate's 45 s cap (input generation and frame playback run long). */
 async function evaluateLong(client, expression) {
     const result = await client.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }, 900000);
@@ -529,7 +567,7 @@ async function scenesPart(results) {
         await withBrowser(async (client) => {
             for (const scenario of scenarios) {
                 const byVariant = {};
-                for (const variant of ['baseline', 'exposure-serial-v1']) {
+                for (const variant of sceneVariants) {
                     const url = new URL(benchServer.origin);
                     url.searchParams.set('benchMode', 'capture');
                     url.searchParams.set('scenario', scenario);
@@ -549,18 +587,24 @@ async function scenesPart(results) {
                     if (value.variant !== variant) throw new Error(`Bench reported ${value.variant}, expected ${variant}.`);
                     byVariant[variant] = { ...value, browserErrors: browserErrors(client) };
                 }
-                const a = byVariant['exposure-serial-v1'].values, b = byVariant.baseline.values;
+                const [reference, ...others] = sceneVariants;
+                const a = byVariant[reference].values;
                 const summary = {
                     scenario,
                     frames: a.length,
-                    framesDiffering: a.filter((v, i) => JSON.stringify(v) !== JSON.stringify(b[i])).length,
-                    exposure: deltas(a.map((v, i) => [fromHalf(v[0]), fromHalf(b[i][0])])),
-                    avgLuma: deltas(a.map((v, i) => [fromHalf(v[1]), fromHalf(b[i][1])])),
-                    maxUlps: Math.max(...a.flatMap((v, i) => v.map((h, c) => Math.abs(h - b[i][c])))),
-                    errors: [...byVariant.baseline.errors, ...byVariant['exposure-serial-v1'].errors,
-                        ...byVariant.baseline.browserErrors, ...byVariant['exposure-serial-v1'].browserErrors],
+                    stability: Object.fromEntries(sceneVariants.map((v) => [v, stability(byVariant[v].values)])),
+                    against: Object.fromEntries(others.map((variant) => {
+                        const b = byVariant[variant].values;
+                        return [variant, {
+                            framesDiffering: a.filter((v, i) => JSON.stringify(v) !== JSON.stringify(b[i])).length,
+                            exposure: deltas(a.map((v, i) => [fromHalf(v[0]), fromHalf(b[i][0])])),
+                            avgLuma: deltas(a.map((v, i) => [fromHalf(v[1]), fromHalf(b[i][1])])),
+                            maxUlps: Math.max(...a.flatMap((v, i) => v.map((h, c) => Math.abs(h - b[i][c])))),
+                        }];
+                    })),
+                    errors: sceneVariants.flatMap((v) => [...byVariant[v].errors, ...byVariant[v].browserErrors]),
                 };
-                results.scenes.push({ ...summary, values: { serial: a, parallel: b } });
+                results.scenes.push({ ...summary, values: Object.fromEntries(sceneVariants.map((v) => [v, byVariant[v].values])) });
                 console.log(JSON.stringify(summary));
                 await writeFile(join(output, 'results.json'), JSON.stringify(results, null, 2));
             }

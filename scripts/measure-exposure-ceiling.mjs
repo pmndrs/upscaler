@@ -24,7 +24,7 @@ import { browserExecutable } from './browser-executable.mjs';
  * Usage:
  *   node scripts/measure-exposure-ceiling.mjs [--exposures auto,80,32,16,8,4,2,1]
  *     [--background 0] [--sharpness 0.8] [--frames 128] [--average 32]
- *     [--hide large,medium] [--label baseline] [--port 9333]
+ *     [--hide large,medium] [--label baseline] [--metering every-texel] [--port 9333]
  *     [--url http://127.0.0.1:5199]
  *
  * Starts the bench dev server on --url's port if nothing answers there.
@@ -57,13 +57,14 @@ const USAGE = `Usage: node scripts/measure-exposure-ceiling.mjs [options]
   --average <n>          trailing frames averaged per emitter (default 32)
   --hide <list>          emitter sizes to hide, e.g. large,medium (default none)
   --label <name>         output folder (default baseline)
+  --metering <form>      bench-only exposure metering (NEXT-STEPS §17), e.g. every-texel
   --url <origin>         bench origin (default ${DEFAULT_BENCH_URL}); if nothing answers,
                          the bench dev server is started on that host + port (--strictPort)
   --port <n>             Chrome DevTools (CDP) port (default 9333)
 Writes bench/results/raw/exposure-ceiling/<label>/summary.json.`;
 const cli = parseCliOrExit(
     process.argv.slice(2),
-    ['exposures', 'background', 'sharpness', 'frames', 'average', 'hide', 'label', 'url', 'port'],
+    ['exposures', 'background', 'sharpness', 'frames', 'average', 'hide', 'label', 'metering', 'url', 'port'],
     USAGE,
 );
 const exposures = String(cli.exposures ?? 'auto,80,32,16,8,4,2,1').split(',');
@@ -73,6 +74,7 @@ const frames = Number(cli.frames ?? 128);
 const average = Number(cli.average ?? 32);
 const hide = cli.hide ? String(cli.hide).split(',') : [];
 const label = cli.label ?? 'baseline';
+const metering = typeof cli.metering === 'string' ? cli.metering : null;
 const port = parsePort(cli.port, '--port') ?? 9333;
 const server = resolveServerUrl(cli.url, DEFAULT_BENCH_URL);
 const outputDirectory = join(ROOT, 'bench/results/raw/exposure-ceiling', label);
@@ -194,7 +196,9 @@ async function main() {
             logRecords.push(`[exception] ${exceptionDetails.exception?.description ?? exceptionDetails.text}`),
         );
         await Promise.all([client.call('Page.enable'), client.call('Runtime.enable'), client.call('Log.enable')]);
-        await client.call('Page.navigate', { url: `${server.origin}/exposure-ceiling.html` });
+        const page = new URL('/exposure-ceiling.html', server.origin);
+        if (metering) page.searchParams.set('exposureMetering', metering);
+        await client.call('Page.navigate', { url: page.href });
         for (let attempt = 0; ; attempt++) {
             if ((await evaluate(client, 'window.__exposureCeiling?.ready === true')) === true) break;
             if (attempt > 300) throw new Error(`Timed out waiting for the probe page.\n${logRecords.join('\n')}`);
