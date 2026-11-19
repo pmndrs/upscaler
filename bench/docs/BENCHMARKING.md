@@ -290,13 +290,16 @@ so HDR highlights can't dominate). A depth mask leaves out disoccluded pixels,
 and pixels with no geometry (sky or clear colour) count as masked too. This is
 `WarpingError` from `@pmndrs/motion-vectors` (a bench-only devDependency). A
 path that flickers, crawls, smears or ghosts under motion reads higher. A
-stable one approaches the scene's own shading change.
+stable one approaches the scene's own shading change, *plus a resampling floor
+that grows with sharpness* (see "Sharpness bias" below).
 
 ```bash
 node scripts/measure-motion-stability.mjs --scenario Q19 --ratio 2 \
   --modes native,bilinear,spatial,temporal --heat
 # A/B two registered variants (every upscaled mode runs both, with per-segment deltas):
 node scripts/measure-motion-stability.mjs --variant production --comparison <B>
+# Flicker with sharpness taken out (the error against the 2×2 reference is warped):
+node scripts/measure-motion-stability.mjs --judge display --warp error --modes temporal,reference
 ```
 
 It drives `bench/motion-upscaler.html`, the motion probe. The upscaler there is
@@ -306,7 +309,8 @@ benchmark. `--scenario` takes Q19 (per segment, measured from frame 100), Q4
 (orbit / truck / wide orbit / hold, from frame 24) or Q3 (object motion under a
 still camera, from frame 24). `--settings` merges RuntimeSettings, `--heat`
 saves heat maps (error ×8 grey, blue = masked) at the middle of each motion
-segment, and `--end` cuts a smoke run short. Per segment it reports the mean
+segment, and `--end` cuts a smoke run short. `--modes` also takes `reference`:
+the 2×2-supersampled render as the output, no upscaler. Per segment it reports the mean
 and worst per-frame error, and the scored, masked (`occluded`) and
 over-threshold (> 0.02) shares. The headline numbers are the mean of the motion
 segments' means and of the holds' means. Output goes to
@@ -319,11 +323,33 @@ Camera motion from depth is never the judge, because it calls an object moving
 along the view axis motionless and rewards the path fed that motion. The judge
 is also never the motion one of the compared outputs was built from (MOTION.md
 §10 in pmndrs/motion-vectors). On the bench, three's `velocity` and the node
-agree, so the temporal path being fed three's motion doesn't bias it. One known
-blind spot: the mask uses the render-resolution depth, which is jittered on the
-temporal path. On a still camera it masks about 1 % more pixels there than on
-native, mostly sub-texel geometry (Q3's fence pickets). Flicker on geometry
-thinner than a render texel is still the still-scene meters' job.
+agree, so the temporal path being fed three's motion doesn't bias it. By default
+(`--judge input`) the judge motion and its depth mask come from the input render,
+which is at render resolution and, on the temporal path, rasterized under the
+jittered projection. Near silhouettes the judge itself moves by a jitter step each
+frame: orbit reads a period-2 alternation (0.0020 / 0.0024) that is all within
+3 px of mask edges, and a still camera masks about 1 % more pixels than on
+native. **Use `--judge display`**, which renders the same node a second time,
+unjittered and at display resolution, for every mode. Native reads identically
+under both judges. Flicker on geometry thinner than a render texel is still the
+still-scene meters' job.
+
+**Sharpness bias.** The warp resamples the previous frame bilinearly, so for
+any motion that isn't a whole number of pixels, a sharp image differs from its
+warped predecessor even when nothing flickers. Holds read exactly 0 (no motion,
+no resampling) and motion reads mostly this floor. The 2×2-supersampled
+reference, a stable near-ground-truth image, reads **0.00462**: above native,
+bilinear and temporal. So a lower reading can mean *softer*, not steadier, and the
+plain meter can't rank paths of different sharpness. A variant that sharpens
+reads worse even if it is just as stable. `--warp error` warps the output's
+conditioned-luma error against that reference instead (d = c(out) − c(ref),
+carried through WarpingError as a grey whose conditioned luma is 0.5 + d).
+Content shared with the reference cancels, so it reads how the *error* changes
+along motion, and the reference reads 0. The error image is still resampled
+bilinearly, so cross-mode rankings keep a weaker bias. Use it for onset-versus-steady
+questions and A/Bs, and confirm cross-mode claims against
+`measure-reference-quality.mjs`. It needs `float32-filterable`, which Metal and
+most desktop GPUs have. Evidence: NEXT-STEPS §17.
 
 **Baseline** (2026-11-20, `production`, Q19, ratio 2, 1280×720, Metal, r186.1;
 52 s for all four modes):
@@ -336,16 +362,22 @@ thinner than a render texel is still the still-scene meters' job.
 | **temporal** | **0.00174** | 0.00020 | 0.00265 | orbit-right 0.00216 |
 
 These match the probe's own `warp` experiment and MOTION.md §5 (0.0038 /
-0.0030 / 0.0049 / 0.0017). The temporal path is the steadiest under motion:
-2.2× below native and 1.7× below bilinear. FSR1 is the least steady, because
-RCAS sharpens aliasing that then crawls. Temporal's holds read 0.0002, which is
-jitter churn (the still-scene meters' domain); the first frames of a hold after
-motion reach 0.0004–0.0007 while history re-converges. Temporal's worst frames
-are the onset of motion after a converged hold. Scene-recede reads 0.0024–0.0027
-over frames 720–725 against a segment mean of 0.00165, and the start of
-orbit-right and the end of scene-approach show the same pattern.
-Regenerate the baseline with the first command above; NEXT-STEPS §16 has the
-record.
+0.0030 / 0.0049 / 0.0017). Read them with the sharpness bias in mind: the
+reference reads 0.00462 on the same run, so temporal's low figure is largely
+its softness under motion. Temporal's holds read 0.0002, which is jitter churn
+(the still-scene meters' domain). The first frames of a hold after motion reach
+0.0004–0.0007 while history re-converges.
+
+With `--judge display` (same run, `--modes …,reference`): native 0.00380,
+bilinear 0.00317, FSR1 0.00505, temporal 0.00177, reference 0.00462. With
+`--judge display --warp error`: native 0.00294, bilinear 0.00630, FSR1 0.00756,
+temporal 0.00542, reference 0.
+
+The scene-recede "onset spike" (0.0024–0.0027 over frames 720–725) is not an
+onset effect. The last frames of scene-approach, at the same scene positions
+but 50 frames into motion, read the same, and under `--warp error` the onset is
+flat (NEXT-STEPS §17). Regenerate the baseline with the first command above;
+NEXT-STEPS §16–17 have the record.
 
 ---
 

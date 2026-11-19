@@ -141,6 +141,8 @@ node scripts/measure-motion-upscaler.mjs
 # Flicker UNDER MOTION (reference-free): WarpingError on the output, judged through
 # the package's MotionVectors node, per Q19/Q4/Q3 segment. The still-scene meters'
 # motion counterpart; --comparison A/Bs two bench variants in one run (~1 min).
+# It reads SHARPER as WORSE (bilinear warp; the 2×2 reference reads above native):
+# A/B with --judge display --warp error (error vs the reference is warped; NEXT-STEPS §17).
 node scripts/measure-motion-stability.mjs --modes native,bilinear,spatial,temporal --heat
 
 # Sub-pixel emitter retention (issue #51): Q17 per-emitter output energy vs the

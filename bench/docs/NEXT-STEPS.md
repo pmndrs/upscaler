@@ -1703,13 +1703,13 @@ native / temporal: Q4 motion 0.00501 / 0.00200 (truck is the hardest at 0.00236)
 and Q3 0.00020 / 0.00054. On Q3 the camera is still, so temporal's figure is mostly
 jitter churn on static pixels, not object-motion flicker.
 
-**What it shows that nothing else did:** temporal's worst frames are the *onset* of
+**What it seemed to show:** temporal's worst frames looked like the *onset* of
 motion after a converged hold. Scene-recede reads 0.0024–0.0027 over frames 720–725,
-against 0.00014 on the hold before it and a segment mean of 0.00165, and the start of
-orbit-right and the end of scene-approach repeat the pattern. Orbit is temporal's
-hardest steady segment (0.0021–0.0022, 1.5 % of pixels over 0.02). Neither has been
-investigated yet. The onset spike is the first candidate if motion flicker is
-reported. Gate any accumulation, lock or rectification change on this meter as well
+against 0.00014 on the hold before it and a segment mean of 0.00165. **§17 rules this
+out as an onset effect:** the last frames of scene-approach, at the same scene
+positions but 50 frames into motion, read the same, and the meter reads sharper
+images higher. Orbit's period-2 alternation (0.0020 / 0.0024) is the meter's own
+jittered judge, also §17. Gate any accumulation, lock or rectification change on this meter as well
 as the still-scene ones. #107 (motion-adaptive accumulation cap) is the obvious
 first user.
 
@@ -1725,6 +1725,112 @@ Regenerate (52 s; nothing to start first, it boots the dev server if none answer
 node scripts/measure-motion-stability.mjs --scenario Q19 --ratio 2 \
   --modes native,bilinear,spatial,temporal --heat --label baseline
 # writes bench/results/raw/motion-stability/baseline-Q19-2x/
+```
+
+## 17. The motion-onset "spike" — NOT REAL as onset; two meter defects found (2026-11-20)
+
+§16 read temporal's first scene-recede frames (720–725: 0.0024–0.0027) against the
+hold before them (0.00014) as a pop at motion onset. It is not one. Three findings,
+all on Q19, ratio 2, 1280×720, Metal, `production` (worktree runs; the meter is
+deterministic, so re-runs reproduce to the last digit).
+
+**1. The level is set by scene position, not by history.** Q19's scene-recede and
+scene-approach are mirror images (0.1 u/frame out, then back), so recede frame
+720 + k and approach frame 899 − k show the same geometry, one right after a converged
+hold and one 50 frames into motion. Temporal reads the same at both (×1e-4, display
+judge): recede 24.1 / 25.0 / 26.5 / 24.6 at k = 0…3 against approach 25.2 / 23.8 /
+25.2 / 26.2. Both fall to ~14 by k = 15, where the props and the fence have shrunk.
+There is no one-frame step at frame 720 either: 720 reads below 721 and 722. Orbit-right
+shows no onset effect (first 6 frames 21.9 against 21.6 steady), and dolly-back
+very little (17.5 against 16.8). Accumulation age stays saturated through the onset
+(only thin disocclusion trails at silhouettes). Locks hold on the grid lines.
+
+**2. Defect: the meter reads sharpness as instability.** `WarpingError` resamples
+the previous frame bilinearly, so on any motion that is not a whole number of pixels
+a sharp image differs from its warped predecessor even when nothing flickers. Holds
+read exactly 0 for every deterministic path (no motion, no resampling), so the hold
+→ motion jump is mostly this floor. The proof is a new `reference` mode, the 2×2-supersampled
+render as the output (no upscaler; verified identical to the probe's reference
+residual, |out − ref| = 0). It reads **0.00462 under motion**, above native (0.00380)
+and 2.6× temporal (0.00177). A stable, near-ground-truth image is "least steady".
+So the cross-mode ranking in §16 (temporal 2.2× steadier than native) is mostly
+temporal being softer, and the onset "excess" is the converged still image being
+sharper than the steady-motion image (#107's motion softness), decaying over ~10 frames.
+
+The fix in the probe is `--warp error`: the warp runs on the output's
+conditioned-luma *error* against the same 2×2 reference, d = c(out) − c(ref). It is
+encoded as a grey y with y/(1+y) = 0.5 + d, in rgba32float, so the package's own
+WarpingError measures |d − warp(d_prev)| with its own mask and counters. Content
+the output shares with the reference cancels, and what remains is how the error
+changes along motion: flicker, crawl and ghosting. The reference then reads exactly
+0. On that meter the onset is flat: recede's first 12 frames 54.6 against 56.2 on
+approach's last 12, orbit-right 56.0 against 55.3, dolly-back 50.2 against 59.0. The
+error image is still resampled bilinearly, so cross-mode rankings keep a weaker
+version of the bias (native 0.00294, bilinear 0.00630, FSR1 0.00756, temporal
+0.00542). Use it for onset-vs-steady and same-sharpness A/Bs, and confirm cross-mode
+claims against `measure-reference-quality.mjs`.
+
+**3. Defect: the temporal path's judge was jittered.** The judge motion and its
+depth mask came from the input render, which on the temporal path is rasterized
+under the jittered projection at render resolution. Near silhouettes the judge
+itself moved by a jitter step each frame, and orbit read a period-2 alternation
+(0.00232 / 0.00200 / 0.00245 / 0.00202 …). Heat maps of consecutive frames put
+that alternation entirely within 3 px of mask edges (502 − 503: +0.00033 near
+edges, +0.00004 elsewhere). `--judge display` renders the same `MotionVectors`
+node a second time, unjittered and at display resolution, for every mode. Native
+is unchanged to the last digit (it was already unjittered at display resolution),
+and orbit goes flat (0.00221 / 0.00214 / 0.00216 / 0.00222). Segment means barely
+move (temporal 0.00174 → 0.00177).
+
+**A/B over the onset windows** (output warp, display judge, ×1e-4 conditioned luma).
+*recede0* is frames 720–731, *mirror* is 888–899 (the same positions, mid-motion),
+and *excess* is their difference, the only part history could explain. *stopTail* is
+the first 10 frames of hold-6 (780–789) and *holdSS* is 800–839:
+
+| condition | motion | holds | recede0 | mirror | excess | orbitR 0–5 / steady | stopTail / holdSS |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| production | 17.68 | 2.05 | 23.6 | 21.5 | +2.1 | 21.9 / 21.6 | 3.5 / 1.6 |
+| `lockThinFeatures` off | 17.97 | 2.32 | 23.9 | 21.6 | +2.4 | 23.2 / 21.7 | 3.7 / 1.8 |
+| `detectShadingChanges` off | 17.68 | 2.05 | 23.6 | 21.5 | +2.1 | 21.9 / 21.6 | 3.5 / 1.6 |
+| `autoExposure` off | 17.35 | 2.00 | 23.4 | 22.0 | +1.4 | 21.5 / 21.2 | 3.0 / 1.5 |
+| `maxAccumulation` 8 | 18.62 | **6.04** | 23.0 | 22.6 | +0.4 | 23.0 / 22.0 | 6.6 / 5.6 |
+| `accumulate-still-relax0-v1` | 17.68 | **4.31** | 24.0 | 22.0 | +2.0 | 21.2 / 21.6 | 4.4 / 2.2 |
+| `accumulate-motion-cap2-early-v1` (#107) | **28.63** | 2.19 | 29.0 | 29.9 | −0.9 | 34.7 / 32.2 | 4.8 / 1.5 |
+
+The shading detector does not fire on Q19 (bit-identical with it off). The still-scene
+relax, the prime suspect, does not cause the excess: with `STILL_CLAMP_RELAX` 0
+the excess stays +2.0, while hold churn doubles (2.05 → 4.31), which is the relax
+doing its job (§5). Only shortening history shrinks the excess (`maxAccumulation` 8: +0.4).
+It does so by making the steady-motion image sharper (mirror 21.5 → 22.6), and it
+triples hold churn, so it is not a fix. #107's cap removes the "excess" the same way
+and raises the motion reading 62 % (17.7 → 28.6). Under `--warp error`, which takes
+sharpness out, cap2-early still reads **+8.8 % under motion (54.2 → 59.0), +39 %
+on slide (31.5 → 43.7)**, and +5–18 % on the first holds after motion
+(history regrowing from 2). That is real added instability, concentrated on slow
+pans, and it is the "interactive look at slow pans for crawl" #107 still owes. Its
+still scenes are unchanged: Q1 consecutive 0.1113 / same-phase 0.0240 and Q12
+0.0175 / 0.0159, identical to production (`measure-convergence --pairs 33`). The cap
+is inactive below 0.05 px/frame.
+
+**Verdict:** no onset fix is warranted, so no production default changes. The real
+motion behaviour is a gradual softening as motion starts (#107's territory) and a
+~10-frame re-sharpening tail after it stops (stopTail 3.5 against 1.6). Neither is
+a pop. Gate #107 on `--warp error` per segment, not only on PSNR. Open: a sharper
+resampler in WarpingError (Catmull-Rom) would shrink the remaining bias in both
+meters. That change belongs upstream in pmndrs/motion-vectors.
+
+Regenerate (each condition ~3–15 s; the dev server must answer on `--url` or is started):
+
+```bash
+node scripts/measure-motion-stability.mjs --scenario Q19 --ratio 2 --judge display \
+  --modes native,bilinear,spatial,temporal,reference --label judge          # output warp
+node scripts/measure-motion-stability.mjs --scenario Q19 --ratio 2 --judge display \
+  --warp error --modes native,bilinear,spatial,temporal,reference --label rel
+node scripts/measure-motion-stability.mjs --scenario Q19 --ratio 2 --judge display \
+  --settings '{"maxAccumulation":8}' --label max8                           # one A/B row
+node scripts/measure-motion-stability.mjs --scenario Q19 --ratio 2 --judge display \
+  --warp error --variant production --comparison accumulate-motion-cap2-early-v1 --label relcap
+# per-frame records: bench/results/raw/motion-stability/<label>-Q19-2x/<condition>.frames.json
 ```
 
 ## Explicitly not planned (measured against)
