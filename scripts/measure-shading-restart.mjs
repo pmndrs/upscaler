@@ -117,7 +117,8 @@ const PAGE_HELPERS = `
 window.__shadingRestart = {
   upscaler() { return window.__UPSCALER_BENCH__._context.pipeline.resolver._upscaler; },
   async read(rois) {
-    const up = this.upscaler(); const device = up._device; const texture = up._shadingSignal;
+    // The GPU state lives on the engine-free core since the monorepo split.
+    const up = this.upscaler()._core; const device = up._device; const texture = up._shadingSignal;
     const w = texture.width, h = texture.height, bytesPerRow = Math.ceil((w * 4) / 256) * 256;
     const buffer = device.createBuffer({ size: bytesPerRow * h, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
     const encoder = device.createCommandEncoder();
