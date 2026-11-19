@@ -1982,8 +1982,11 @@ node reconfigures when it gains or loses the view offset). Runtime settings
 `scripts/measure-shading-restart.mjs` (§14) read the detector's texture off the three
 `Upscaler`, a field path stale since the core split; it now reads `_core`. Q18 ratio 2,
 full-frame firing (v > 0.1) at the f300 step: mature 62.2 %; re-enabled 1 frame before
-64.2 % (event frame 0 %, primed); 3 frames before 62.5 % (3.5 % / 1.4 % on the two frames
-after the event, the memory's warm-up — `configure`, a genuine reset, reads 3.6 % / 1.4 %).
+the step 64.2 %, 3 frames before 62.5 % — the step fires in full either way (the same
+runs at v > 0.5 read 13.71 %, equal to `ref`, in `measure-late-ready`). The 0 % on the
+re-enable frame itself (f299 / f297) is the prime reporting no change on a frame with
+no step. On the two frames after a 3-frame lead it reads 3.5 % / 1.4 % (the memory's
+warm-up); `configure`, a genuine reset, reads 3.6 % / 1.4 %.
 
 ## Explicitly not planned (measured against)
 

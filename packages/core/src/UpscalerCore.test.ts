@@ -329,6 +329,21 @@ describe('UpscalerCore without an engine', () => {
             expect(shadingFlags(writes)).toBe(FLAG_SHADING_CHANGE);
         });
 
+        it('still primes on the next good frame when the first active call throws', async () => {
+            const held = new Set<OptionalPass>(['shadingChange']);
+            const { core, inputs, writes } = await running(held);
+            held.clear();
+            // Staged with the detector on, then rejected before anything encoded.
+            expect(() => core.dispatch({ color: inputs.color }, camera)).toThrow(/depth and velocity/);
+            core.dispatchGuides({ depth: inputs.depth, velocity: inputs.velocity }, camera);
+            expect(() => core.dispatchGuides({ depth: inputs.depth, velocity: inputs.velocity }, camera)).toThrow(/already ran/);
+            expect(() => core.dispatch(inputs, camera)).toThrow(/split frame/);
+            core.dispatchUpscale({ color: inputs.color }, camera);
+            expect(shadingFlags(writes)).toBe(FLAG_SHADING_PRIME);
+            core.dispatch(inputs, camera);
+            expect(shadingFlags(writes)).toBe(FLAG_SHADING_CHANGE);
+        });
+
         it('primes the same way when detectShadingChanges is toggled back on', async () => {
             const { core, inputs, writes } = await running(new Set());
             core.dispatch(inputs, camera);

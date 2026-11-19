@@ -37,6 +37,7 @@ import {
     RECONSTRUCT_CROSS_FRAME_SHADER,
     buildDepthClipVariant,
 } from './reconstructVariants';
+import { FLAG_SHADING_PRIME, WGSL_CONSTANTS } from './common';
 import { SHADING_CHANGE_SHADER } from './shadingChange';
 import { assembleShader } from './wgsl';
 
@@ -674,6 +675,9 @@ describe('reset (issue #102)', () => {
         expect(SHADING_CHANGE_SHADER).toContain(
             'frameReset = hasFlag(FLAG_RESET) || hasFlag(FLAG_SHADING_PRIME) || frameInfo.a > 0.5;',
         );
+        // The prime bit lives only in this shader; its literal must match the writer's.
+        expect(SHADING_CHANGE_SHADER).toContain(`const FLAG_SHADING_PRIME : u32 = ${FLAG_SHADING_PRIME}u;`);
+        expect(WGSL_CONSTANTS).not.toContain('FLAG_SHADING_PRIME');
         expect(SHADING_CHANGE_SHADER).toContain('if (frameReset) { return neutral; }');
         expect(SHADING_CHANGE_SHADER).toContain('var moving = select(0.0, 1.0, frameReset);');
         // No pass may honour the CPU flag alone (it would ignore a GPU cut).

@@ -180,7 +180,8 @@ export interface OptionalPassState {
  * metering form needs nothing — the exposure eases from its stored value
  * toward the new form's target, inside the adaptation dead-band when they
  * agree; the debug view only replaces the output pass.
- * @param previous - The stages the previous frame ran
+ * @param previous - The stages the last encoded frame ran (a staged frame
+ * that threw before encoding doesn't count, or the next frame would skip its prime)
  * @param next - The stages this frame runs
  * @returns `primeShading`: this frame is the detector's first
  * @internal
@@ -287,7 +288,10 @@ export class UpscalerCore<THandle = GPUTexture> {
     private readonly _requests = new Map<string, Promise<void>>();
     private readonly _failures = new Map<string, unknown>();
     private _effectiveSettings: RuntimeSettings;
-    private _shadingActive = false;
+    // The detector's luma history and block memory are current: the last
+    // encoded late stage ran it. Set at encode time, not when a frame is staged,
+    // so a call that throws before encoding can't skip the next frame's prime.
+    private _shadingEncoded = false;
     private _debugActive = false;
 
     // GPU-side working set (owned raw textures + the engine-visible output)
@@ -608,11 +612,10 @@ export class UpscalerCore<THandle = GPUTexture> {
         // (NEXT-STEPS §18). The detector primes instead; the debug view and the
         // metering form need nothing.
         const transition = optionalPassTransition(
-            { shading: this._shadingActive, debug: this._debugActive, everyTexel: this._everyTexelActive },
+            { shading: this._shadingEncoded, debug: this._debugActive, everyTexel: this._everyTexelActive },
             { shading, debug, everyTexel },
         );
         this._shadingPrime = transition.primeShading;
-        this._shadingActive = shading;
         this._debugActive = debug;
         this._everyTexelActive = everyTexel;
         this._effectiveSettings = {
@@ -1070,7 +1073,7 @@ export class UpscalerCore<THandle = GPUTexture> {
         this._passes.clear();
         this._requests.clear();
         this._failures.clear();
-        this._shadingActive = false;
+        this._shadingEncoded = false;
         this._debugActive = false;
         this._destroyTextures();
         this._constants?.dispose();
@@ -1387,8 +1390,10 @@ export class UpscalerCore<THandle = GPUTexture> {
         //* Shading Change — fused multi-scale block-mean detector (skipped
         //* entirely when the detector is off; accumulate then reads a zero dummy).
         let shadingSignalView = this._reactiveDummy!.createView();
-        if (!this._effectiveSettings.detectShadingChanges) this._shadingMemoryStale = true;
-        else {
+        if (!this._effectiveSettings.detectShadingChanges) {
+            this._shadingMemoryStale = true;
+            this._shadingEncoded = false;
+        } else {
             const shadingMemoryIn = this._shadingBlockMemory![this._historyIndex];
             if (this._shadingMemoryStale) {
                 this._shadingMemoryStale = false;
@@ -1428,6 +1433,7 @@ export class UpscalerCore<THandle = GPUTexture> {
             );
             shadingPass.end();
             shadingSignalView = this._shadingSignal!.createView();
+            this._shadingEncoded = true;
         }
 
         //* Accumulate — jittered upsample + history reprojection/rectification
