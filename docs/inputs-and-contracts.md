@@ -25,6 +25,9 @@ The **upscale ratio** is display / render, per axis.
 | `deltaTime` | n/a | seconds | auto-exposure adaptation |
 
 All inputs are ordinary three textures, typically render-target attachments. The
+TSL `upscale()` node also takes a composite node for `color`, `reactive` and
+`reactiveOpaqueColor`, and renders it at the depth pass's render resolution in a
+half-float target ([getting started](getting-started.md#upscale-the-composable-node)). The
 upscaler resolves the `GPUTexture` behind each one, so a texture must exist on the GPU
 before its first dispatch: render to it once, or pass it through
 `renderer.initTexture()`.

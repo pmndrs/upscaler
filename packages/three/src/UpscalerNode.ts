@@ -1,7 +1,6 @@
 import { Vector2, type Texture } from 'three';
 import { Node, NodeUpdateType, TSL, type UniformNode, type WebGPURenderer } from 'three/webgpu';
 import {
-    convertToTexture,
     mix,
     mrt,
     nodeObject,
@@ -16,6 +15,7 @@ import { Upscaler } from './Upscaler';
 import type { TemporalGuidesNode } from './TemporalGuidesNode';
 import { getGPUTexture } from './internal/threeWebGPU';
 import { getPipelineEvents, installRenderPipelineHooks } from './internal/renderPipelineHooks';
+import { RenderResolutionInputNode, materializeInput } from './internal/renderResolutionInput';
 import { getPassRenderResolution, getQualityModeRatio } from '@pmndrs/upscaler-core/math/resolution';
 import { QualityMode, type UpscalePath } from './types';
 
@@ -38,6 +38,10 @@ let warnedLegacyPipeline = false;
 let warnedViewOffsetConflict = false;
 let warnedNoPipeline = false;
 
+/** The upscale ratio the options ask for: explicit `ratio`, else `quality`'s (default Quality). */
+const optionsRatio = (options: UpscalerNodeOptions): number =>
+    options.ratio ?? getQualityModeRatio(options.quality ?? QualityMode.Quality);
+
 /** Options for {@link upscale} / {@link upscaleScene}. */
 export interface UpscalerNodeOptions {
     /** Which FSR path to run. Defaults to `'temporal'`. */
@@ -45,7 +49,8 @@ export interface UpscalerNodeOptions {
     /**
      * Quality preset — sizes {@link upscaleScene}'s scene pass. The other
      * factories read their input's actual size, so for them it only seeds the
-     * first allocation.
+     * first allocation — and sizes a composite color that has no depth or
+     * velocity to take its size from ({@link upscaleSpatial}).
      */
     quality?: QualityMode;
     /** Explicit upscale ratio (overrides quality) — see {@link quality}. */
@@ -128,7 +133,8 @@ export interface UpscalerNodeOptions {
  * const scenePass = pass(scene, camera);
  * scenePass.setResolutionScale(0.5);            // render small
  * const gi = denoise(ssgi(scenePass.getTextureNode('output'), …));
- * // composite `gi` into a reduced-res color texture, then:
+ * const giColor = scenePass.getTextureNode('output').add(gi); // a composite
+ * // rendered at the pass's resolution, half float — no rtt() needed:
  * post.outputNode = upscale(giColor, scenePass.getTextureNode('depth'),
  *                        scenePass.getTextureNode('velocity'), camera);
  * ```
@@ -300,8 +306,7 @@ export class UpscalerNode extends Node<'vec4'> {
         // input size is picked up in updateBefore once the passes have rendered.
         if (!this._configured) {
             renderer.getDrawingBufferSize(this._output);
-            const ratio = this._options.ratio ??
-                getQualityModeRatio(this._options.quality ?? QualityMode.Quality);
+            const ratio = optionsRatio(this._options);
             // Predict the size three's PassNode renders at (floored), or the
             // first configure is a texel larger than the real input (#88).
             const render = getPassRenderResolution(this._output.x, this._output.y, ratio);
@@ -495,13 +500,27 @@ export class UpscalerNode extends Node<'vec4'> {
 
     dispose(): void {
         this._upscaler?.dispose();
+        // Targets the factory created for composite inputs belong to this
+        // node; texture and pass inputs belong to the caller.
+        for (const input of [this._color, this._reactive, this._reactiveOpaqueColor]) {
+            if (input instanceof RenderResolutionInputNode) input.dispose();
+        }
         super.dispose();
     }
 }
 
 /**
  * Creates a composable {@link UpscalerNode} from reduced-resolution input nodes.
- * @param color - Reduced-res color texture node (your composited render)
+ *
+ * `color` may be a texture/pass node or any composite node (say
+ * `scenePass.getTextureNode().add(gi)`). A composite is rendered into a
+ * half-float target (full float if the depth pass renders full float) at the
+ * render resolution of the depth/velocity pass — `Math.floor(drawingBuffer ×
+ * pass.getResolutionScale())`, as three's `PassNode` sizes it — so no
+ * `rtt()` wrapper is needed. A texture or pass node is used as is, at its own
+ * size. `options.reactive` / `options.reactiveOpaqueColor` are treated the same.
+ *
+ * @param color - Reduced-res color: a texture/pass node or a composite node
  * @param depth - Reduced-res depth texture node (e.g. `pass.getTextureNode('depth')`)
  * @param velocity - Reduced-res jitter-free velocity texture node
  * @param camera - Scene camera (perspective or orthographic)
@@ -515,21 +534,25 @@ export const upscale = (
     velocityNode: TextureNodeLike,
     camera: CameraLike,
     options: UpscalerNodeOptions = {},
-): UpscalerNode =>
-    // Materialize the (possibly composited) color into a texture — same as
-    // FSR1/TAAU do with their beauty input. depth/velocity are already pass
-    // texture nodes, so they pass through untouched (matching TAAUNode). The
-    // reactive inputs get the same convertToTexture treatment as color (a
-    // passthrough for pass/texture nodes; the caller controls their resolution).
-    nodeObject(
-        new UpscalerNode(convertToTexture(color), depth, velocityNode, camera, {
+): UpscalerNode => {
+    //* Materialize a composited color (and reactive inputs) into a texture, as
+    //* FSR1/TAAU do with their beauty input — but at the render resolution
+    //* the depth/velocity pass renders at, in a float target. three's
+    //* convertToTexture would size it to the drawing buffer (display size).
+    //* Texture and pass nodes pass through untouched: their resolution is the
+    //* caller's. depth/velocity are pass texture nodes already (as in TAAUNode).
+    const reference = depth ?? velocityNode;
+    const ratio = optionsRatio(options);
+    const input = (node: TextureNodeLike): TextureNodeLike =>
+        node ? materializeInput(node, reference, ratio) : undefined;
+    return nodeObject(
+        new UpscalerNode(input(color), depth, velocityNode, camera, {
             ...options,
-            reactive: options.reactive ? convertToTexture(options.reactive) : undefined,
-            reactiveOpaqueColor: options.reactiveOpaqueColor
-                ? convertToTexture(options.reactiveOpaqueColor)
-                : undefined,
+            reactive: input(options.reactive),
+            reactiveOpaqueColor: input(options.reactiveOpaqueColor),
         }),
     );
+};
 
 // Stand-in camera for the spatial path. EASU is purely spatial — it reprojects
 // nothing — but `Upscaler._writeConstants` still stages `camera.near/far`
@@ -551,7 +574,9 @@ const SPATIAL_CAMERA = { isCamera: true, near: 0.1, far: 2000, isPerspectiveCame
  * post.outputNode = upscaleSpatial(pass(scene, camera).getTextureNode('output'));
  * ```
  *
- * @param color - Reduced-res color texture node to upscale
+ * @param color - Reduced-res color to upscale: a texture/pass node, used at
+ *   its own size, or a composite node, rendered into a half-float target at
+ *   the drawing buffer / `ratio` (or `quality`'s ratio)
  * @param options - `path`/`jitter` are forced. The node sizes itself from the
  *   color texture it receives; `quality` / `ratio` only seed the first allocation.
  * @returns A TSL node whose value is the upscaled display-resolution texture
@@ -562,7 +587,7 @@ export const upscaleSpatial = (
     options: Omit<UpscalerNodeOptions, 'path' | 'jitter'> = {},
 ): UpscalerNode =>
     nodeObject(
-        new UpscalerNode(convertToTexture(color), null, null, SPATIAL_CAMERA, {
+        new UpscalerNode(materializeInput(color, null, optionsRatio(options)), null, null, SPATIAL_CAMERA, {
             ...options,
             path: 'spatial',
             jitter: false,
@@ -595,7 +620,7 @@ export const upscaleScene = (
     camera: CameraLike,
     options: UpscalerNodeOptions = {},
 ): UpscalerNode => {
-    const ratio = options.ratio ?? getQualityModeRatio(options.quality ?? QualityMode.Quality);
+    const ratio = optionsRatio(options);
 
     //* Render the scene at 1/ratio with a color + velocity MRT — the two inputs
     //* FSR3's temporal path needs (depth is the pass's own depth buffer). The
