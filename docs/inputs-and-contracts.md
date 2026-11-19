@@ -231,7 +231,8 @@ A reset drops all history for one frame: the frame is resolved from the current
 input alone, exposure snaps to its target instead of easing, locks and the
 shading-change memory restart, and the `disocclusion` guide reads 1 everywhere.
 Reset on a camera cut, a teleport, or anything else that makes last frame's image
-unrelated to this one. Three ways to ask for one, all equivalent on the GPU:
+unrelated to this one. Three ways to ask for one. They do the same work on the GPU;
+what differs is when the verdict exists (see the TSL caveat below):
 
 - `resetHistory()`: the next dispatch is a reset, and the jitter sequence restarts.
 - `reset: true` in that frame's dispatch inputs.
@@ -239,9 +240,26 @@ unrelated to this one. Three ways to ask for one, all equivalent on the GPU:
   texel (0, 0) is above 0.5. It is read entirely on the GPU, so a cut detector that
   runs this frame can trigger the reset without a readback stall. Absent, a zero
   placeholder is bound and the output is byte-identical to not having the input.
-  Available on `dispatch()` / `dispatchGuides()`, `UpscalePass.setResetTexture()`,
+  Available on `dispatch()` / `dispatchGuides()`, `UpscalePass.setResetSignal()`,
   and the `resetTexture` option of the `upscale()` and `temporalGuides()` nodes. On a
-  split frame, pass it to `dispatchGuides()`: the late stage reuses it.
+  split frame, pass it to `dispatchGuides()`: the late stage reuses it. Like every
+  input, the texture needs a GPU allocation before its first dispatch (render to it,
+  or `renderer.initTexture()`), or the dispatch throws.
+
+**The verdict must be written this frame, from this frame's depth.** A detector that
+runs on last frame's inputs resets one frame late: the cut frame blends one ghost
+frame of the old view, and the reset then drops the first clean history instead.
+The raw `Upscaler` and `UpscalePass` give you the point to run it (below). **TSL
+nodes don't:** with `upscaleScene()` or an in-graph `pass()`, depth renders inside
+the render pipeline and the upscale dispatches from the node's `updateBefore` in the
+same pipeline run, so a detector you update outside the graph (before or after
+`renderPipeline.render()`) always sees the previous frame's depth. For a same-frame
+reset in a graph, the detector itself has to be a graph dependency of the upscale
+node that runs after the scene pass: a node whose `updateBefore` encodes it, passed
+as (or chained into) the `resetTexture` node. No such helper ships yet. Without one,
+the node option is only same-frame for a verdict that doesn't depend on this frame's
+render (your own scene logic writing the texture), and a cut detector belongs on the
+raw `Upscaler` or `UpscalePass`.
 
 `resetTexture` can't restart the jitter sequence, which is CPU state. That only
 changes the phase the fresh history starts at, not the result's quality.
@@ -277,9 +295,23 @@ upscaler.endFrame(camera);
 upscaler.dispatch({ color, depth, velocity, resetTexture: cuts.cutFlag, deltaTime }, camera);
 ```
 
-With `UpscalePass`, run the same `cuts.update(...)` from its `onInputsRendered`
-callback (it receives the render target and camera at the right point) and call
-`setResetTexture(cuts.cutFlag)` once.
+With `UpscalePass`, hand it the flag and its producer together. It calls `update`
+on the temporal path at the right point (after the render, before `endFrame()`), and
+`setResetSignal(null)` removes both, so a last verdict of 1 can't outlive its
+detector and reset every frame:
+
+```ts
+pass.setResetSignal({
+    texture: cuts.cutFlag,
+    update: (target, camera) =>
+        cuts.update({
+            depth: target.depthTexture,
+            camera,
+            projectionMatrix: pass.upscaler.unjitteredProjectionMatrix,
+            motions: [target.textures[1]],
+        }),
+});
+```
 
 On the bench's Q10 cut (`scripts/measure-reset-signal.mjs`, 1280×720, ratio 2), the
 detector fires on the cut frame only (share 0.268 against its 0.2 threshold; at most

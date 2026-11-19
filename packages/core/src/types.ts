@@ -251,7 +251,9 @@ export interface DispatchInputs<TTexture = GPUTexture> {
      * shading change, accumulation age and locks. Unlike `resetHistory()` it
      * cannot restart the jitter sequence (CPU state), which only changes the
      * phase the fresh history starts at. When omitted a zero placeholder is
-     * bound, and output is byte-identical to not having the input.
+     * bound, and output is byte-identical to not having the input. Adapters
+     * resolve it like every input: an engine texture with no GPU allocation
+     * yet throws at dispatch.
      */
     resetTexture?: TTexture;
     /** Seconds since the previous frame. */

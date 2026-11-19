@@ -107,10 +107,14 @@ export interface UpscalerNodeOptions {
     exposureTexture?: TextureNodeLike;
     /**
      * Optional GPU **reset signal** texture node: history drops on any frame
-     * where its red texel (0, 0) is above 0.5 — a GPU cut detector's flag,
-     * consumed with no readback. Registered as a graph dependency like the
-     * other inputs. With `guides`, give it to the guides node as well so the
-     * disocclusion guide reflects the reset. Mirrors
+     * where its red texel (0, 0) is above 0.5, consumed with no readback.
+     * Registered as a graph dependency like the other inputs; its texture
+     * needs a GPU allocation before the first dispatch. Same-frame only if
+     * the verdict is written before this node's `updateBefore` in the same
+     * pipeline run: a cut detector updated outside the graph reads last
+     * frame's in-graph depth and resets one frame late (the cut frame ghosts);
+     * see docs/inputs-and-contracts.md. With `guides`, give it to the guides node
+     * as well so the disocclusion guide reflects the reset. Mirrors
      * {@link DispatchInputs.resetTexture}.
      */
     resetTexture?: TextureNodeLike;
