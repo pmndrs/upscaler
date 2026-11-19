@@ -51,6 +51,7 @@ type UpscalerInternalOptions = UpscalerOptions & {
     _exposureShader?: string;
     _exposureMetering?: 'taps' | 'every-texel' | 'every-texel-no-deadband' | 'every-quad' | 'every-quad-no-deadband';
     _crossFrameReconstruct?: { shader: string; cameraCompensated: boolean };
+    _holdOptionalPass?: (pass: 'shadingChange' | 'everyTexel' | 'debug') => boolean;
 };
 
 /**

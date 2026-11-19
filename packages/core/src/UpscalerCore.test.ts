@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { UpscalerCore, everyTexelGate, everyTexelSupported } from './UpscalerCore';
-import { FLAG_PERSPECTIVE, FLAG_RESET, FLAG_REVERSED_DEPTH } from './shaders/common';
+import { UpscalerCore, everyTexelGate, everyTexelSupported, optionalPassTransition, type OptionalPass } from './UpscalerCore';
+import { FLAG_PERSPECTIVE, FLAG_RESET, FLAG_REVERSED_DEPTH, FLAG_SHADING_CHANGE, FLAG_SHADING_PRIME } from './shaders/common';
+import { DebugView } from './types';
 import type { CoreTexture, CoreTextureDescriptor } from './textures';
 
 //* Mock Device — answers every create* call with a stub so the core runs
@@ -205,8 +206,8 @@ describe('UpscalerCore without an engine', () => {
                 .toEqual(expect.arrayContaining(['validation', 'internal', 'out-of-memory']));
         });
 
-        it('meters with the taps until the every-texel metering is ready', async () => {
-            const { device, passes, gpu } = mockDevice();
+        it('meters with the taps until the every-texel metering is ready, then switches without a reset', async () => {
+            const { device, passes, gpu, writes } = mockDevice();
             let release: () => void = () => {};
             const gate = new Promise<void>((resolve) => { release = resolve; });
             const original = device.createComputePipelineAsync.getMockImplementation()!;
@@ -219,11 +220,14 @@ describe('UpscalerCore without an engine', () => {
             await vi.waitFor(() => expect(core.isReady).toBe(true));
             const inputs = { color: gpu('color'), depth: gpu('depth'), velocity: gpu('velocity') };
             core.dispatch(inputs, camera);
+            core.dispatch(inputs, camera);
             expect(exposureDispatches(passes)).toEqual([[1, 1]]);
             release();
             await core.prepare();
             core.dispatch(inputs, camera);
             expect(exposureDispatches(passes)).toEqual([[1, 1, 1], [1, 1, 1]]);
+            // Switching forms eases the stored exposure; history keeps going.
+            expect(lastFlags(writes) & FLAG_RESET).toBe(0);
         });
 
         it('falls back to the taps for good, warning once, when the compile fails', async () => {
@@ -274,6 +278,95 @@ describe('UpscalerCore without an engine', () => {
             core.dispatch({ color: gpu('color'), depth: gpu('depth'), velocity: gpu('velocity') }, camera);
             expect(exposureDispatches(passes)).toEqual([[1, 1]]);
             expect(everyTexelLabels(device)).toEqual([]);
+        });
+    });
+
+    describe('optional passes turning on mid-history (NEXT-STEPS §18)', () => {
+        const camera = { near: 0.1, far: 100, perspective: true };
+        const shadingFlags = (writes: Uint32Array[]) => lastFlags(writes) & (FLAG_RESET | FLAG_SHADING_CHANGE | FLAG_SHADING_PRIME);
+        const ran = (passes: Array<{ label?: string }>, label: string) => passes.some((p) => p.label === label);
+
+        // A core whose optional passes stay inactive while `held` names them
+        // (the bench's late-readiness hook), past one reset first frame.
+        async function running(held: Set<OptionalPass>) {
+            const mock = mockDevice();
+            const core = new UpscalerCore({
+                device: mock.device as unknown as GPUDevice,
+                _holdOptionalPass: (pass: OptionalPass) => held.has(pass),
+            } as ConstructorParameters<typeof UpscalerCore>[0]);
+            core.configure({ displayWidth: 64, displayHeight: 32, customUpscaleRatio: 2 });
+            await core.prepare();
+            const inputs = { color: mock.gpu('color'), depth: mock.gpu('depth'), velocity: mock.gpu('velocity') };
+            core.dispatch(inputs, camera);
+            expect(lastFlags(mock.writes) & FLAG_RESET).toBe(FLAG_RESET);
+            return { ...mock, core, inputs };
+        }
+
+        it('primes only on the frame a stage turns on', () => {
+            const off = { shading: false, debug: false, everyTexel: false };
+            const on = { shading: true, debug: true, everyTexel: true };
+            expect(optionalPassTransition(off, { ...off, shading: true })).toEqual({ primeShading: true });
+            expect(optionalPassTransition(on, on)).toEqual({ primeShading: false });
+            expect(optionalPassTransition(on, off)).toEqual({ primeShading: false });
+            expect(optionalPassTransition(off, { ...off, debug: true, everyTexel: true })).toEqual({ primeShading: false });
+        });
+
+        it('primes a late shading-change detector instead of restarting history', async () => {
+            const held = new Set<OptionalPass>(['shadingChange']);
+            const { core, inputs, writes, passes } = await running(held);
+            core.dispatch(inputs, camera);
+            expect(shadingFlags(writes)).toBe(0);
+            expect(ran(passes, 'upscale-shading-change')).toBe(false);
+
+            held.clear();
+            passes.length = 0;
+            core.dispatch(inputs, camera);
+            // Runs (seeding its history) but nothing consults it, and no reset.
+            expect(shadingFlags(writes)).toBe(FLAG_SHADING_PRIME);
+            expect(ran(passes, 'upscale-shading-change')).toBe(true);
+
+            core.dispatch(inputs, camera);
+            expect(shadingFlags(writes)).toBe(FLAG_SHADING_CHANGE);
+        });
+
+        it('primes the same way when detectShadingChanges is toggled back on', async () => {
+            const { core, inputs, writes } = await running(new Set());
+            core.dispatch(inputs, camera);
+            expect(shadingFlags(writes)).toBe(FLAG_SHADING_CHANGE);
+            core.settings.detectShadingChanges = false;
+            core.dispatch(inputs, camera);
+            expect(shadingFlags(writes)).toBe(0);
+            core.settings.detectShadingChanges = true;
+            core.dispatch(inputs, camera);
+            expect(shadingFlags(writes)).toBe(FLAG_SHADING_PRIME);
+            core.dispatch(inputs, camera);
+            expect(shadingFlags(writes)).toBe(FLAG_SHADING_CHANGE);
+        });
+
+        it('keeps a split frame primed from its guides stage through its upscale stage', async () => {
+            const held = new Set<OptionalPass>(['shadingChange']);
+            const { core, inputs, writes } = await running(held);
+            held.clear();
+            core.dispatchGuides({ depth: inputs.depth, velocity: inputs.velocity }, camera);
+            held.add('shadingChange'); // frozen at the guides stage
+            core.dispatchUpscale({ color: inputs.color }, camera);
+            expect(shadingFlags(writes)).toBe(FLAG_SHADING_PRIME);
+        });
+
+        it('turns a late debug view or every-texel metering on without a reset', async () => {
+            const held = new Set<OptionalPass>(['debug', 'everyTexel']);
+            const { core, inputs, writes, passes } = await running(held);
+            core.settings.debugView = DebugView.MotionVectors;
+            await core.prepare();
+            core.dispatch(inputs, camera);
+            expect(core.activeDebugView).toBe(DebugView.None);
+            held.clear();
+            passes.length = 0;
+            core.dispatch(inputs, camera);
+            expect(core.activeDebugView).toBe(DebugView.MotionVectors);
+            expect(ran(passes, 'upscale-debug')).toBe(true);
+            expect(passes.find((p) => p.label === 'upscale-exposure')!.dispatches).toHaveLength(2);
+            expect(lastFlags(writes) & FLAG_RESET).toBe(0);
         });
     });
 
