@@ -96,6 +96,7 @@
         "@babylonjs/core": "9.31.0",
         "@eslint/js": "^9.18.0",
         "@pixi/3d": "0.1.0",
+        "@pmndrs/motion-vectors": "0.1.0",
         "@pmndrs/upscaler-babylon": "workspace:*",
         "@pmndrs/upscaler-core": "workspace:*",
         "@pmndrs/upscaler-motion": "workspace:*",

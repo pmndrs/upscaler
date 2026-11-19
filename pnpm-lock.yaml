@@ -17,6 +17,9 @@ importers:
       '@pixi/3d':
         specifier: 0.1.0
         version: 0.1.0(pixi.js@8.23.0)
+      '@pmndrs/motion-vectors':
+        specifier: 0.1.0
+        version: 0.1.0(@pixi/3d@0.1.0(pixi.js@8.23.0))(pixi.js@8.23.0)(three@0.187.0)
       '@pmndrs/upscaler-babylon':
         specifier: workspace:*
         version: link:packages/babylon
@@ -368,6 +371,20 @@ packages:
     resolution: {integrity: sha512-6mwC1nD4pDRix9QVl8aRDSHeMZtqb00vKiKb6U5cFeaYxZbwEnn9gXJphnk9udQKqf0jz2z8YUXaGudsACLaOQ==}
     peerDependencies:
       pixi.js: ^8.23.0
+
+  '@pmndrs/motion-vectors@0.1.0':
+    resolution: {integrity: sha512-qxOEJUpPq4KgcGrlfcbcxEuxrwAFtPWDDa13yh2cBs/JbTYGwSh9RwrGsB5CrcKOfbRWdjUXSbcd/5BAIy8oFQ==}
+    peerDependencies:
+      '@pixi/3d': '>=0.1.0'
+      pixi.js: ^8.23.0
+      three: '>=0.186.0'
+    peerDependenciesMeta:
+      '@pixi/3d':
+        optional: true
+      pixi.js:
+        optional: true
+      three:
+        optional: true
 
   '@rollup/rollup-android-arm-eabi@4.62.2':
     resolution: {integrity: sha512-6o7ZLZK+BeenkZCFNDXqpbjw9bD6nuWonvS/lwQJp7NoVVxm6p3qE7qQ5jGuBjiFsgvqjD8mZAU5oWxTmbOeOg==}
@@ -1407,6 +1424,14 @@ snapshots:
     dependencies:
       meshoptimizer: 1.3.0
       pixi.js: 8.23.0
+
+  '@pmndrs/motion-vectors@0.1.0(@pixi/3d@0.1.0(pixi.js@8.23.0))(pixi.js@8.23.0)(three@0.187.0)':
+    dependencies:
+      '@webgpu/types': 0.1.71
+    optionalDependencies:
+      '@pixi/3d': 0.1.0(pixi.js@8.23.0)
+      pixi.js: 8.23.0
+      three: 0.187.0
 
   '@rollup/rollup-android-arm-eabi@4.62.2':
     optional: true
