@@ -1671,6 +1671,62 @@ motion does.
 cross-frame identity disoccludes **44.4%** of the interior (80% of pixels young, mean age
 0.21); production **0.49%** (mean age 0.75).
 
+## 16. Flicker under motion — METER BUILT, baseline recorded (2026-11-20)
+
+The maintainer's rule is that colour shifts are tolerable and flicker is not. Until
+now every flicker meter here (`measure-convergence`, `measure-alpha-convergence`,
+the `--stride 1` flicker in `measure-receding-disocclusion`) needed a still camera
+or measured a guide rather than the image. `scripts/measure-motion-stability.mjs`
+closes that gap. It runs `@pmndrs/motion-vectors`' `WarpingError` on the output: the
+previous output is warped onto the current one through the package's `MotionVectors`
+node, masked by the node's `.w` previous depth, and the mean conditioned-luma
+difference is reported per segment. No reference render is needed. The bench now
+takes the package from npm (0.1.0), replacing PR #110's vendored tarball, and the
+probe builds its upscaler through the variant registry, so `--variant A
+--comparison B` is a one-command A/B. Method, judge rule and blind spot are in
+BENCHMARKING.md under "Under motion".
+
+**Baseline** (`production`, Q19, ratio 2, 1280×720, Metal, r186.1). These are means
+of the motion segments' and of the holds' means, conditioned luma:
+
+| mode | motion | holds | worst motion frame |
+| --- | --- | --- | --- |
+| native | 0.00380 | 0.00000 | 0.00503 |
+| bilinear | 0.00302 | 0.00000 | 0.00400 |
+| spatial | 0.00486 | 0.00000 | 0.00608 |
+| temporal | 0.00174 | 0.00020 | 0.00265 |
+
+They reproduce the PR #110 probe's `warp` experiment exactly, re-run on the npm
+build the same day: 0.0038 / 0.0030 / 0.0049 / 0.0017, with the cut detector at
+0.268 on Q10 and 0 false positives in 1,237 frames. Smoke runs on the other plans,
+native / temporal: Q4 motion 0.00501 / 0.00200 (truck is the hardest at 0.00236),
+and Q3 0.00020 / 0.00054. On Q3 the camera is still, so temporal's figure is mostly
+jitter churn on static pixels, not object-motion flicker.
+
+**What it shows that nothing else did:** temporal's worst frames are the *onset* of
+motion after a converged hold. Scene-recede reads 0.0024–0.0027 over frames 720–725,
+against 0.00014 on the hold before it and a segment mean of 0.00165, and the start of
+orbit-right and the end of scene-approach repeat the pattern. Orbit is temporal's
+hardest steady segment (0.0021–0.0022, 1.5 % of pixels over 0.02). Neither has been
+investigated yet. The onset spike is the first candidate if motion flicker is
+reported. Gate any accumulation, lock or rectification change on this meter as well
+as the still-scene ones. #107 (motion-adaptive accumulation cap) is the obvious
+first user.
+
+**How it complements the still-scene meters:** they measure jitter churn on a still
+camera (same-phase diffs, shading-change firing). This one measures stability while
+pixels move and its holds column re-reads the churn at a coarser grain. Neither
+replaces `measure-reference-quality.mjs`: a path can be steady and wrong (bilinear
+is steadier than native here because it is blurrier).
+
+Regenerate (52 s; nothing to start first, it boots the dev server if none answers):
+
+```bash
+node scripts/measure-motion-stability.mjs --scenario Q19 --ratio 2 \
+  --modes native,bilinear,spatial,temporal --heat --label baseline
+# writes bench/results/raw/motion-stability/baseline-Q19-2x/
+```
+
 ## Explicitly not planned (measured against)
 
 - Lanczos2/bicubic history filtering (+47% accumulate, no visible win).

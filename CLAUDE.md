@@ -138,6 +138,11 @@ node scripts/measure-receding-disocclusion.mjs --variants baseline,reconstruct-c
 # resets on Q19/Q10. The motion lab itself lives in pmndrs/motion-vectors.
 node scripts/measure-motion-upscaler.mjs
 
+# Flicker UNDER MOTION (reference-free): WarpingError on the output, judged through
+# the package's MotionVectors node, per Q19/Q4/Q3 segment. The still-scene meters'
+# motion counterpart; --comparison A/Bs two bench variants in one run (~1 min).
+node scripts/measure-motion-stability.mjs --modes native,bilinear,spatial,temporal --heat
+
 # Sub-pixel emitter retention (issue #51): Q17 per-emitter output energy vs the
 # input's own coverage, flicker, lock/disocclusion/shading activity and a
 # switch-off ghost. Use auto-exposure off for attribution (AE pins at its cap here).

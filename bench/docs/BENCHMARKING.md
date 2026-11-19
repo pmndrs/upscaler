@@ -205,7 +205,7 @@ them from `--scenarios` without an error.
 | Q16 | `sparse-wires-empty-background` | Issue #22: fans of sub-texel bars (about 0.5–1 render px at ratio 2, 0.35–0.7 at ratio 3) over an opaque black background, still camera, plus a solid knot as a control. The jitter phase decides whether a bar lands in a texel, so block means swing although nothing changed: the shading-change view must stay black until the fans' light drops to a quarter at frame 300. Measure with `measure-convergence.mjs --scenario Q16 --shading-frames 32` (and `measure-drift-lag.mjs --frames 296:356:2` for the step). |
 | Q17 | `subpixel-emitter-retention` | Issue #51: still camera onto unlit discs of 0.3–1.5 render-px diameter and 0.5 px lines, over black and over a textured backdrop, each floating (depth edge) or as a decal (no depth edge). Measure with `scripts/measure-emitter-retention.mjs` (per-emitter retention vs input coverage, flicker, switch-off ghost) and `measure-convergence.mjs --scenario Q17`. |
 | Q18 | `fine-line-chart` | Still camera square-on to a resolution chart: line-pair bars of 6 → 0.75 render px period at ratio 2 (4 → 0.5 at ratio 3), so they cross the render Nyquist; a Siemens star; flat swatches (the control); a swatch crossed by 0.5 px hairlines. The chart is unmipmapped, so the bars alias differently on every jitter phase and render-space block means swing although nothing changed: the shading-change view must stay black until the light drops to a quarter at frame 300. ROIs per chart region. Measure with `measure-convergence.mjs --scenario Q18 --shading-frames 32 --views final,accumulation-age` (per-ROI firing and accumulation age) and `measure-drift-lag.mjs --scenario Q18 --frames 296:356:2` for the step, and `measure-shading-restart.mjs` for a step right after the detector is re-enabled (`NEXT-STEPS.md` §14). |
-| Q19 | `receding-disocclusion` | Issue #67: converge, then dolly back / forward, orbit left / right, slide, and the scene receding / approaching under a still camera, each followed by a 60-frame hold; then a fast dolly (0.3 u/frame, #67's headline case) back and forward; a frontal textured wall stands behind the props. A camera-invariant depth clip keeps receding surfaces' history. Measure with `scripts/measure-receding-disocclusion.mjs --variants baseline,reconstruct-cross-frame-v1` (per-segment disocclusion and accumulation age, plus frame-to-frame flicker at `--stride 1`; the interior crop excludes the border strip entering view). Still scenes never disocclude under the scatter, so this, not Q1/Q12, separates depth-clip forms (`depth-clip-*` identities, NEXT-STEPS §15). |
+| Q19 | `receding-disocclusion` | Issue #67: converge, then dolly back / forward, orbit left / right, slide, and the scene receding / approaching under a still camera, each followed by a 60-frame hold; then a fast dolly (0.3 u/frame, #67's headline case) back and forward; a frontal textured wall stands behind the props. A camera-invariant depth clip keeps receding surfaces' history. Measure with `scripts/measure-receding-disocclusion.mjs --variants baseline,reconstruct-cross-frame-v1` (per-segment disocclusion and accumulation age, plus frame-to-frame flicker at `--stride 1`; the interior crop excludes the border strip entering view). Still scenes never disocclude under the scatter, so this, not Q1/Q12, separates depth-clip forms (`depth-clip-*` identities, NEXT-STEPS §15). Flicker under motion, per segment: `scripts/measure-motion-stability.mjs` (see "Under motion" below). |
 
 ---
 
@@ -279,6 +279,74 @@ offline LPIPS / ColorVideoVDP / FovVideoVDP recipe are in
 [`REFERENCE-QUALITY.md`](REFERENCE-QUALITY.md). Run it before and after any
 change that trades sharpness or stability for something else.
 
+### Under motion (motion stability)
+
+The convergence meters diff consecutive frames, so they only work on a still
+camera: under motion consecutive frames differ by the motion itself.
+`measure-motion-stability.mjs` measures flicker *under motion*, with no
+reference. Each frame it warps the previous output onto the current one through
+a motion field and averages the conditioned-luma difference (`x/(1+x)` luma,
+so HDR highlights can't dominate). A depth mask leaves out disoccluded pixels,
+and pixels with no geometry (sky or clear colour) count as masked too. This is
+`WarpingError` from `@pmndrs/motion-vectors` (a bench-only devDependency). A
+path that flickers, crawls, smears or ghosts under motion reads higher. A
+stable one approaches the scene's own shading change.
+
+```bash
+node scripts/measure-motion-stability.mjs --scenario Q19 --ratio 2 \
+  --modes native,bilinear,spatial,temporal --heat
+# A/B two registered variants (every upscaled mode runs both, with per-segment deltas):
+node scripts/measure-motion-stability.mjs --variant production --comparison <B>
+```
+
+It drives `bench/motion-upscaler.html`, the motion probe. The upscaler there is
+built through the bench's variant registry (`--variant`, default `production`,
+the shipping pipeline), so a frozen candidate A/Bs exactly as it does in the
+benchmark. `--scenario` takes Q19 (per segment, measured from frame 100), Q4
+(orbit / truck / wide orbit / hold, from frame 24) or Q3 (object motion under a
+still camera, from frame 24). `--settings` merges RuntimeSettings, `--heat`
+saves heat maps (error ×8 grey, blue = masked) at the middle of each motion
+segment, and `--end` cuts a smoke run short. Per segment it reports the mean
+and worst per-frame error, and the scored, masked (`occluded`) and
+over-threshold (> 0.02) shares. The headline numbers are the mean of the motion
+segments' means and of the holds' means. Output goes to
+`bench/results/raw/motion-stability/<label>-<scenario>-<ratio>x/`.
+
+**Judge rule.** Every mode is judged through the same motion field: the
+package's `MotionVectors` node. It is exact on the bench's rigid motion and
+fills `.w`, the previous linear depth, so moving objects are masked correctly.
+Camera motion from depth is never the judge, because it calls an object moving
+along the view axis motionless and rewards the path fed that motion. The judge
+is also never the motion one of the compared outputs was built from (MOTION.md
+§10 in pmndrs/motion-vectors). On the bench, three's `velocity` and the node
+agree, so the temporal path being fed three's motion doesn't bias it. One known
+blind spot: the mask uses the render-resolution depth, which is jittered on the
+temporal path. On a still camera it masks about 1 % more pixels there than on
+native, mostly sub-texel geometry (Q3's fence pickets). Flicker on geometry
+thinner than a render texel is still the still-scene meters' job.
+
+**Baseline** (2026-11-20, `production`, Q19, ratio 2, 1280×720, Metal, r186.1;
+52 s for all four modes):
+
+| mode | motion | holds | worst motion frame | hardest segment |
+| --- | --- | --- | --- | --- |
+| native | 0.00380 | 0.00000 | 0.00503 | dolly-forward-fast 0.00428 |
+| bilinear | 0.00302 | 0.00000 | 0.00400 | orbit 0.00355 |
+| spatial (FSR1) | 0.00486 | 0.00000 | 0.00608 | orbit 0.00536 |
+| **temporal** | **0.00174** | 0.00020 | 0.00265 | orbit-right 0.00216 |
+
+These match the probe's own `warp` experiment and MOTION.md §5 (0.0038 /
+0.0030 / 0.0049 / 0.0017). The temporal path is the steadiest under motion:
+2.2× below native and 1.7× below bilinear. FSR1 is the least steady, because
+RCAS sharpens aliasing that then crawls. Temporal's holds read 0.0002, which is
+jitter churn (the still-scene meters' domain); the first frames of a hold after
+motion reach 0.0004–0.0007 while history re-converges. Temporal's worst frames
+are the onset of motion after a converged hold. Scene-recede reads 0.0024–0.0027
+over frames 720–725 against a segment mean of 0.00165, and the start of
+orbit-right and the end of scene-approach show the same pattern.
+Regenerate the baseline with the first command above; NEXT-STEPS §16 has the
+record.
+
 ---
 
 ## Benchmarking on a device
@@ -332,6 +400,8 @@ several runs — or several worktrees — can share a machine without colliding.
 | `measure-shading-restart.mjs` | bench, `http://127.0.0.1:5199` | `--port` (9333) |
 | `measure-receding-disocclusion.mjs` | bench, `http://127.0.0.1:5199` | `--port` (9333) |
 | `measure-reference-quality.mjs` | bench, `http://127.0.0.1:5199` | `--port` (9333) |
+| `measure-motion-stability.mjs` | bench (`motion-upscaler.html`), `http://127.0.0.1:5199` | `--port` (9335) |
+| `measure-motion-upscaler.mjs` | bench (`motion-upscaler.html`), `http://127.0.0.1:5199` | `--port` (9334) |
 | `verify-packed-guides.mjs` | its own `vite preview` on `--port` (a free port) | `--cdp-port` (a free port) |
 
 ```bash

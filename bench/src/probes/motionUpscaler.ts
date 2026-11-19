@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu';
 import { mrt, output, texture, velocity } from 'three/tsl';
 
-import { Upscaler, type RuntimeSettings } from '@pmndrs/upscaler';
+import type { RuntimeSettings } from '@pmndrs/upscaler';
 import { createThreeTextureAllocator } from '@pmndrs/upscaler-three/internal/textureAllocator';
 import { getGPUTexture } from '@pmndrs/upscaler-three/internal/threeWebGPU';
 import { earthMovers, jensenShannon } from '@pmndrs/motion-vectors';
@@ -19,6 +19,7 @@ import {
 
 import { createBenchScene } from '../BenchScene';
 import { getBenchmarkScenario } from '../benchmark/scenarios';
+import { SingleVariantRegistry } from '../benchmark/variants';
 
 /**
  * Upscaler motion probe (EXPERIMENTAL), driven by `scripts/measure-motion-upscaler.mjs`
@@ -47,6 +48,13 @@ import { getBenchmarkScenario } from '../benchmark/scenarios';
  *   before the upscale so a reset lands in the same frame; `reset: 'auto'`),
  *   and the Jensen–Shannon / earth mover's distance between consecutive input
  *   luma histograms (`reset: 'auto-histogram'`, the depth-less fallback).
+ *
+ * The upscaler is a bench variant (`variant`, default `production`: the
+ * shipping pipeline), built through the bench's own registry so frozen
+ * candidates A/B here exactly as in the benchmark. `metrics: 'warp'` skips the
+ * audit, histogram and cut readbacks (scripts/measure-motion-stability.mjs),
+ * and `heatFrames` keeps `WarpingError`'s heat map of those frames for
+ * `takeHeat()`.
  *
  * `velocity` picks what the upscaler is fed: three's `velocity` (`engine`),
  * the package's `MotionVectors` node (`node`), or camera motion from depth
@@ -79,6 +87,20 @@ interface LabRequest {
     heatCandidate?: number;
     reference?: boolean;
     settings?: Partial<RuntimeSettings>;
+    /** Bench variant identity the upscaled paths run (default `production`). */
+    variant?: string;
+    /** `warp` reads back only `WarpingError` (default `all`). */
+    metrics?: 'all' | 'warp';
+    /** Frames whose warping-error heat map is read back for `takeHeat()`. */
+    heatFrames?: number[];
+}
+
+interface HeatSnapshot {
+    frame: number;
+    width: number;
+    height: number;
+    /** Tightly packed rgba8 rows, base64. */
+    rgba: string;
 }
 
 interface FrameRecord {
@@ -158,7 +180,19 @@ function applyFrame(scenario: string, frame: number): { scene: THREE.Scene; rese
 //* Pipeline
 const analyzer = new MotionAnalyzer(device, createThreeTextureAllocator(renderer));
 await analyzer.init();
-const upscaler = new Upscaler({ renderer });
+// One resolver at a time (the registry enforces it); replaced when a request
+// names another variant.
+const registry = new SingleVariantRegistry();
+let upscaler: BenchmarkResolver | null = null;
+let upscalerVariant = '';
+function resolverFor(variant: string, ratio: number): BenchmarkResolver {
+    if (upscaler && upscalerVariant === variant) return upscaler;
+    registry.disposeActive();
+    upscaler = registry.create(variant, ratio, renderer);
+    upscalerVariant = variant;
+    configured = '';
+    return upscaler;
+}
 // One stable matrix for the whole session. setProjectionMatrix() is read when
 // a material's shader builds (null = the camera's own, *jittered*, projection),
 // so switching it between runs leaves earlier-built materials on the old
@@ -183,8 +217,10 @@ let inputTarget: THREE.RenderTarget | null = null;
 let referenceTarget: THREE.RenderTarget | null = null;
 let configured = '';
 
-function configure(path: LabPath, ratio: number, width: number, height: number): { renderWidth: number; renderHeight: number } {
-    const key = `${path}:${ratio}:${width}x${height}`;
+function configure(path: LabPath, ratio: number, width: number, height: number, variant: string): { renderWidth: number; renderHeight: number } {
+    // native renders at display size and never builds an upscaler.
+    if (path !== 'native') resolverFor(variant, ratio);
+    const key = `${path}:${ratio}:${width}x${height}:${path === 'native' ? '' : variant}`;
     if (renderer.domElement.width !== width || renderer.domElement.height !== height) renderer.setSize(width, height);
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
@@ -192,9 +228,9 @@ function configure(path: LabPath, ratio: number, width: number, height: number):
     let renderHeight = height;
     if (path !== 'native') {
         if (key !== configured)
-            upscaler.configure({ displayWidth: width, displayHeight: height, customUpscaleRatio: ratio, path });
-        renderWidth = upscaler.renderWidth;
-        renderHeight = upscaler.renderHeight;
+            upscaler!.configure({ displayWidth: width, displayHeight: height, ratio, path });
+        renderWidth = upscaler!.renderWidth;
+        renderHeight = upscaler!.renderHeight;
     }
     if (key !== configured) {
         inputTarget?.dispose();
@@ -233,11 +269,14 @@ async function run(request: LabRequest): Promise<{ frames: FrameRecord[]; render
     const view = request.view ?? 'output';
     const resetMode = request.reset ?? 'scenario';
     const source = request.velocity ?? 'engine';
-    const { renderWidth, renderHeight } = configure(path, ratio, width, height);
+    const warpOnly = request.metrics === 'warp';
+    const heatFrames = new Set(request.heatFrames ?? []);
+    heatSnapshots.length = 0;
+    const { renderWidth, renderHeight } = configure(path, ratio, width, height, request.variant ?? 'production');
     if (path !== 'native') {
-        Object.assign(upscaler.settings, { sharpness: 0.8, maxAccumulation: 24, autoExposure: true, exposure: 1, debugView: 0, ...request.settings });
-        await upscaler.prepare();
-        upscaler.resetHistory();
+        Object.assign(upscaler!.settings, { sharpness: 0.8, maxAccumulation: 24, autoExposure: true, exposure: 1, debugView: 0, ...request.settings });
+        await upscaler!.prepare();
+        upscaler!.reset();
     }
     bench.resetDeterministicState();
     analyzer.reset();
@@ -252,9 +291,9 @@ async function run(request: LabRequest): Promise<{ frames: FrameRecord[]; render
         advanceNodeFrame(frame);
         const measured = frame >= start;
         const temporal = path === 'temporal';
-        if (temporal) upscaler.beginFrame(camera);
+        if (temporal) upscaler!.beginFrame(camera);
         const jittered = camera.projectionMatrix.clone();
-        const unjittered = temporal ? upscaler.unjitteredProjectionMatrix.clone() : jittered;
+        const unjittered = temporal ? (upscaler!.unjitteredProjectionMatrix as THREE.Matrix4).clone() : jittered;
         velocityProjection.copy(unjittered);
         motionVectors.beginFrame();
         renderer.setMRT(mrtFull);
@@ -268,7 +307,7 @@ async function run(request: LabRequest): Promise<{ frames: FrameRecord[]; render
         // candidate), while the camera still holds the (jittered) projection the
         // depth was rendered with.
         depthMotion.update({ depth: inputTarget!.depthTexture!, camera, projectionMatrix: unjittered, motions: [nodeVelocity] });
-        if (temporal) upscaler.endFrame(camera);
+        if (temporal) upscaler!.endFrame(camera);
 
         const view4 = camera.matrixWorldInverse;
         const early = device.createCommandEncoder({ label: 'motion-upscaler-early' });
@@ -286,9 +325,9 @@ async function run(request: LabRequest): Promise<{ frames: FrameRecord[]; render
         let cutEMD: number | null = null;
         let reset = resetMode === 'scenario' && resetHistory;
         // Read back before the upscale, so an automatic reset lands in this frame.
-        const cut = measured || resetMode === 'auto' ? await depthMotion.readCut() : null;
+        const cut = (measured && !warpOnly) || resetMode === 'auto' ? await depthMotion.readCut() : null;
         if (resetMode === 'auto' && cut?.hasPrevious && cut.cut) reset = true;
-        if (measured || resetMode === 'auto-histogram') {
+        if ((measured && !warpOnly) || resetMode === 'auto-histogram') {
             const histogram = (await analyzer.readStats()).histograms[0]!;
             if (previousHistogram) {
                 cutJS = jensenShannon(previousHistogram, histogram);
@@ -297,21 +336,24 @@ async function run(request: LabRequest): Promise<{ frames: FrameRecord[]; render
             }
             previousHistogram = histogram;
         }
-        if (reset && path !== 'native') upscaler.resetHistory();
+        if (reset && path !== 'native') upscaler!.reset();
 
         //* Upscale
         let outputTexture: THREE.Texture = color;
         if (path !== 'native') {
-            upscaler.dispatch(
+            upscaler!.dispatch(
                 {
                     color,
                     depth: inputTarget!.depthTexture!,
                     velocity: source === 'camera' ? depthMotion.motion : source === 'node' ? nodeVelocity : engineVelocity,
                     deltaTime: 1 / 60,
+                    frameTag: frame,
                 },
                 camera,
             );
-            outputTexture = upscaler.outputTexture;
+            // The bench resolvers always time; nothing here reads it.
+            upscaler!.takeTimingSamples();
+            outputTexture = upscaler!.outputTexture as THREE.Texture;
         }
         if (request.reference) {
             renderer.setRenderTarget(referenceTarget);
@@ -341,20 +383,27 @@ async function run(request: LabRequest): Promise<{ frames: FrameRecord[]; render
                 depthTest: false,
             });
         // Judged through the node for every path and velocity source.
+        const keepHeat = measured && heatFrames.has(frame);
         warping.encode(late, {
             current: gpu(outputTexture),
             motion: gpu(nodeVelocity),
             linearDepth: depthMotion.linearDepth,
-            heat: view === 'warp' ? warpHeat!.gpu : undefined,
+            heat: view === 'warp' || keepHeat ? warpHeat!.gpu : undefined,
         });
+        const heatReadback = keepHeat ? encodeHeatReadback(late, width, height) : null;
         analyzer.encodeSnapshot(late, 'input', gpu(color));
         analyzer.endFrame();
         device.queue.submit([late.finish()]);
         present(view, outputTexture, renderWidth, renderHeight);
 
         if (!measured) continue;
-        const stats = await analyzer.readStats();
+        if (heatReadback) heatSnapshots.push(await heatReadback(frame));
+        const stats = warpOnly ? null : await analyzer.readStats();
         const warp = await warping.read();
+        if (!stats) {
+            frames.push({ frame, audit: null, warp: warp.hasPrevious ? warp : null, reference: null, cut, cutJS, cutEMD, reset });
+            continue;
+        }
         frames.push({
             frame,
             audit: stats.residuals[0],
@@ -370,4 +419,43 @@ async function run(request: LabRequest): Promise<{ frames: FrameRecord[]; render
     return { frames, renderWidth, renderHeight };
 }
 
-(window as unknown as { __motionLab: unknown }).__motionLab = { ready: true, run };
+//* Heat Maps
+const heatSnapshots: HeatSnapshot[] = [];
+
+/** Copies the heat map into a mappable buffer; the returned reader waits for the submit. */
+function encodeHeatReadback(encoder: GPUCommandEncoder, width: number, height: number): (frame: number) => Promise<HeatSnapshot> {
+    const bytesPerRow = Math.ceil((width * 4) / 256) * 256;
+    const buffer = device.createBuffer({ label: 'motion-upscaler-heat-readback', size: bytesPerRow * height, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    encoder.copyTextureToBuffer({ texture: warpHeat!.gpu }, { buffer, bytesPerRow }, { width, height });
+    return async (frame) => {
+        await buffer.mapAsync(GPUMapMode.READ);
+        const padded = new Uint8Array(buffer.getMappedRange());
+        const rgba = new Uint8Array(width * height * 4);
+        for (let y = 0; y < height; y++) rgba.set(padded.subarray(y * bytesPerRow, y * bytesPerRow + width * 4), y * width * 4);
+        buffer.unmap();
+        buffer.destroy();
+        let binary = '';
+        for (let index = 0; index < rgba.length; index += 0x8000) binary += String.fromCharCode(...rgba.subarray(index, index + 0x8000));
+        return { frame, width, height, rgba: btoa(binary) };
+    };
+}
+
+/**
+ * Part of heat map `index` of the last run: base64 characters [offset, offset +
+ * length) of its pixels plus their total. CDP stalls on a multi-megabyte value
+ * (4 MB timed out where 1 MB took 0.16 s), so the driver reads it in pieces.
+ */
+function takeHeat(index: number, offset = 0, length = 1 << 20): (Omit<HeatSnapshot, 'rgba'> & { rgba: string; total: number }) | null {
+    const snapshot = heatSnapshots[index];
+    if (!snapshot) return null;
+    return { ...snapshot, rgba: snapshot.rgba.slice(offset, offset + length), total: snapshot.rgba.length };
+}
+
+(window as unknown as { __motionLab: unknown }).__motionLab = {
+    ready: true,
+    run,
+    takeHeat,
+    get heatCount() {
+        return heatSnapshots.length;
+    },
+};
