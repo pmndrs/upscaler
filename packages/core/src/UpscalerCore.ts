@@ -206,6 +206,9 @@ export class UpscalerCore<THandle = GPUTexture> {
     // scattered into while the depth clip empties the other for next frame.
     private _reconstructedDepth: [GPUBuffer, GPUBuffer] | null = null;
     private _scatterIndex = 0;
+    // This frame's GPU reset signal (DispatchInputs.resetTexture), set by the
+    // guides stage so a split frame's late stage sees it too.
+    private _frameResetSignal: GPUTexture | null = null;
     private _dilatedMotion: GPUTexture | null = null;
     private _masks: GPUTexture | null = null;
     private _easuOutput: GPUTexture | null = null;
@@ -750,6 +753,7 @@ export class UpscalerCore<THandle = GPUTexture> {
     private _endFrame(): void {
         this._frameIndex++;
         this._pendingReset = false;
+        this._frameResetSignal = null;
         if (this._path === 'temporal') {
             this._historyIndex = 1 - this._historyIndex;
             this._depthIndex = 1 - this._depthIndex;
@@ -819,6 +823,7 @@ export class UpscalerCore<THandle = GPUTexture> {
             // The frame ends here — there is no late stage.
             this._frameIndex++;
             this._pendingReset = false;
+            this._frameResetSignal = null;
             this._depthIndex = 1 - this._depthIndex;
         } else {
             this._guidesPending = true;
@@ -886,6 +891,7 @@ export class UpscalerCore<THandle = GPUTexture> {
         this._guidesPending = false;
         this._frameIndex++;
         this._pendingReset = false;
+        this._frameResetSignal = null;
         this._historyIndex = 1 - this._historyIndex;
         this._depthIndex = 1 - this._depthIndex;
     }
@@ -979,7 +985,11 @@ export class UpscalerCore<THandle = GPUTexture> {
         // need only depth + velocity; everything after needs the beauty color.
         // Composed on one encoder here so the monolithic dispatch keeps its
         // single submit — the seam exists for the split-dispatch guides API.
-        this._encodeGuides(encoder, { depth: inputs.depth, velocity: inputs.velocity });
+        this._encodeGuides(encoder, {
+            depth: inputs.depth,
+            velocity: inputs.velocity,
+            resetTexture: inputs.resetTexture,
+        });
         this._encodeLate(encoder, colorGPU, inputs);
     }
 
@@ -999,6 +1009,10 @@ export class UpscalerCore<THandle = GPUTexture> {
         const depthCur = this._dilatedDepth![this._depthIndex];
         const depthPrev = this._dilatedDepth![1 - this._depthIndex];
         this._latestDepthWrite = this._depthIndex;
+        // The frame's GPU reset signal, kept for the late stage: a split frame
+        // passes it to dispatchGuides(), and the late stage's exposure pass
+        // folds it into the exposure texel's .a for every pass after it.
+        this._frameResetSignal = inputs.resetTexture ?? null;
         const w = this._renderWidth;
         const h = this._renderHeight;
 
@@ -1040,6 +1054,7 @@ export class UpscalerCore<THandle = GPUTexture> {
             { buffer: scatterBuffer },
             this._masks!.createView(),
             { buffer: nextScatterBuffer },
+            (this._frameResetSignal ?? this._reactiveDummy!).createView(),
         ]);
         const depthClipPass = encoder.beginComputePass({
             label: 'upscale-depth-clip',
@@ -1159,6 +1174,9 @@ export class UpscalerCore<THandle = GPUTexture> {
         const hostPreExposureView = inputs.preExposureTexture
             ? inputs.preExposureTexture.createView()
             : this._reactiveDummy!.createView();
+        // GPU reset signal — this call's, else the guides stage's; the zero
+        // dummy reads as "no reset".
+        const resetSignal = inputs.resetTexture ?? this._frameResetSignal ?? this._reactiveDummy!;
         const exposureBindGroup = this._exposurePass.createBindGroup([
             { buffer: this._constants.buffer },
             colorGPU.createView(),
@@ -1167,6 +1185,7 @@ export class UpscalerCore<THandle = GPUTexture> {
             exposureCur.createView(),
             externalExposureView,
             hostPreExposureView,
+            resetSignal.createView(),
         ]);
         const exposurePass = encoder.beginComputePass({
             label: 'upscale-exposure',
@@ -1440,15 +1459,17 @@ export class UpscalerCore<THandle = GPUTexture> {
             const exposure1 = this._createSharedTexture('exposure-1', 1, 1, 'rgba16float');
             this._guideTex.exposure = [exposure0, exposure1];
             this._exposure = [exposure0.gpu, exposure1.gpu];
-            // Sampled-only (no storage) so a non-storage format is fine; zero-init
-            // gives a "nothing reactive" default when the caller passes no mask.
-            this._reactiveDummy = this._device.createTexture({
-                label: 'upscale-reactive-dummy',
-                size: { width: 1, height: 1 },
-                format: 'r8unorm',
-                usage: GPUTextureUsage.TEXTURE_BINDING,
-            });
         }
+        // Sampled-only (no storage) so a non-storage format is fine; zero-init
+        // gives a "nothing reactive" / "no reset" default when the caller
+        // passes no mask or reset signal. Every path allocates it: the guides
+        // path's depth clip binds it for an absent reset signal.
+        this._reactiveDummy = this._device.createTexture({
+            label: 'upscale-reactive-dummy',
+            size: { width: 1, height: 1 },
+            format: 'r8unorm',
+            usage: GPUTextureUsage.TEXTURE_BINDING,
+        });
 
         if (this._path === 'spatial') {
             this._easuOutput = this._createTexture('easu-output', dw, dh, 'rgba16float');

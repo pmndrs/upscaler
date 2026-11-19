@@ -304,6 +304,7 @@ export class Upscaler {
             depth: getGPUTexture(inputs.depth),
             velocity: getGPUTexture(inputs.velocity),
             reset: inputs.reset,
+            resetTexture: inputs.resetTexture && getGPUTexture(inputs.resetTexture),
             deltaTime: inputs.deltaTime,
         };
         const frame = this._frameInfo(camera);
@@ -350,6 +351,7 @@ export class Upscaler {
             exposureTexture: inputs.exposureTexture && getGPUTexture(inputs.exposureTexture),
             preExposureTexture: inputs.preExposureTexture && getGPUTexture(inputs.preExposureTexture),
             reset: inputs.reset,
+            resetTexture: inputs.resetTexture && getGPUTexture(inputs.resetTexture),
             deltaTime: inputs.deltaTime,
         };
     }

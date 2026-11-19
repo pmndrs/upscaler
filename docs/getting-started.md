@@ -109,7 +109,7 @@ pipeline.outputNode = upscale(
   size every frame and upscales it to the renderer's drawing-buffer size. `ratio` and
   `quality` only size `upscaleScene`'s own pass.
 - **The inputs render in-graph.** Every input node (and `reactive`,
-  `reactiveOpaqueColor`, `exposureTexture`) is registered as a graph dependency, so
+  `reactiveOpaqueColor`, `exposureTexture`, `resetTexture`) is registered as a graph dependency, so
   three renders the whole chain in dependency order before the upscale runs. Hand the
   node a node chain; don't render the inputs yourself.
 - **Jitter defaults on**, because in-graph inputs render under the node's jitter.
@@ -119,7 +119,9 @@ pipeline.outputNode = upscale(
   accumulates and denoises; it just doesn't reconstruct sub-pixel detail. See
   [Jitter](inputs-and-contracts.md#jitter).
 - **Optional inputs:** `reactive` (a mask), `reactiveOpaqueColor` (auto-generated mask),
-  `exposureTexture`, and `guides` (a linked `temporalGuides()` node; see
+  `exposureTexture`, `resetTexture` (a GPU reset signal, see
+  [Resets and camera cuts](inputs-and-contracts.md#resets-and-camera-cuts)), and
+  `guides` (a linked `temporalGuides()` node; see
   [Temporal guides](temporal-guides.md#tsl-linked-mode)). Host pre-exposure is not
   exposed on the node; use the raw `Upscaler` for it.
 - **Runtime settings:** the node creates its `Upscaler` lazily on first build.
@@ -191,6 +193,9 @@ renderer.setAnimationLoop(() => {
 - `three`'s `velocity` node is a singleton, and its projection override is global. Pass
   `new UpscalePass(renderer, { shareVelocityMatrix: false })` for every pass but one
   when several share a renderer.
+- `setResetTexture(tex)` feeds a GPU reset signal (a cut detector's flag) to every
+  `draw()`. Encode the detector from the `onInputsRendered` callback, which runs after
+  the scene render and before the upscale, while the camera is still jittered.
 - `UpscalePass` doesn't expose `exposureTexture` or `preExposureTexture`. Drive
   `pass.upscaler` (the raw API) directly if you need them.
 
@@ -291,7 +296,8 @@ All except `sharpness` and `rcasDenoise` affect only the temporal path.
 
 **Camera cuts:** call `upscaler.resetHistory()`, or pass `reset: true` in that
 frame's dispatch inputs, so the first frame after a teleport doesn't blend against
-the old view.
+the old view. To detect cuts on the GPU instead, pass a cut detector's flag as
+`resetTexture` ([Resets and camera cuts](inputs-and-contracts.md#resets-and-camera-cuts)).
 
 **GPU timings:** off by default, because profiling has a per-frame cost (timestamp
 writes on every pass plus a readback) and nothing in the pipeline needs it. Opt in with

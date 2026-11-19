@@ -50,12 +50,14 @@ const BASELINE_BINDING_COUNTS: Record<string, number> = {
     rcas: 5,
     // 6 since 2026-10-05: dilate + scatter, depth clip split out (issue #67).
     reconstruct: 6,
-    depthClip: 6,
+    // 7 since 2026-11-20: the GPU reset signal (issue #102).
+    depthClip: 7,
     reconstructCrossFrame: 7,
     // 11 since 2026-10-05: per-block memory in/out (NEXT-STEPS §14).
     shadingChange: 11,
     accumulate: 13,
-    luminancePyramid: 7,
+    // 8 since 2026-11-20: the GPU reset signal, resolved into exposure .a.
+    luminancePyramid: 8,
     // 5 since 2026-07-22: incoming-mask binding for merge-not-overwrite.
     generateReactive: 5,
     debug: 10,
@@ -83,7 +85,9 @@ const BASELINE_FINGERPRINTS: Record<string, string> = {
     // 2026-10-05: reconstructed-previous-depth scatter (issue #67) — the
     // depth clip moved to its own pass; the old fused form is frozen below.
     reconstruct: '193dec98',
-    depthClip: '800a41f5',
+    // 2026-11-20: a reset frame (FLAG_RESET or the GPU reset signal) writes
+    // every pixel disoccluded (issue #102).
+    depthClip: '4300b381',
     reconstructCrossFrame: 'd944fd8f',
     // Added 2026-07-21: multi-scale shading-change detector (NEXT-STEPS item 4);
     // 2026-10-03: the contrast floor reads both frames' spread, not just the
@@ -92,7 +96,9 @@ const BASELINE_FINGERPRINTS: Record<string, string> = {
     // 2026-10-05: per-block memory of the last 8 means, jump-gated range test
     // (fine-line aliasing on a still camera, NEXT-STEPS §14); 2026-10-05: an
     // all-zero (empty) memory restarts instead of pushing (NEXT-STEPS §14).
-    shadingChange: 'fba11623',
+    // 2026-11-20: reset read from the exposure texel's resolved .a too (the
+    // GPU reset signal), not FLAG_RESET alone.
+    shadingChange: '448ca86f',
     // Updated 2026-07-21: DeltaPreExposure history correction (NEXT-STEPS item 2);
     // 2026-08-25: alpha resolved alongside color into the locks buffer's .a;
     // 2026-10-02: the alpha clamp takes the color path's still-scene relax;
@@ -103,10 +109,13 @@ const BASELINE_FINGERPRINTS: Record<string, string> = {
     // NEXT-STEPS §11);
     // 2026-10-05: pre-exposure read guarded with max(…, 1e-4) like RCAS/blit,
     // so a fixed/external exposure of 0 no longer blacks out accumulation.
-    accumulate: '1505bcb5',
+    // 2026-11-20: reset read from the exposure texel's resolved .a too.
+    accumulate: '3594f274',
     // 2026-10-08: 1/16-stop adaptation dead-band, so the jitter-phase wobble of
     // the metered log-average no longer re-conditions history on still scenes.
-    luminancePyramid: '30144ae9',
+    // 2026-11-20: the GPU reset signal (binding 7), folded with FLAG_RESET
+    // and published in .a for the rest of the late stage.
+    luminancePyramid: 'a1719dab',
     // Updated 2026-07-22: reactive merge-not-overwrite (guides spec M3) — the
     // generator max-merges an incoming mask instead of being suppressed by it.
     generateReactive: '9d0739e5',
@@ -461,7 +470,7 @@ describe('shading-change block memory', () => {
     });
 
     it('restarts the memory of blocks that moved, disoccluded or reset', () => {
-        expect(SHADING_CHANGE_SHADER).toContain('var moving = select(0.0, 1.0, hasFlag(FLAG_RESET));');
+        expect(SHADING_CHANGE_SHADER).toContain('var moving = select(0.0, 1.0, frameReset);');
         expect(SHADING_CHANGE_SHADER).toContain(
             'select(memoryDistance(midWords, midMean), 1.0, moving1 > 0.5)',
         );
@@ -503,15 +512,61 @@ describe('reconstructed previous depth (issue #67)', () => {
     });
 });
 
+describe('reset (issue #102)', () => {
+    const resetSignal = /textureLoad\(resetSignal, vec2i\(0\), 0\)\.r > 0\.5/;
+
+    it('writes every pixel disoccluded on a reset frame, after emptying the next buffer', () => {
+        const sources = [DEPTH_CLIP_SHADER, ...Object.values(DEPTH_CLIP_VARIANTS).map(buildDepthClipVariant)];
+        for (const source of sources) {
+            const body = source.split('fn main')[1] ?? '';
+            const reset = body.indexOf(
+                'let reset = hasFlag(FLAG_RESET) || textureLoad(resetSignal, vec2i(0), 0).r > 0.5;',
+            );
+            expect(reset).toBeGreaterThan(0);
+            // The ping-pong clear runs whatever the frame: the scatter keeps no
+            // other cross-frame state, so a skipped clear is the only way a
+            // reset could leak a stale nearer depth into the next frame.
+            expect(body.indexOf('nextReconstructedDepth[')).toBeLessThan(reset);
+            // Every store is 1 on a reset: the off-screen one always, the
+            // final one through the reset select.
+            const stores = [...body.matchAll(/textureStore\(maskOutput, gid\.xy, vec4f\(([^,]+),/g)].map((m) => m[1]);
+            expect(stores.length).toBeGreaterThan(0);
+            for (const value of stores) expect(['1.0', 'select(disocclusion']).toContain(value.trim());
+            expect(body).toContain('vec4f(select(disocclusion, 1.0, reset), 0.0, 0.0, 1.0)');
+        }
+    });
+
+    it('resolves the GPU signal once, in the exposure texel, for the late stage', () => {
+        // The exposure pass folds FLAG_RESET and the signal into .a ...
+        expect(LUMINANCE_PYRAMID_SHADER).toMatch(
+            /let reset = hasFlag\(FLAG_RESET\) \|\| textureLoad\(resetSignal, vec2i\(0\), 0\)\.r > 0\.5;/,
+        );
+        expect(LUMINANCE_PYRAMID_SHADER).toMatch(/if \(!reset && prev > 0\.0\)/);
+        expect(LUMINANCE_PYRAMID_SHADER).toContain('vec4f(exposure, avgLum, host, select(0.0, 1.0, reset))');
+        expect(LUMINANCE_PYRAMID_SHADER).toMatch(resetSignal);
+        // ... and every later pass that honours FLAG_RESET also reads it.
+        expect(ACCUMULATE_SHADER).toContain('if (hasFlag(FLAG_RESET) || frameInfo.a > 0.5 || offscreen)');
+        expect(SHADING_CHANGE_SHADER).toContain('frameReset = hasFlag(FLAG_RESET) || frameInfo.a > 0.5;');
+        expect(SHADING_CHANGE_SHADER).toContain('if (frameReset) { return neutral; }');
+        expect(SHADING_CHANGE_SHADER).toContain('var moving = select(0.0, 1.0, frameReset);');
+        // No pass may honour the CPU flag alone (it would ignore a GPU cut).
+        for (const source of [ACCUMULATE_SHADER, SHADING_CHANGE_SHADER, LUMINANCE_PYRAMID_SHADER, DEPTH_CLIP_SHADER]) {
+            const uses = [...source.matchAll(/hasFlag\(FLAG_RESET\)([^;{]*)/g)].map((match) => match[1]);
+            expect(uses.length).toBeGreaterThan(0);
+            for (const rest of uses) expect(rest).toMatch(/\|\| (frameInfo\.a > 0\.5|textureLoad\(resetSignal)/);
+        }
+    });
+});
+
 describe('depth-clip variants (issue #79)', () => {
     // Swapped in through Upscaler's _depthClipShader, which binds production's
-    // six entries, so every variant must declare exactly bindings 0–5.
+    // seven entries, so every variant must declare exactly bindings 0–6.
     it.each(Object.entries(DEPTH_CLIP_VARIANTS))('%s keeps production bindings', (_id, options) => {
         const source = buildDepthClipVariant(options);
         const bindings = [...source.matchAll(/@group\(0\) @binding\((\d+)\)/g)].map((match) =>
             Number(match[1]),
         );
-        expect(bindings).toEqual([0, 1, 2, 3, 4, 5]);
+        expect(bindings).toEqual([0, 1, 2, 3, 4, 5, 6]);
         expect(source.match(/@compute/g)).toHaveLength(1);
         expect(source.match(/struct FsrConstants/g)).toHaveLength(1);
         // Still empties next frame's slot before the off-screen early return.
