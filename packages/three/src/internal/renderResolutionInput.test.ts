@@ -1,6 +1,7 @@
-import { DataTexture, FloatType, HalfFloatType, PerspectiveCamera, Scene, type Vector2 } from 'three';
+import { DataTexture, FloatType, HalfFloatType, PerspectiveCamera, Scene, UnsignedByteType, type Vector2 } from 'three';
+import { RTTNode } from 'three/webgpu';
 import { mrt, output, pass, texture, vec4, velocity } from 'three/tsl';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { getPassRenderResolution } from '@pmndrs/upscaler-core/math/resolution';
 import { upscale, upscaleSpatial } from '../UpscalerNode';
@@ -86,18 +87,44 @@ describe('materializeInput', () => {
         expect(materializeInput(p, p.getTextureNode('depth'), 2)).toBe(p.getTextureNode());
     });
 
-    it('renders a composite into a half-float target', () => {
+    it('renders a composite into a render target without a depth buffer', () => {
         const p = scenePass(0.5);
         const node = materializeInput(p.getTextureNode('output').add(vec4(1)), p.getTextureNode('depth'), 2);
         expect(node).toBeInstanceOf(RenderResolutionInputNode);
-        expect(node.renderTarget.texture.type).toBe(HalfFloatType);
         expect(node.renderTarget.depthBuffer).toBe(false);
     });
+});
 
-    it('follows a full-float reference pass', () => {
-        const p = scenePass(0.5, FloatType);
+describe('RenderResolutionInputNode texture type', () => {
+    // The decision point is setup(), where three's PassNode also picks its
+    // type (renderer.getOutputBufferType(), overriding pass()'s own option).
+    // RTTNode's own setup needs a real builder, so stub just that.
+    function setUpWith(outputBufferType: number, passType?: number) {
+        const p = scenePass(0.5, passType);
         const node = materializeInput(p.getTextureNode('output').add(vec4(1)), p.getTextureNode('depth'), 2);
-        expect(node.renderTarget.texture.type).toBe(FloatType);
+        const parent = vi.spyOn(RTTNode.prototype, 'setup').mockReturnValue(null as never);
+        try {
+            node.setup({ renderer: { getOutputBufferType: () => outputBufferType } });
+            expect(parent).toHaveBeenCalledOnce();
+        } finally {
+            parent.mockRestore();
+        }
+        // three's own decision for the reference pass, as the oracle.
+        p.setup({ renderer: { getOutputBufferType: () => outputBufferType, samples: 0, reversedDepthBuffer: false } } as never);
+        return { input: node.renderTarget.texture.type, pass: p.renderTarget.texture.type };
+    }
+
+    it("matches the reference pass's type, as PassNode.setup() decides it", () => {
+        for (const [outputBufferType, passType] of [[HalfFloatType], [FloatType], [HalfFloatType, FloatType], [FloatType, HalfFloatType]]) {
+            const { input, pass } = setUpWith(outputBufferType, passType);
+            expect(input, `outputBufferType ${outputBufferType}, pass type ${passType}`).toBe(pass);
+        }
+        expect(setUpWith(FloatType).input).toBe(FloatType);
+        expect(setUpWith(HalfFloatType, FloatType).input).toBe(HalfFloatType);
+    });
+
+    it('never goes 8-bit', () => {
+        expect(setUpWith(UnsignedByteType).input).toBe(HalfFloatType);
     });
 });
 

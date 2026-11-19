@@ -25,9 +25,20 @@ export interface InputSizeRenderer {
     getOutputRenderTarget?(): { isXRRenderTarget?: boolean; width: number; height: number } | null;
 }
 
+/** The renderer surface {@link RenderResolutionInputNode} picks its texture type from. */
+export interface InputTypeRenderer {
+    getOutputBufferType(): TextureDataType;
+}
+
 /**
  * Resolves a reference node to the size source it implies, or `null` when it
  * carries none (absent, or a texture not yet sized).
+ *
+ * Only a pass texture node (`pass.getTextureNode(…)`) is predicted for the
+ * current frame. A plain texture node (say `texture(pass.getTexture('depth'))`)
+ * reports its size as last rendered: if its pass renders after this input on a
+ * resize frame, colour and depth disagree for that one frame, until the next
+ * frame re-reads the new size.
  * @param node - The upscaler's depth (or velocity) texture node
  * @returns The size reference
  */
@@ -96,12 +107,32 @@ export class RenderResolutionInputNode extends RTTNode {
      * @param ratio - Upscale ratio, used when `reference` carries no size
      * @param type - Texture type of the target (half or full float)
      */
-    constructor(node: Node, reference: AnyNode, ratio: number, type: TextureDataType) {
+    constructor(node: Node, reference: AnyNode, ratio: number) {
         const size = getInputRenderSize({ width: 1, height: 1 }, describeSizeReference(reference), ratio);
         // A fixed width/height turns RTTNode's own drawing-buffer resize off.
-        super(node, size.width, size.height, { type, depthBuffer: false });
+        // The type is settled in setup(), once the renderer is known.
+        super(node, size.width, size.height, { type: HalfFloatType, depthBuffer: false });
         this._reference = reference;
         this._ratio = ratio;
+    }
+
+    /**
+     * Sets the target's texture type from the renderer, where three's
+     * `PassNode.setup()` sets its own: the renderer's output buffer type
+     * overrides any type passed to `pass()`.
+     * @param renderer - The renderer building this node
+     * @returns The texture type applied
+     */
+    syncType(renderer: InputTypeRenderer): TextureDataType {
+        const type = getInputTextureType(renderer.getOutputBufferType());
+        this.renderTarget!.texture.type = type;
+        return type;
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    setup(builder: any): any {
+        this.syncType(builder.renderer);
+        return super.setup(builder);
     }
 
     /**
@@ -127,20 +158,22 @@ export class RenderResolutionInputNode extends RTTNode {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     updateBefore(frame: any): any {
+        // Size only; the render stays RTTNode's, so its renderer-state
+        // handling (r187: clear colour/alpha kept across the reset) applies.
         this.syncSize(frame.renderer);
         return super.updateBefore(frame);
     }
 }
 
 /**
- * Texture type for a materialised input: full float when the reference pass
- * renders full float, half float otherwise — never 8-bit, which would clip
- * HDR colour.
- * @param reference - The upscaler's depth (or velocity) node
+ * Texture type for a materialised input: full float when the renderer's
+ * passes render full float (`outputBufferType: FloatType`), half float
+ * otherwise — never 8-bit, which would clip HDR colour.
+ * @param outputBufferType - `renderer.getOutputBufferType()`
  * @returns `FloatType` or `HalfFloatType`
  */
-export function getInputTextureType(reference: AnyNode): TextureDataType {
-    return reference?.passNode?.renderTarget?.texture?.type === FloatType ? FloatType : HalfFloatType;
+export function getInputTextureType(outputBufferType: TextureDataType): TextureDataType {
+    return outputBufferType === FloatType ? FloatType : HalfFloatType;
 }
 
 /**
@@ -154,5 +187,5 @@ export function getInputTextureType(reference: AnyNode): TextureDataType {
  */
 export function materializeInput(node: AnyNode, reference: AnyNode, ratio: number): AnyNode {
     if (node.isSampleNode || node.isTextureNode || node.isPassNode) return convertToTexture(node);
-    return new RenderResolutionInputNode(nodeObject(node), reference, ratio, getInputTextureType(reference));
+    return new RenderResolutionInputNode(nodeObject(node), reference, ratio);
 }

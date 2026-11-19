@@ -514,7 +514,8 @@ export class UpscalerNode extends Node<'vec4'> {
  *
  * `color` may be a texture/pass node or any composite node (say
  * `scenePass.getTextureNode().add(gi)`). A composite is rendered into a
- * half-float target (full float if the depth pass renders full float) at the
+ * float target of the renderer's output buffer type (half float unless
+ * `outputBufferType: FloatType`; never 8-bit), as three's passes are, at the
  * render resolution of the depth/velocity pass — `Math.floor(drawingBuffer ×
  * pass.getResolutionScale())`, as three's `PassNode` sizes it — so no
  * `rtt()` wrapper is needed. A texture or pass node is used as is, at its own

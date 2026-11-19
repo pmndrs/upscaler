@@ -110,11 +110,14 @@ pipeline.outputNode = upscale(
   size every frame and upscales it to the renderer's drawing-buffer size. `ratio` and
   `quality` only size `upscaleScene`'s own pass.
 - **A composite color renders at render resolution.** When `color` is not a texture or
-  pass node (say `output.add(gi)`), `upscale()` renders it into a half-float target
-  (full float if the depth pass renders full float) sized like the depth/velocity
-  pass: `Math.floor(drawingBuffer × pass.getResolutionScale())`, the same rounding as
-  three's `PassNode`, re-derived each frame so a resize lands on every input at once.
-  A texture or pass node is used as is, at its own size, with no copy. The same goes
+  pass node (say `output.add(gi)`), `upscale()` renders it into a float target of the
+  type three's passes use (`renderer.getOutputBufferType()`: half float by default,
+  full float with `outputBufferType: FloatType`, never 8-bit), sized like the
+  depth/velocity pass: `Math.floor(drawingBuffer × pass.getResolutionScale())`, the
+  same rounding as three's `PassNode`, re-derived each frame so a resize lands on every
+  input at once. This prediction needs depth (or velocity) as a pass texture node
+  (`pass.getTextureNode('depth')`); a plain `texture()` reference is followed at its
+  last rendered size, so a resize can leave colour one frame behind. A texture or pass node is used as is, at its own size, with no copy. The same goes
   for the `reactive` and `reactiveOpaqueColor` options. (Up to 0.5 a composite went
   through three's `convertToTexture`, which sizes from the drawing buffer: the
   composite rendered at display size and the upscaler ran at ratio 1 against
