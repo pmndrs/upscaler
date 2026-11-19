@@ -35,10 +35,10 @@ function fixture() {
             maxComputeWorkgroupStorageSize: 16384,
         },
         queue: { writeBuffer: vi.fn(), writeTexture: vi.fn(), submit: vi.fn() },
-        // The every-texel metering (@pmndrs/downsampler) compiles synchronously
-        // inside a validation scope.
+        // The every-texel metering creates its layouts and buffers inside error
+        // scopes; its pipelines go through createComputePipelineAsync.
         pushErrorScope: vi.fn(), popErrorScope: vi.fn(async () => null),
-        createBindGroupLayout: resource, createPipelineLayout: resource, createComputePipeline: resource,
+        createBindGroupLayout: resource, createPipelineLayout: resource, createComputePipeline: vi.fn(resource),
         createShaderModule: vi.fn(resource),
         createComputePipelineAsync: vi.fn((descriptor: GPUComputePipelineDescriptor) =>
             new Promise<GPUComputePipeline>((resolve, reject) => jobs.push({ label: descriptor.label!, resolve, reject }))),
@@ -158,6 +158,19 @@ describe('Upscaler preparation', () => {
         expect(upscaler.activeDebugView).toBe(DebugView.MotionVectors);
         upscaler.dispatch({ color, depth, velocity }, camera);
         expect(upscaler.activeDebugView).toBe(DebugView.None);
+    });
+
+    it('compiles the every-texel exposure metering asynchronously on a small temporal render', async () => {
+        // A 256-invocation device (the default) within the size gate
+        // (NEXT-STEPS §17): both scalar entry points go through the async queue.
+        const { upscaler, device, finish } = fixture();
+        upscaler.configure({ displayWidth: 32, displayHeight: 32 });
+        const ready = upscaler.init(); await finish(); await ready;
+        const labels = device.createComputePipelineAsync.mock.calls.map(([d]) => d.label);
+        expect(labels).toContain('upscale-exposure-every-texel-partials');
+        expect(labels).toContain('upscale-exposure-every-texel-combine');
+        expect(device.createComputePipeline).not.toHaveBeenCalled();
+        expect(upscaler.isReady).toBe(true);
     });
 
     it('prepares only geometry for guides-only consumers', async () => {

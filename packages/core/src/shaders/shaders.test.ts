@@ -10,12 +10,14 @@ import { EASU_SHADER } from './easu';
 import { GENERATE_REACTIVE_SHADER } from './generateReactive';
 import { createScalarKernel } from '@pmndrs/downsampler/webgpu';
 
-import { everyTexelExposureLayout } from '../internal/EveryTexelExposure';
+import {
+    everyTexelDispatchShape,
+    everyTexelExposureLayout,
+    everyTexelKernelOptions,
+} from '../internal/EveryTexelExposure';
 import {
     EXPOSURE_EVERY_QUAD_BINDINGS,
-    EXPOSURE_EVERY_QUAD_LOAD,
     EXPOSURE_EVERY_TEXEL_BINDINGS,
-    EXPOSURE_EVERY_TEXEL_LOAD,
     LUMINANCE_PYRAMID_SERIAL_SHADER,
     LUMINANCE_PYRAMID_SHADER,
     exposureEveryTexelFinish,
@@ -531,15 +533,7 @@ describe('every-texel exposure metering', () => {
 
     it('assembles with the generated kernel without name collisions', () => {
         for (const form of ['texel', 'quad'] as const) {
-            const wgsl = createScalarKernel({
-                reduction: ['average', 'sum', 'sum', 'sum'],
-                bindings: {
-                    wgsl: form === 'quad' ? EXPOSURE_EVERY_QUAD_BINDINGS : EXPOSURE_EVERY_TEXEL_BINDINGS,
-                    entries: [],
-                },
-                load: form === 'quad' ? EXPOSURE_EVERY_QUAD_LOAD : EXPOSURE_EVERY_TEXEL_LOAD,
-                finish,
-            });
+            const wgsl = createScalarKernel(everyTexelKernelOptions(form));
             for (const name of ['load', 'finish', 'partials', 'combine'])
                 expect(wgsl.match(new RegExp(`\\bfn ${name}\\(`, 'g'))).toHaveLength(1);
             // Only the generator's own declarations sit in group 0.
@@ -547,6 +541,25 @@ describe('every-texel exposure metering', () => {
         }
         for (const ours of [EXPOSURE_EVERY_TEXEL_BINDINGS, EXPOSURE_EVERY_QUAD_BINDINGS, finish])
             expect(ours).not.toMatch(/\bds_/);
+    });
+
+    it('dispatches the generated kernel the way its ScalarReduction would', () => {
+        // EveryTexelExposure compiles the kernel itself (async) and fills the
+        // uniform and workgroup counts the library's class would: pin the
+        // generated shape those depend on (@pmndrs/downsampler 0.1.0, exact).
+        const wgsl = createScalarKernel(everyTexelKernelOptions('texel'));
+        expect(wgsl).toContain(
+            'struct DsParams {\n\tsize: vec2u,\n\tfirstLayer: u32,\n\tgroupsX: u32,\n\tpartialCount: u32,\n\tcount: u32,\n}',
+        );
+        expect(wgsl).toContain('@group(0) @binding(0) var<uniform> ds_params: DsParams;');
+        expect(wgsl).toContain('@group(0) @binding(1) var<storage, read_write> ds_partials: array<vec4f>;');
+        expect(wgsl).toContain('@compute @workgroup_size(16, 16)\nfn partials');
+        expect(wgsl).toContain('@compute @workgroup_size(256)\nfn combine');
+        expect(wgsl).toContain('let origin = group.xy * 64u + local.xy;');
+        expect(everyTexelDispatchShape(960, 540)).toEqual({
+            groups: [15, 9], params: [960, 540, 0, 15, 135, 518400],
+        });
+        expect(everyTexelDispatchShape(1, 1)).toEqual({ groups: [1, 1], params: [1, 1, 0, 1, 1, 1] });
     });
 });
 

@@ -85,13 +85,38 @@ export interface UpscalerCoreOptions<THandle = GPUTexture> {
 /** Bench-only exposure metering forms (EveryTexelExposure, NEXT-STEPS §17). */
 type ExposureMetering = 'taps' | 'every-texel' | 'every-texel-no-deadband' | 'every-quad' | 'every-quad-no-deadband';
 
-// Auto-exposure meters every render texel up to this many (2^19: 960×540 and
-// below), and the 1024 bilinear taps above (NEXT-STEPS §17). The taps' jitter
+// Auto-exposure meters every render texel up to this many (2^19 = 524,288,
+// ≈960×540), and the 1024 bilinear taps above (NEXT-STEPS §17). The taps' jitter
 // wobble grows as the render shrinks and crossed the adaptation dead-band at
 // 640×360, re-conditioning still scenes; every texel stays far inside it, at a
 // cost that grows with the render (+3–4 µs at ≤ 960×540, +15–39 µs at
 // 1280×720–1920×1080 in a worktree), where the taps are already steady.
 const EVERY_TEXEL_MAX_TEXELS = 1 << 19;
+
+/**
+ * Whether a render size meters every texel (the size gate).
+ * @param width - Render width
+ * @param height - Render height
+ * @returns True up to 2^19 texels
+ * @internal
+ */
+export function everyTexelGate(width: number, height: number): boolean {
+    return width * height <= EVERY_TEXEL_MAX_TEXELS;
+}
+
+/**
+ * Whether a device can run the every-texel metering: the scalar reduction's
+ * 256-invocation, 256-wide workgroups (the WebGPU default; compatibility mode
+ * defaults to 128) and a second bind group.
+ * @param device - The upscaler's device
+ * @returns False keeps the taps at every size
+ * @internal
+ */
+export function everyTexelSupported(device: GPUDevice): boolean {
+    const limits = device.limits;
+    return limits.maxComputeInvocationsPerWorkgroup >= 256 &&
+        limits.maxComputeWorkgroupSizeX >= 256 && limits.maxBindGroups >= 2;
+}
 
 /**
  * Bench-only construction knobs. Not part of the published surface; reached
@@ -186,9 +211,16 @@ export class UpscalerCore<THandle = GPUTexture> {
     private readonly _reprojectData: (() => Float32Array<ArrayBuffer>) | null;
     private _accumulatePass!: ComputePass;
     private _exposurePass!: ComputePass;
-    // Every-texel metering (small renders, NEXT-STEPS §17); null where the
-    // device lacks 256-invocation workgroups, which leaves the taps everywhere.
+    // Every-texel metering (renders ≤ EVERY_TEXEL_MAX_TEXELS, NEXT-STEPS §17).
+    // Optional like the shading detector: compiled async only once the size
+    // gate wants it, never part of isReady, and frames meter with the taps
+    // until it is ready. Any failure falls back to the taps for good.
     private _everyTexelExposure: EveryTexelExposure | null = null;
+    private _everyTexelRequest: Promise<EveryTexelExposure | null> | null = null;
+    private _everyTexelPreparation: { key: string; promise: Promise<void> } | null = null;
+    private _everyTexelFailed = false;
+    // This frame's metering, frozen at dispatch start (split frames agree).
+    private _everyTexelActive = false;
     private _generateReactivePass!: ComputePass;
     private _shadingChangePass!: ComputePass;
     private _debugPass!: ComputePass;
@@ -213,7 +245,7 @@ export class UpscalerCore<THandle = GPUTexture> {
     private _initialized = false;
     private _generation = 0;
     private _deviceLost = false;
-    private readonly _passes = new Map<string, ComputePass | EveryTexelExposure>();
+    private readonly _passes = new Map<string, ComputePass>();
     private readonly _requests = new Map<string, Promise<void>>();
     private readonly _failures = new Map<string, unknown>();
     private _effectiveSettings: RuntimeSettings;
@@ -395,28 +427,58 @@ export class UpscalerCore<THandle = GPUTexture> {
         if (this._path === 'spatial') return ['easu', 'spatialRcas', 'blit'];
         const geometry = this._crossFrameReconstruct ? ['reconstruct'] : ['reconstruct', 'depthClip'];
         return this._path === 'guides' ? geometry :
-            [...geometry, 'accumulate', 'exposure', ...this._everyTexelPasses(), 'generateReactive', 'rcas', 'blit'];
+            [...geometry, 'accumulate', 'exposure', 'generateReactive', 'rcas', 'blit'];
     }
 
-    // The every-texel metering compiles wherever it can run, so a configure()
-    // across the size gate never waits on a compile; 'taps' never uses it.
-    private _everyTexelPasses(): string[] {
-        if (this._exposureMetering === 'taps') return [];
-        const limits = this._device.limits;
-        const supported = limits.maxComputeInvocationsPerWorkgroup >= 256 &&
-            limits.maxComputeWorkgroupSizeX >= 256 && limits.maxBindGroups >= 2;
-        if (!supported && this._exposureMetering) {
-            throw new Error('@pmndrs/upscaler: every-texel exposure needs 256-invocation workgroups.');
+    // Whether this configuration meters every texel: the temporal path on a
+    // device with 256-invocation workgroups, not failed before, and the render
+    // within the size gate (or a bench `_exposureMetering` forcing it).
+    private _everyTexelWanted(): boolean {
+        if (this._path !== 'temporal' || this._everyTexelFailed || this._exposureMetering === 'taps') return false;
+        if (!everyTexelSupported(this._device)) return false;
+        return this._exposureMetering !== null || everyTexelGate(this._renderWidth, this._renderHeight);
+    }
+
+    // Compiles (once) and sizes the every-texel metering when wanted. Never
+    // rejects: a failure warns once and leaves the taps for this instance.
+    private _prepareEveryTexel(): Promise<void> {
+        const forced = this._exposureMetering !== null && this._exposureMetering !== 'taps';
+        if (forced && !everyTexelSupported(this._device)) {
+            this._everyTexelFail(new Error('the device lacks 256-invocation workgroups'));
         }
-        return supported ? ['exposureEveryTexel'] : [];
+        if (!this._everyTexelWanted()) return Promise.resolve();
+        const generation = this._generation;
+        if (!this._everyTexelRequest) {
+            const form = this._exposureMetering ?? 'every-texel';
+            this._everyTexelRequest = EveryTexelExposure.create(
+                this._device,
+                form.startsWith('every-quad') ? 'quad' : 'texel',
+                !form.endsWith('-no-deadband'),
+            ).then(created => {
+                if (generation !== this._generation) return null;
+                return this._everyTexelExposure = created;
+            });
+        }
+        // Called every frame: one promise per render size, not per frame.
+        const width = this._renderWidth, height = this._renderHeight;
+        const key = `${width}x${height}`;
+        if (this._everyTexelPreparation?.key === key) return this._everyTexelPreparation.promise;
+        const promise = this._everyTexelRequest
+            .then(metering => metering?.resize(width, height))
+            .catch(error => {
+                if (generation === this._generation) this._everyTexelFail(error);
+            });
+        this._everyTexelPreparation = { key, promise };
+        return promise;
     }
 
-    // This frame's metering form: forced by `_exposureMetering`, else every
-    // texel up to EVERY_TEXEL_MAX_TEXELS and the taps above.
-    private _meterEveryTexel(): boolean {
-        if (!this._everyTexelExposure || this._exposureMetering === 'taps') return false;
-        if (this._exposureMetering) return true;
-        return this._renderWidth * this._renderHeight <= EVERY_TEXEL_MAX_TEXELS;
+    private _everyTexelFail(error: unknown): void {
+        if (this._everyTexelFailed) return;
+        this._everyTexelFailed = true;
+        this._everyTexelExposure?.dispose();
+        this._everyTexelExposure = null;
+        console.warn('@pmndrs/upscaler: every-texel exposure metering is unavailable; ' +
+            'metering with the 1024 taps for this instance.', error);
     }
 
     private _requestPass(name: string, retry: boolean): Promise<void> {
@@ -439,27 +501,14 @@ export class UpscalerCore<THandle = GPUTexture> {
             generateReactive: ['gen-reactive', GENERATE_REACTIVE_SHADER],
             shadingChange: ['shading-change', this._shadingChangeShader ?? SHADING_CHANGE_SHADER],
             debug: ['debug', DEBUG_SHADER],
-            exposureEveryTexel: ['exposure-every-texel', ''],
         };
         const [label, code] = shaders[name];
         const generation = this._generation;
-        const metering = this._exposureMetering ?? 'every-texel';
-        const compiled: Promise<ComputePass | EveryTexelExposure> = name === 'exposureEveryTexel'
-            ? EveryTexelExposure.create(
-                this._device,
-                metering.startsWith('every-quad') ? 'quad' : 'texel',
-                !metering.endsWith('-no-deadband'),
-            )
-            : ComputePass.create(this._device, label, code);
-        const request = compiled.then(pass => {
+        const request = ComputePass.create(this._device, label, code).then(pass => {
             if (generation !== this._generation || this._deviceLost) {
                 throw new Error('@pmndrs/upscaler: preparation cancelled by disposal or device loss.');
             }
             this._passes.set(name, pass);
-            if (pass instanceof EveryTexelExposure) {
-                this._everyTexelExposure = pass;
-                return;
-            }
             switch (name) {
                 case 'blit': this._blitPass = pass; break;
                 case 'easu': this._easuPass = pass; break;
@@ -490,7 +539,12 @@ export class UpscalerCore<THandle = GPUTexture> {
             if (this.settings.detectShadingChanges) names.push('shadingChange');
             if (this.settings.debugView !== DebugView.None) names.push('debug');
         }
-        return Promise.all(names.filter(name => !this._passes.has(name)).map(name => this._requestPass(name, retry))).then(() => {});
+        // The every-texel metering rides along (prepare() waits for it, so a
+        // prepared frame 0 already uses it) but never rejects or gates isReady.
+        return Promise.all([
+            ...names.filter(name => !this._passes.has(name)).map(name => this._requestPass(name, retry)),
+            this._prepareEveryTexel(),
+        ]).then(() => {});
     }
 
     private _startDispatch(): void {
@@ -509,6 +563,11 @@ export class UpscalerCore<THandle = GPUTexture> {
         }
         this._shadingActive = shading;
         this._debugActive = debug;
+        // Switching metering forms mid-history would ease the exposure from one
+        // form's target to the other's; restart instead, as optional passes do.
+        const everyTexel = this._everyTexelWanted() && this._everyTexelExposure?.ready === true;
+        if (everyTexel !== this._everyTexelActive) this._pendingReset = true;
+        this._everyTexelActive = everyTexel;
         this._effectiveSettings = {
             ...this.settings, detectShadingChanges: shading,
             debugView: debug ? this.settings.debugView : DebugView.None,
@@ -971,6 +1030,9 @@ export class UpscalerCore<THandle = GPUTexture> {
         this._reprojectBuffer?.destroy();
         this._everyTexelExposure?.dispose();
         this._everyTexelExposure = null;
+        this._everyTexelRequest = null;
+        this._everyTexelPreparation = null;
+        this._everyTexelActive = false;
         this._timer?.dispose();
         this._timer = null;
         this._initialized = false;
@@ -1246,10 +1308,10 @@ export class UpscalerCore<THandle = GPUTexture> {
             label: 'upscale-exposure',
             timestampWrites: this._timer?.passDescriptor('exposure'),
         });
-        if (this._meterEveryTexel()) {
+        if (this._everyTexelActive && this._everyTexelExposure?.ready) {
             // Every render texel: workgroup partials, then a one-workgroup
             // combine that runs the same epilogue (EveryTexelExposure).
-            this._everyTexelExposure!.encodePass(exposurePass, {
+            this._everyTexelExposure.encodePass(exposurePass, {
                 constants: this._constants.buffer,
                 color: colorGPU.createView(),
                 sampler: this._linearSampler,
@@ -1258,8 +1320,6 @@ export class UpscalerCore<THandle = GPUTexture> {
                 external: externalExposureView,
                 host: hostPreExposureView,
                 reset: resetSignalView,
-                width: this._renderWidth,
-                height: this._renderHeight,
             });
         } else {
             const exposureBindGroup = this._exposurePass.createBindGroup([

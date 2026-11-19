@@ -41,10 +41,13 @@ core.encode(encoder, { color, depth, velocity, deltaTime }, { near, far, perspec
 - **Limits.** `UpscalerCore.isSupported(device)` checks the baseline (13 bindings
   per group, 9 sampled and 3 storage textures per stage, and so on). Every
   WebGPU-conformant device passes it at default limits, so you don't need to
-  request higher ones. Auto-exposure meters every render texel up to 960×540
-  (2^19 texels) with 256-invocation workgroups, the WebGPU default; a device
+  request higher ones. Auto-exposure meters every render texel up to 2^19 texels
+  (≈960×540) with 256-invocation workgroups, the WebGPU default; a device
   limited below that (compatibility mode's 128) meters with the 1024 taps at
-  every size instead.
+  every size instead. That metering compiles asynchronously, only for a render
+  inside that size, and is not part of `isReady`: frames meter with the taps
+  until it is ready (`prepare()` waits for it), and a failure warns once and
+  keeps the taps.
 - **Optional features.** With `timestamp-query` on the device, `gpuTiming: true`
   fills `core.gpuTimings`. Without it the timer silently does nothing. Nothing else
   is feature-gated.

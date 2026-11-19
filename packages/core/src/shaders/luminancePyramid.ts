@@ -218,8 +218,8 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
 );
 
 //* Every-Texel Metering (NEXT-STEPS §17) ======================================
-// Production below 2^19 render texels (UpscalerCore's EVERY_TEXEL_MAX_TEXELS):
-// the hooks of a @pmndrs/downsampler ScalarReduction (internal/EveryTexelExposure).
+// Production up to 2^19 render texels, ≈960×540 (UpscalerCore's everyTexelGate):
+// the hooks of the scalar reduction @pmndrs/downsampler generates (internal/EveryTexelExposure).
 // The taps above wobble with the jitter phase as the render shrinks; the log
 // average of every texel holds still scenes well inside the dead-band.
 
@@ -234,8 +234,8 @@ if (EVERY_TEXEL_HEAD === EXPOSURE_HEAD || !EXPOSURE_PUBLISH.includes(TAP_AVERAGE
 /**
  * Every-texel metering, `@group(1)`: the production pass's declarations
  * (constants, color, previous/next exposure, external and host exposure, the
- * reset signal) for `@pmndrs/downsampler`'s `ScalarReduction`, which owns
- * `@group(0)`. Binding numbers match production, minus the sampler (2).
+ * reset signal) for `@pmndrs/downsampler`'s generated scalar reduction, which
+ * owns `@group(0)`. Binding numbers match production, minus the sampler (2).
  */
 export const EXPOSURE_EVERY_TEXEL_BINDINGS = assembleShader(EXPOSURE_CONSTANTS, WGSL_COLOR, EVERY_TEXEL_HEAD)
     .replaceAll('@group(0)', '@group(1)');

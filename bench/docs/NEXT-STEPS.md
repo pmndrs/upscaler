@@ -1774,17 +1774,42 @@ peak-to-peak reached 0.095 stops: the exposure stepped one f16 ulp every ~27 fra
 the still-scene meter reads as a phase-locked residual 2–22× above the fixed-exposure
 floor (table below, renders of 640×360 and 427×240).
 
-**Change.** FSR 3's shape: the log-average of **every render texel**, on
-`@pmndrs/downsampler` 0.1's `ScalarReduction` (64×64-texel workgroup partials, then one
-256-invocation combine whose `finish` is our epilogue, unchanged: key, clamp, easing,
-dead-band, manual/external overrides, host pre-exposure, the `.r/.g/.b` guide). Unlike
-AMD's pyramid it covers the whole image, not the top-left `2^mips` window. It costs more
-as the render grows, and the taps are steady there, so production is **size-gated**:
-every texel up to 2^19 render texels (960×540 and below), the taps above
-(`EVERY_TEXEL_MAX_TEXELS` in `UpscalerCore.ts`; `internal/EveryTexelExposure.ts`). A
-device without 256-invocation workgroups (compatibility mode) keeps the taps everywhere.
-Both forms compile up front, so a `configure()` across the gate never waits on a compile
-(it resets history, so exposure snaps to the new form's target).
+**Change.** FSR 3's shape: the log-average of **every render texel**, as the WGSL of
+`@pmndrs/downsampler` 0.1.0's scalar reduction (`createScalarKernel`: 64×64-texel
+workgroup partials, then one 256-invocation combine whose `finish` is our epilogue,
+unchanged: key, clamp, easing, dead-band, manual/external overrides, host pre-exposure,
+the `.r/.g/.b` guide). Unlike AMD's pyramid it covers the whole image, not the top-left
+`2^mips` window. It costs more as the render grows, and the taps are steady there, so
+production is **size-gated**: every texel up to 2^19 = 524,288 render texels (≈960×540;
+1024×512 is exactly on it), the taps above (`everyTexelGate` / `EVERY_TEXEL_MAX_TEXELS` in
+`UpscalerCore.ts`; `internal/EveryTexelExposure.ts`). A device without 256-invocation,
+256-wide workgroups (compatibility mode) keeps the taps everywhere.
+
+How it is built (review follow-up, 2026-11-20):
+- *Async only.* The library's `ScalarReduction` class compiles with the synchronous
+  `createComputePipeline`, per instance and outside our pipeline queue, which breaks
+  the zero-synchronous-compute-creation contract (docs/windows-cross-device.md). So
+  `EveryTexelExposure` takes only the pure generator (`createScalarKernel`,
+  `scalarLayoutEntries`), compiles both entry points with `createComputePipelineAsync`
+  through `ComputePass`'s per-device queue and cache (`compileComputePipeline`, explicit
+  layout keyed per form), and dispatches them itself, filling the `DsParams` uniform and
+  workgroup counts the class would. `shaders.test.ts` pins the generated kernel's
+  `DsParams` struct, bindings, workgroup sizes and tile against that dispatch.
+- *Lazy and optional.* It is compiled only once a configuration inside the gate is
+  configured, is never part of `isReady`, and `prepare()`/`init()` wait for it, so a
+  prepared frame 0 already uses it. Until it is ready (a `configure()` into the gate
+  without awaiting), frames meter with the taps; the frame it switches on restarts
+  history (as enabling the shading detector does) so the exposure snaps to the new form
+  instead of easing between the two forms' targets.
+- *Failure falls back for good.* Layouts and the per-size buffers are created inside
+  `validation`, `internal` and `out-of-memory` error scopes and nothing is bound until
+  they pop clean (the #31 `GpuTimer` pattern); a compile rejection or any scope error
+  disposes it, warns once, and leaves the taps for the instance's lifetime.
+- Missing upstream API for doing this through the library itself
+  (pmndrs/downsampler): an async compile on `ScalarReduction` (a `kernelAsync()` or
+  `prepareAsync()` built on `createComputePipelineAsync`), or, for self-dispatch, an
+  exported `scalarWorkgroups` and a pure helper for the `DsParams` words, so callers
+  don't mirror the uniform layout.
 
 Bench identities, all on `baseline`'s pipeline with only the exposure form changed:
 `exposure-taps-v1` (taps at every size: production before this item),
@@ -1870,18 +1895,17 @@ Gated production against `exposure-taps-v1`, 3 reps each: ratio 1 +0.4 µs and 1
 compute sums read 1015 → 1130 µs and 1066 → 1092 µs, inside their own noise (per-rep
 ratios 0.92–1.49).
 
-**Packaging.** `@pmndrs/downsampler` is a regular `dependency` (`^0.1.0`) of the
-published package and of `packages/core`, and **external** in both the JS and the
-`.d.ts` builds: it is engine-free with no dependencies of its own, an app that already
-uses it shares one copy (and its per-device pipeline cache), and its MIT code is not
-re-shipped inside ours. `verify-packed-subpaths` allows `@pmndrs/downsampler/webgpu`
-from every entry (the shared chunk reaches it) and installs it in each consumer. A
-0.1.x patch that changed the generated WGSL would change our exposure without a release
-of ours; downsampler checks its kernels byte-for-byte against golden WGSL, and the
-shader tests here assert the assembled kernel's shape.
+**Packaging.** `@pmndrs/downsampler` is a regular `dependency` of the published package
+and of `packages/core`, **pinned to exactly `0.1.0`**: a patch that changed the generated
+WGSL would otherwise change our exposure without a release of ours, so a bump is a
+deliberate change that re-runs this section's checks. It is **external** in both the JS
+and the `.d.ts` builds: engine-free with no dependencies of its own, its MIT code is not
+re-shipped inside ours, and an app on the same version shares the install (only the
+generator is used, so there is no pipeline cache to share). `verify-packed-subpaths`
+allows `@pmndrs/downsampler/webgpu` from every entry (the shared chunk reaches it) and
+installs it in each consumer.
 
-**Open.** Windows (DXC compile of the scalar kernel; the library builds it with
-synchronous `createComputePipeline`, inside an error scope that preparation awaits)
+**Open.** Windows (DXC compile time of the scalar kernel, now async through our queue)
 and a quiet-machine re-time of ratios 2–3. Folding the metering into a pass that
 already reads every texel (the shading-change detector) would remove its bandwidth at
 any size, at one frame of metering latency.

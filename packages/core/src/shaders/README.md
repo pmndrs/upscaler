@@ -717,8 +717,8 @@ SPD and coordinated resolver variants, not as a standalone toggle in the local b
 #### Luma and exposure analysis (`luminancePyramid.ts`)
 
 - **Current status:** Custom scalar replacement; despite its filename, it is not a pyramid.
-- **Local implementation:** Up to 2^19 render texels (960×540), the log-average of every
-  render texel: a `@pmndrs/downsampler` `ScalarReduction` (64×64-texel workgroup
+- **Local implementation:** Up to 2^19 render texels (≈960×540), the log-average of every
+  render texel: `@pmndrs/downsampler`'s generated scalar reduction (64×64-texel workgroup
   partials, then a one-workgroup combine whose `finish` is the epilogue below;
   `internal/EveryTexelExposure.ts`, `bench/docs/NEXT-STEPS.md` §17). Above that, a fixed
   32×32 grid, 16 taps on each of the one workgroup's 64 lanes, tree-summed in workgroup
