@@ -92,8 +92,10 @@ already prepared path or ordinary resize usually requires no new compilation.
 
 `upscaler.isReady` means the mandatory passes are ready. A newly requested optional
 debug/shading feature can still be preparing while it is true. Rendering continues
-with that feature temporarily inactive; it activates at a frame boundary and resets
-the affected history. Await `prepare()` if the host needs that feature warmed first.
+with that feature temporarily inactive; it activates at a frame boundary without
+restarting history (the shading-change detector spends its first frame seeding its
+own state and reports no change on it). Await `prepare()` if the host needs that
+feature warmed first.
 
 For code that keeps rendering an input fallback, check `isReady` before raw dispatch.
 You can also catch `UpscalerNotReadyError` (or check its code across bundles) in a

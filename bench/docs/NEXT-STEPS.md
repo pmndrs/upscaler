@@ -1803,9 +1803,10 @@ How it is built (review follow-up, 2026-11-20):
 - *Lazy and optional.* It is compiled only once a configuration inside the gate is
   configured, is never part of `isReady`, and `prepare()`/`init()` wait for it, so a
   prepared frame 0 already uses it. Until it is ready (a `configure()` into the gate
-  without awaiting), frames meter with the taps; the frame it switches on restarts
-  history (as enabling the shading detector does) so the exposure snaps to the new form
-  instead of easing between the two forms' targets.
+  without awaiting), frames meter with the taps. ~~The frame it switches on restarts
+  history so the exposure snaps to the new form.~~ Since §18 it switches in without a
+  restart: the stored exposure eases from its value toward the new form's target (inside
+  the dead-band when the two agree), because a restart there was a full-frame pop.
 - *Failure falls back for good.* Layouts and the per-size buffers are created inside
   `validation`, `internal` and `out-of-memory` error scopes and nothing is bound until
   they pop clean (the #31 `GpuTimer` pattern); a compile rejection or any scope error
@@ -1914,6 +1915,75 @@ installs it in each consumer.
 and a quiet-machine re-time of ratios 2–3. Folding the metering into a pass that
 already reads every texel (the shading-change detector) would remove its bandwidth at
 any size, at one frame of metering latency.
+
+## 18. Optional passes switch in without a history restart — DONE (2026-11-20)
+
+**Problem.** `UpscalePass`, `UpscalerNode` and a raw driver start dispatching as soon as
+`isReady` (mandatory passes only). The shading-change detector (on by default) and the
+every-texel exposure metering (renders ≤ 2^19 texels, §17) compile asynchronously
+outside it, and `_startDispatch` set `_pendingReset` on the frame either switched in —
+as it did for a debug view and for re-enabling `detectShadingChanges` at runtime. On a
+slow-compile device (Windows/DXC) that is a one-time full-history restart at an
+unpredictable frame, seconds into a session. Measured on the old core (`old` below, a
+reset on the release frame): Q10 mid-orbit 97.7 % of output pixels change, mean |Δ|
+6.0e-3 conditioned luma (max 0.81), still 2.0e-3 twelve frames later; Q12 still 95.6 %,
+1.2e-3 (max 0.34), the frame's churn 29× its normal.
+
+**Change** (`optionalPassTransition` in `UpscalerCore.ts`). No optional stage restarts
+history when it turns on.
+- *Shading change primes.* Its first active frame (late compile or runtime re-enable)
+  runs with `FLAG_SHADING_PRIME` (4096, declared only in `shadingChange.ts` like
+  moments' bit, so `WGSL_CONSTANTS` and every other shader are unchanged): the pass
+  treats the frame as a reset — every texel compares neutrally (response 0) and every
+  block restarts its memory from the current mean — and writes this frame's luma
+  history. Accumulate doesn't consult it that frame (`FLAG_SHADING_CHANGE` off), so a
+  frozen bench detector without the bit can't age history off stale luma either. The
+  stale-memory zeroing stays (bench overrides rely on it). Split frames freeze the
+  decision at the guides stage like the rest of the effective settings.
+- *Every-texel metering switches forms in place.* Both forms write the same ping-ponged
+  exposure texel through the same epilogue, so the switch frame eases from the stored
+  value toward the new form's target, or holds it inside the 1/16-stop dead-band.
+- *Debug view* only replaces the output pass; it needed no restart at all.
+
+**Measured** (`scripts/measure-late-ready.mjs`, Metal, ratio 2, 1280×720 → render
+640×360, inside the every-texel gate). `late` = pass held until the release frame by the
+bench-only `_holdOptionalPass` hook, `ref` = active from frame 0. Release-frame values;
+churn is the run's own mean |Δ| vs its previous frame.
+
+| case | \|late − ref\| mean / max / share | churn ref → late | \|old − ref\| mean / max / share |
+| --- | --- | --- | --- |
+| Q12 shading, f60 | 0 / 0 / 0 (byte-identical, all 13 frames) | 4.1e-5 → 4.1e-5 | 1.2e-3 / 0.34 / 95.6 % |
+| Q10 shading, f40 (orbit) | 5.9e-6 / 0.08 / 0.6 % (pre-release, unchanged) | 7.0e-4 → 7.0e-4 | 6.0e-3 / 0.81 / 97.7 % |
+| Q12 every-texel, f60 | 2.2e-4 / 0.021 / 96 % (= pre-release taps offset) | 4.1e-5 → 7.1e-5 (pre-release 8.0e-5) | 1.2e-3 / 0.34 / 95.6 % |
+| Q10 every-texel, f40 | 2.3e-4 / 0.27 / 70 % (pre-release 2.1e-4) | 7.0e-4 → 7.3e-4 | 6.0e-3 / 0.81 / 97.7 % |
+| Q10 both, f40 | 2.3e-4 / 0.27 / 70 % | 7.0e-4 → 7.4e-4 | 6.0e-3 / 0.81 / 97.7 % |
+| Q10 re-enable (off 20–39) | 1.1e-7 / 6.5e-3 / <0.1 % | 7.0e-4 → 7.0e-4 | 6.0e-3 / 0.81 / 97.7 % |
+| Q12 re-enable (off 40–59) | 0 (byte-identical) | 4.1e-5 → 4.1e-5 | 1.2e-3 / 0.34 / 95.6 % |
+
+The every-texel rows' difference from `ref` is the taps' own conditioning offset, present
+before the release and unchanged by it. Stored exposure continues: Q10 3.2324 (taps) →
+3.2363 → 3.2402 … easing toward every-texel's 3.3555 (`old` snaps to 3.3887); on Q12 the
+taps' 6.7031 vs every-texel's 6.5703 is 0.029 stops, inside the dead-band, so it holds.
+
+Detection after priming is unchanged: Q9 primed at f50, the f60 light step fires on
+58.70 % of the response in `late`, `ref` and `old` alike (late − ref ≤ 5.5e-9 every
+frame). Q18 re-enabled 3 or 1 frames before its f300 step: 13.71 %, same as `ref`.
+Re-enabled *on* the step frame the detector is blind for that frame (0 %) and the
+variance clip alone handles the step (mean |Δ| vs ref 1.8e-3 at f300 → 1.0e-3 at f303,
+11 % → 9 % of pixels) — before this change the same frame was a full restart. Always-ready
+runs are unchanged: Q1 / Q12 convergence (`measure-convergence.mjs`, ratio 2) 0.1066 /
+0.0152 mean, identical to the base branch to four digits, accumulation age identical.
+
+**What still restarts history** (genuine): the first frame, `resetHistory()`, `reset:
+true`, `resetTexture`, and `configure()` (resize, path, ratio, jitter on/off; the TSL
+node reconfigures when it gains or loses the view offset). Runtime settings
+(`autoExposure`, `maxAccumulation`, `lockThinFeatures`, …) never did.
+
+`scripts/measure-shading-restart.mjs` (§14) read the detector's texture off the three
+`Upscaler`, a field path stale since the core split; it now reads `_core`. Q18 ratio 2,
+full-frame firing (v > 0.1) at the f300 step: mature 62.2 %; re-enabled 1 frame before
+64.2 % (event frame 0 %, primed); 3 frames before 62.5 % (3.5 % / 1.4 % on the two frames
+after the event, the memory's warm-up — `configure`, a genuine reset, reads 3.6 % / 1.4 %).
 
 ## Explicitly not planned (measured against)
 

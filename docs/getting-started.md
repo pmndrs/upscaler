@@ -321,8 +321,11 @@ initialization again when switching to a path whose pipelines are not ready.
 
 `prepare()` explicitly warms the current settings and retries failed compilation.
 A newly enabled debug view or shading-change detector otherwise prepares on first
-dispatch and stays inactive until ready. Activation invalidates affected history
-without changing the input frame's jitter. Settings are frozen across split dispatch.
+dispatch and stays inactive until ready. Activation never restarts history, so a slow
+compile can't pop the image mid-session: the shading-change detector's first active
+frame (after a late compile or re-enabling `detectShadingChanges`) seeds its own
+state and reports no change, so a lighting change on exactly that frame is left to
+the variance clip. Settings are frozen across split dispatch.
 
 TSL nodes prepare automatically, show the input color while pending, and avoid
 jitter until mandatory pipelines are ready. Failed compilation is reported once;
