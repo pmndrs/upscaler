@@ -24,8 +24,11 @@ export interface TemporalGuidesNodeOptions {
     /**
      * Optional GPU reset signal texture node (red texel (0, 0) > 0.5 = reset
      * this frame): the disocclusion guide reads fully disoccluded on such a
-     * frame. Linked to an upscale node, pass the same node to both. Mirrors
-     * the core's `GuideDispatchInputs.resetTexture`.
+     * frame. Linked to an upscale node, pass the same node to both. As on the
+     * upscale node, a producer that reads this frame's depth must run inside
+     * the graph before this node's dispatch, or the reset lands a frame late
+     * (docs/inputs-and-contracts.md). Mirrors the core's
+     * `GuideDispatchInputs.resetTexture`.
      */
     resetTexture?: TextureNodeLike;
 }

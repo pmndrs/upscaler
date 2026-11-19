@@ -119,7 +119,8 @@ pipeline.outputNode = upscale(
   accumulates and denoises; it just doesn't reconstruct sub-pixel detail. See
   [Jitter](inputs-and-contracts.md#jitter).
 - **Optional inputs:** `reactive` (a mask), `reactiveOpaqueColor` (auto-generated mask),
-  `exposureTexture`, `resetTexture` (a GPU reset signal, see
+  `exposureTexture`, `resetTexture` (a GPU reset signal; a cut detector updated
+  outside the graph lands a frame late, see
   [Resets and camera cuts](inputs-and-contracts.md#resets-and-camera-cuts)), and
   `guides` (a linked `temporalGuides()` node; see
   [Temporal guides](temporal-guides.md#tsl-linked-mode)). Host pre-exposure is not
@@ -193,9 +194,10 @@ renderer.setAnimationLoop(() => {
 - `three`'s `velocity` node is a singleton, and its projection override is global. Pass
   `new UpscalePass(renderer, { shareVelocityMatrix: false })` for every pass but one
   when several share a renderer.
-- `setResetTexture(tex)` feeds a GPU reset signal (a cut detector's flag) to every
-  `draw()`. Encode the detector from the `onInputsRendered` callback, which runs after
-  the scene render and before the upscale, while the camera is still jittered.
+- `setResetSignal({ texture, update })` feeds a GPU reset signal (a cut detector's
+  flag) to every temporal `draw()`. `update` runs after the scene render and before
+  the upscale, while the camera is still jittered; `null` clears both halves. See
+  [Resets and camera cuts](inputs-and-contracts.md#resets-and-camera-cuts).
 - `UpscalePass` doesn't expose `exposureTexture` or `preExposureTexture`. Drive
   `pass.upscaler` (the raw API) directly if you need them.
 
