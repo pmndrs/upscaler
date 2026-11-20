@@ -21,6 +21,16 @@ export interface TemporalGuidesNodeOptions {
      * {@link Upscaler.gpuTiming}. Defaults to `false`.
      */
     gpuTiming?: boolean;
+    /**
+     * Optional GPU reset signal texture node (red texel (0, 0) > 0.5 = reset
+     * this frame): the disocclusion guide reads fully disoccluded on such a
+     * frame. Linked to an upscale node, pass the same node to both. As on the
+     * upscale node, a producer that reads this frame's depth must run inside
+     * the graph before this node's dispatch, or the reset lands a frame late
+     * (docs/inputs-and-contracts.md). Mirrors the core's
+     * `GuideDispatchInputs.resetTexture`.
+     */
+    resetTexture?: TextureNodeLike;
 }
 
 /**
@@ -55,6 +65,7 @@ export class TemporalGuidesNode extends Node {
     private readonly _velocity: TextureNodeLike;
     private readonly _camera: CameraLike;
     private readonly _gpuTiming: boolean | undefined;
+    private readonly _resetTexture: TextureNodeLike;
 
     private _upscaler: Upscaler | null = null;
     // Linked = an UpscalerNode adopted our upscaler and owns configuration
@@ -78,6 +89,7 @@ export class TemporalGuidesNode extends Node {
         this._velocity = velocityNode;
         this._camera = camera;
         this._gpuTiming = options.gpuTiming;
+        this._resetTexture = options.resetTexture ?? null;
     }
 
     /** The underlying upscaler — inspect `.guides`, `.gpuTimings`, etc. */
@@ -139,6 +151,7 @@ export class TemporalGuidesNode extends Node {
         const props = builder.getNodeProperties(this);
         props.depthNode = this._depth;
         props.velocityNode = this._velocity;
+        if (this._resetTexture) props.resetNode = this._resetTexture;
 
         // Point the guide texture nodes at real allocations before their own
         // setup infers formats/samplers (r32float products must resolve to the
@@ -182,7 +195,11 @@ export class TemporalGuidesNode extends Node {
         const dt = this._lastTime ? Math.min((now - this._lastTime) / 1000, 0.1) : 1 / 60;
         this._lastTime = now;
 
-        upscaler.dispatchGuides({ depth, velocity, deltaTime: dt }, this._camera as never);
+        const resetTexture = this._resetTexture ? this._texture(this._resetTexture) : null;
+        upscaler.dispatchGuides(
+            { depth, velocity, resetTexture: resetTexture ?? undefined, deltaTime: dt },
+            this._camera as never,
+        );
         this._refreshGuideNodes();
     }
 

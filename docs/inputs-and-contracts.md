@@ -22,6 +22,7 @@ The **upscale ratio** is display / render, per axis.
 | `reactiveOpaqueColor` | render | opaque-only color, same domain as `color` | optional, temporal |
 | `exposureTexture` | any (1×1 typical) | red channel of texel (0, 0), any float format | optional, temporal |
 | `preExposureTexture` | any (1×1 typical) | red channel of texel (0, 0) | optional, temporal (raw `Upscaler` only) |
+| `resetTexture` | any (1×1 typical) | red channel of texel (0, 0) > 0.5 = reset, any float format | optional, temporal, guides |
 | `deltaTime` | n/a | seconds | auto-exposure adaptation |
 
 All inputs are ordinary three textures, typically render-target attachments. The
@@ -223,6 +224,101 @@ you already applied. Omitting it is equivalent to `1`.
 
 Don't pass a host pre-exposure as `exposureTexture`. The upscaler would divide it out
 at output and apply no history correction.
+
+## Resets and camera cuts
+
+A reset drops all history for one frame: the frame is resolved from the current
+input alone, exposure snaps to its target instead of easing, locks and the
+shading-change memory restart, and the `disocclusion` guide reads 1 everywhere.
+Reset on a camera cut, a teleport, or anything else that makes last frame's image
+unrelated to this one. Three ways to ask for one. They do the same work on the GPU;
+what differs is when the verdict exists (see the TSL caveat below):
+
+- `resetHistory()`: the next dispatch is a reset, and the jitter sequence restarts.
+- `reset: true` in that frame's dispatch inputs.
+- `resetTexture`: a GPU-side verdict. The frame is a reset when the red channel of
+  texel (0, 0) is above 0.5. It is read entirely on the GPU, so a cut detector that
+  runs this frame can trigger the reset without a readback stall. Absent, a zero
+  placeholder is bound and the output is byte-identical to not having the input.
+  Available on `dispatch()` / `dispatchGuides()`, `UpscalePass.setResetSignal()`,
+  and the `resetTexture` option of the `upscale()` and `temporalGuides()` nodes. On a
+  split frame, pass it to `dispatchGuides()`: the late stage reuses it. Like every
+  input, the texture needs a GPU allocation before its first dispatch (render to it,
+  or `renderer.initTexture()`), or the dispatch throws.
+
+**The verdict must be written this frame, from this frame's depth.** A detector that
+runs on last frame's inputs resets one frame late: the cut frame blends one ghost
+frame of the old view, and the reset then drops the first clean history instead.
+The raw `Upscaler` and `UpscalePass` give you the point to run it (below). **TSL
+nodes don't:** with `upscaleScene()` or an in-graph `pass()`, depth renders inside
+the render pipeline and the upscale dispatches from the node's `updateBefore` in the
+same pipeline run, so a detector you update outside the graph (before or after
+`renderPipeline.render()`) always sees the previous frame's depth. For a same-frame
+reset in a graph, the detector itself has to be a graph dependency of the upscale
+node that runs after the scene pass: a node whose `updateBefore` encodes it, passed
+as (or chained into) the `resetTexture` node. No such helper ships yet. Without one,
+the node option is only same-frame for a verdict that doesn't depend on this frame's
+render (your own scene logic writing the texture), and a cut detector belongs on the
+raw `Upscaler` or `UpscalePass`.
+
+`resetTexture` can't restart the jitter sequence, which is CPU state. That only
+changes the phase the fresh history starts at, not the result's quality.
+
+### Recipe: automatic cuts with `@pmndrs/motion-vectors`
+
+[`@pmndrs/motion-vectors`](https://github.com/pmndrs/motion-vectors) (0.1.0+) has a
+GPU cut detector: it counts the surface pixels that no motion candidate (zero, camera
+motion from depth, your velocity) reprojects onto a matching previous depth, and
+writes a 1×1 `rgba16float` flag with `.r = 1` on a cut. That flag is a valid
+`resetTexture` as is. The upscaler doesn't depend on the package; any producer that
+writes the same red-channel verdict works.
+
+```ts
+import { MotionFromDepthPass } from '@pmndrs/motion-vectors/three';
+
+const cuts = new MotionFromDepthPass(renderer); // motion from depth + CutDetector
+await cuts.init();
+
+// Per frame, after the scene rendered into `target` and before endFrame(),
+// while the camera still holds the jittered projection it rendered with:
+upscaler.beginFrame(camera);
+renderer.setRenderTarget(target);
+renderer.render(scene, camera);
+renderer.setRenderTarget(null);
+cuts.update({
+    depth: target.depthTexture,
+    camera,
+    projectionMatrix: upscaler.unjitteredProjectionMatrix,
+    motions: [target.textures[1]], // your velocity, so moving objects aren't "cuts"
+});
+upscaler.endFrame(camera);
+upscaler.dispatch({ color, depth, velocity, resetTexture: cuts.cutFlag, deltaTime }, camera);
+```
+
+With `UpscalePass`, hand it the flag and its producer together. It calls `update`
+on the temporal path at the right point (after the render, before `endFrame()`), and
+`setResetSignal(null)` removes both, so a last verdict of 1 can't outlive its
+detector and reset every frame:
+
+```ts
+pass.setResetSignal({
+    texture: cuts.cutFlag,
+    update: (target, camera) =>
+        cuts.update({
+            depth: target.depthTexture,
+            camera,
+            projectionMatrix: pass.upscaler.unjitteredProjectionMatrix,
+            motions: [target.textures[1]],
+        }),
+});
+```
+
+On the bench's Q10 cut (`scripts/measure-reset-signal.mjs`, 1280×720, ratio 2), the
+detector fires on the cut frame only (share 0.268 against its 0.2 threshold; at most
+0.036 on the other 119 frames), and the output is byte-identical to a scripted
+`reset: true` on every frame. Motion from depth plus the detector cost about 52 µs
+a frame at a 1280×720 depth on Apple M-series, as measured in that package (its
+`docs/MOTION.md` §9); at ratio 2 the depth is a quarter of that size.
 
 ## Output
 
