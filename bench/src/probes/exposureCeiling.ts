@@ -1,6 +1,8 @@
 import * as THREE from 'three/webgpu';
 
-import { UpscalePass, type RuntimeSettings } from '@pmndrs/upscaler';
+import { velocity } from 'three/tsl';
+
+import { UpscalePass, Upscaler, type RuntimeSettings } from '@pmndrs/upscaler';
 
 /**
  * Dark-scene HDR highlight probe (issue #49), driven by
@@ -92,6 +94,15 @@ LEVELS.forEach((level, column) => {
 });
 
 const pass = new UpscalePass(renderer);
+// Bench-only metering form (NEXT-STEPS §17), e.g. ?exposureMetering=every-texel:
+// swap in an upscaler built with it before first use, and point the velocity
+// node at its unjittered projection as the pass's own constructor does.
+const metering = new URLSearchParams(location.search).get('exposureMetering');
+if (metering) {
+    const upscaler = new Upscaler({ renderer, _exposureMetering: metering } as ConstructorParameters<typeof Upscaler>[0]);
+    (pass as { upscaler: Upscaler }).upscaler = upscaler;
+    velocity.setProjectionMatrix(upscaler.unjitteredProjectionMatrix);
+}
 pass.configure({ displayWidth: DISPLAY, displayHeight: DISPLAY, ratio: RATIO });
 await pass.init();
 const nativeTarget = new THREE.RenderTarget(DISPLAY, DISPLAY, { type: THREE.FloatType });

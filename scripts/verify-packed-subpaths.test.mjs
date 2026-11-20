@@ -48,6 +48,11 @@ test('an engine reached through a shared chunk fails the entry that imports it',
     ]);
 });
 
+test('the shared runtime dependency is allowed from every entry', () => {
+    const files = { ...CLEAN, 'chunks/shared.js': 'import { ScalarReduction } from "@pmndrs/downsampler/webgpu";\nexport const a = 1;' };
+    expect(checkImportGraph('/pkg', reader(files))).toEqual([]);
+});
+
 test('declarations are checked too', () => {
     const files = { ...CLEAN, 'pixi.d.ts': "import type { Texture } from 'pixi.js';\nimport type { Camera } from 'three';" };
     expect(checkImportGraph('/pkg', reader(files))).toEqual(["dist/pixi.d.ts reaches 'three', outside its engine"]);

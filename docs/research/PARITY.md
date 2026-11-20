@@ -189,9 +189,13 @@ with a ~20-frame decay tail.
 **Upstream:** auto-exposure reads the coarsest mip of the SPD luminance pyramid.
 
 **Ours:** no consumer needs the intermediate mips (the shading-change detector above
-does its own fused reduction), so exposure is a single 8×8-workgroup log-average
-reduction (`luminancePyramid.ts`) — one tiny dispatch instead of a device-wide
-pyramid. Two upstream behaviors are preserved exactly: `DeltaPreExposure` history
+does its own fused reduction), so exposure is a log-average reduction straight to 1×1
+(`luminancePyramid.ts`). Up to 2^19 render texels (≈960×540) it covers every texel, like
+upstream but over the whole image (upstream's pyramid keeps only a top-left
+power-of-two window), as two dispatches of `@pmndrs/downsampler`'s generated scalar reduction; above
+that, 1024 bilinear taps in one 8×8 workgroup. The taps' jitter-phase wobble crossed
+the adaptation dead-band at small render sizes and re-conditioned still scenes
+(`bench/docs/NEXT-STEPS.md` §17). Two upstream behaviors are preserved exactly: `DeltaPreExposure` history
 correction (reprojected history is ratio-corrected across a host pre-exposure change),
 and host-invariant metering — auto-exposure divides the host's pre-exposure out of the
 scene luma before adapting, so it never chases a step the application already metered.

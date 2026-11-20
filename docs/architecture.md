@@ -119,7 +119,11 @@ veloc ─┘  (dilate +      dilatedDepth   │        Lanczos2 upsample        
 2. **Generate reactive** (`generateReactive.ts`): only when `reactiveOpaqueColor` is
    given. It max-merges any incoming mask.
 3. **Exposure** (`luminancePyramid.ts`): a single 1×1 log-average with eye
-   adaptation. It also carries the external and host pre-exposure inputs.
+   adaptation. It also carries the external and host pre-exposure inputs. Up to
+   2^19 render texels (≈960×540) it averages every texel, two dispatches of
+   `@pmndrs/downsampler`'s generated scalar reduction (`internal/EveryTexelExposure.ts`);
+   above that, 1024 bilinear taps in one workgroup, which are steady there and
+   cheaper (`bench/docs/NEXT-STEPS.md` §17).
 4. **Shading change** (`shadingChange.ts`): one fused half-resolution dispatch
    comparing block-mean luma at 4×4 and 8×8 against a one-frame luma history. Per texel
    the previous value is the closest one in the reprojected bilinear footprint's tap

@@ -16,8 +16,8 @@ export const USAGE = `Usage: node scripts/verify-packed-subpaths.mjs [options]
 Builds + packs the library, then checks every public subpath against the packed
 artifact (GPU-free; CI runs it):
   1. each entry's import graph (JS and .d.ts) names only its own engine;
-  2. a fresh consumer per engine, with ONLY that engine installed, typechecks
-     and bundles an import of its subpath.
+  2. a fresh consumer per engine, with ONLY that engine (plus the runtime
+     dependencies) installed, typechecks and bundles an import of its subpath.
   --skip-build   pack the existing dist/ instead of rebuilding it
   --keep-temp    keep the consumers for inspection
   --help, -h     print this message and exit`;
@@ -28,12 +28,16 @@ artifact (GPU-free; CI runs it):
  * engine at all, `/babylon` and `/pixi` without three.
  */
 const THREE = [/^three$/, /^three\/(tsl|webgpu)$/];
+// Runtime dependencies (package.json `dependencies`, engine-free) that the
+// shared chunk may reach from every entry; each consumer installs them.
+export const DEPENDENCIES = ['@pmndrs/downsampler'];
+const SHARED = [/^@pmndrs\/downsampler\/webgpu$/];
 export const SUBPATHS = {
-    index: { specifier: '@pmndrs/upscaler', allowed: THREE },
-    three: { specifier: '@pmndrs/upscaler/three', allowed: THREE },
-    core: { specifier: '@pmndrs/upscaler/core', allowed: [] },
-    babylon: { specifier: '@pmndrs/upscaler/babylon', allowed: [/^@babylonjs\/core\//] },
-    pixi: { specifier: '@pmndrs/upscaler/pixi', allowed: [/^pixi\.js$/] },
+    index: { specifier: '@pmndrs/upscaler', allowed: [...THREE, ...SHARED] },
+    three: { specifier: '@pmndrs/upscaler/three', allowed: [...THREE, ...SHARED] },
+    core: { specifier: '@pmndrs/upscaler/core', allowed: SHARED },
+    babylon: { specifier: '@pmndrs/upscaler/babylon', allowed: [/^@babylonjs\/core\//, ...SHARED] },
+    pixi: { specifier: '@pmndrs/upscaler/pixi', allowed: [/^pixi\.js$/, ...SHARED] },
 };
 
 /**
@@ -198,7 +202,7 @@ function createConsumer(directory, archive, { packages, source }) {
     const packageDirectory = join(modules, '@pmndrs/upscaler');
     mkdirSync(packageDirectory, { recursive: true });
     run('tar', ['-xzf', archive, '-C', packageDirectory, '--strip-components=1']);
-    for (const name of ['@webgpu/types', ...packages]) link(name, modules);
+    for (const name of ['@webgpu/types', ...DEPENDENCIES, ...packages]) link(name, modules);
     writeFileSync(join(directory, 'package.json'), JSON.stringify({ name: 'consumer', private: true, type: 'module' }));
     writeFileSync(join(directory, 'tsconfig.json'), JSON.stringify(CONSUMER_TSCONFIG, null, 4));
     writeFileSync(join(directory, 'main.ts'), source);

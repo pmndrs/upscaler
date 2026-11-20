@@ -10,7 +10,7 @@ import {
 } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { basename, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
@@ -128,6 +128,13 @@ function unpackLibrary(archive, consumerDirectory) {
 
     if (manifest.name !== '@pmndrs/upscaler')
         throw new Error(`Packed artifact has unexpected package name: ${manifest.name}`);
+    // The artifact's own runtime dependencies (@pmndrs/downsampler), resolved
+    // from the repo's install as a registry install would provide them.
+    for (const dependency of Object.keys(manifest.dependencies ?? {})) {
+        const link = join(consumerModules, dependency);
+        mkdirSync(dirname(link), { recursive: true });
+        symlinkSync(join(ROOT, 'node_modules', dependency), link, process.platform === 'win32' ? 'junction' : 'dir');
+    }
     if (!existsSync(packageEntry))
         throw new Error('Packed artifact is missing dist/index.js.');
     if (packageEntry.startsWith(join(ROOT, 'src')))
