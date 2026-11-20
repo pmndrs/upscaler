@@ -37,6 +37,8 @@ const velocity = scenePass.getTextureNode('velocity');
 const sceneNode = upscaleScene(scene, camera, { quality: QualityMode.Performance });
 post.outputNode = sceneNode;
 post.outputNode = upscale(color, depth, velocity, camera);
+// A composite colour (no rtt() wrapper — upscale() renders it at render res).
+post.outputNode = upscale(color.add(vec4(0.1, 0, 0, 0)), depth, velocity, camera);
 post.outputNode = upscaleSpatial(color);
 
 //* Composition with TSL math (example 08's vignette) — no cast.

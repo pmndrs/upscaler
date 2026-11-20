@@ -175,6 +175,8 @@ function configure(): void {
     //* Pin the composite to a reduced-res texture (autoResize off) so the effects
     //* run at render res — then FSR3 upscales that to display size. A plain
     //* convertToTexture(composite) would render it full-res, defeating the point.
+    //* Handing `composite` straight to upscale() works too: it renders a
+    //* composite at the depth pass's resolution itself (see docs/getting-started).
     const colorTex = convertToTexture(composite, rw, rh);
 
     // Dispose the previous node's upscaler before replacing the graph.
