@@ -7,7 +7,7 @@ import type { Texture, WebGPURenderer } from 'three/webgpu';
  * `GPUDevice` three created and the `GPUTexture` handles behind three's
  * `Texture`/`RenderTarget` objects. Three doesn't expose these publicly —
  * the shapes below document exactly which internals we rely on (verified
- * against three r184 and re-verified on r186: `WebGPUBackend.device` and `Backend.get(object)`
+ * against three r184 and re-verified on r186 and r187: `WebGPUBackend.device` and `Backend.get(object)`
  * returning per-object data with a `.texture` GPUTexture).
  *
  * NOTE: These are internals and may shift between three releases. The

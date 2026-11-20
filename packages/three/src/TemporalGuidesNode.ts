@@ -1,5 +1,5 @@
 import { DataTexture, FloatType, NearestFilter, RedFormat, Vector2 } from 'three';
-import { NodeUpdateType, TempNode, type WebGPURenderer } from 'three/webgpu';
+import { Node, NodeUpdateType, type WebGPURenderer } from 'three/webgpu';
 import { nodeObject, passTexture } from 'three/tsl';
 
 import { Upscaler } from './Upscaler';
@@ -48,7 +48,7 @@ export interface TemporalGuidesNodeOptions {
  * re-pointed automatically each frame, so the returned node is stable.
  *
  */
-export class TemporalGuidesNode extends TempNode {
+export class TemporalGuidesNode extends Node {
     readonly isTemporalGuidesNode = true;
 
     private readonly _depth: TextureNodeLike;

@@ -78,12 +78,16 @@ if (backend.isWebGPUBackend !== true || !backend.device) {
     throw new Error('WebGPU backend unavailable');
 }
 if (automated) {
-    const animation = (renderer as unknown as { _animation?: { stop(): void } })._animation;
-    if (!animation || typeof animation.stop !== 'function')
+    const animation = (renderer as unknown as { _animation?: { start(): void; stop(): void } })
+        ._animation;
+    if (!animation || typeof animation.stop !== 'function' || typeof animation.start !== 'function')
         throw new Error('Pinned renderer._animation bridge shape changed.');
     // Automated frames advance the pinned NodeFrame bridge explicitly; leaving
     // three's ambient RAF loop active would inject uncontrolled wall-clock ticks.
+    // r187 restarts the loop from every render()/compute() (three#35278), so
+    // stopping it once no longer sticks: pin start() off too.
     animation.stop();
+    animation.start = () => {};
 }
 const validation: BenchmarkValidationRecord[] = [];
 monitorDeviceLoss(renderer, validation);
