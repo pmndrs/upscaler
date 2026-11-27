@@ -341,9 +341,10 @@ export interface TemporalGuides<TTexture = GPUTexture> {
      * 1 everywhere on a reset frame. The grade is a tolerance ratio
      * (`1 − tolerance / separation` of the best tap), so thresholds between
      * ~0.25 and ~0.75 behave alike; use 0.5 for a yes/no mask. It is computed
-     * from the dilated depth and motion, so it sits up to one texel onto a
-     * moving silhouette's foreground side and misses part of the revealed
-     * strip beside it. The tolerance scales with the render viewport diagonal.
+     * from the dilated depth and motion, so the flagged band is the revealed
+     * strip shifted about one texel away from the occluder: thin (1–2 texel)
+     * reveal strips are mostly missed. The tolerance scales with the render
+     * viewport diagonal.
      * See docs/temporal-guides.md → Reading `disocclusion`.
      */
     readonly disocclusion: TTexture;

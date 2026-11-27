@@ -116,17 +116,22 @@ yes/no mask. Any value above 0 also picks up quantization-level grades on ordina
 surfaces. The upscaler itself uses the grade continuously: it scales history weight
 and accumulation age by `1 − disocclusion`.
 
-**It hugs the foreground side of a silhouette by design.** The test runs on the
-*dilated* depth and motion, which take the nearest depth in each pixel's 3×3 and that
-texel's motion. That is right for upscaling, because thin foreground edges must drag
-their own motion and not smear background history. But a background pixel within one
-texel of a moving silhouette takes the foreground's depth and motion, and so it is
-tested as foreground. The flagged band therefore sits up to one render texel onto the
-occluder's side, and part of the freshly revealed strip beside it reads as stable.
-Behind thin occluders, a large share of that strip is missed. A consumer that needs the
-exact reveal strip, for example a denoiser that must not keep history from another
-surface, should run its own per-tap test on undilated depth. Issue
-[#102](https://github.com/pmndrs/upscaler/issues/102) has the measurements.
+**It is offset from the revealed strip by about one texel, by design.** The test runs
+on the *dilated* depth and motion, which take the nearest depth in each pixel's 3×3 and
+that texel's motion. That is right for upscaling, because thin foreground edges must
+drag their own motion and not smear background history. But a revealed pixel directly
+beside an occluder's current silhouette takes the occluder's depth and motion, so it is
+tested as the occluder and reads as stable. Those dilated pixels also scatter the
+occluder's depth one texel further out, so the first not-revealed pixel past the far
+end of the strip is flagged instead. The flagged band is the revealed strip shifted
+about one render texel away from the occluder. A strip several texels wide (a fast
+occluder) is mostly caught. A one- or two-texel strip, the usual case behind thin or
+slow occluders and across dense geometry under a camera pan, is mostly missed and
+mostly replaced by false flags next to it. A consumer that needs the exact reveal
+strip, for example a denoiser that must not keep history from another surface, should
+run its own per-tap test on undilated depth. Issue
+[#102](https://github.com/pmndrs/upscaler/issues/102) and `bench/docs/NEXT-STEPS.md`
+§24 have the measurements.
 
 **The tolerance scales with the render viewport diagonal.** The tolerance is
 `max(1.37e-5 · |renderSize / 2| · depth, relief)`. `|renderSize / 2|` is half the
