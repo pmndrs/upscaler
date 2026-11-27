@@ -11,6 +11,6 @@
         "./*": "./src/*.ts"
     },
     "dependencies": {
-        "@pmndrs/downsampler": "0.1.0"
+        "@pmndrs/downsampler": "0.1.1"
     }
 }

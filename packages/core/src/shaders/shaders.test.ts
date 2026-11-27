@@ -598,7 +598,7 @@ describe('every-texel exposure metering', () => {
     it('dispatches the generated kernel the way its ScalarReduction would', () => {
         // EveryTexelExposure compiles the kernel itself (async) and fills the
         // uniform and workgroup counts the library's class would: pin the
-        // generated shape those depend on (@pmndrs/downsampler 0.1.0, exact).
+        // generated shape those depend on (@pmndrs/downsampler 0.1.1, exact).
         const wgsl = createScalarKernel(everyTexelKernelOptions('texel'));
         expect(wgsl).toContain(
             'struct DsParams {\n\tsize: vec2u,\n\tfirstLayer: u32,\n\tgroupsX: u32,\n\tpartialCount: u32,\n\tcount: u32,\n}',

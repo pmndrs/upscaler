@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@pmndrs/downsampler':
-        specifier: 0.1.0
-        version: 0.1.0(three@0.187.0)
+        specifier: 0.1.1
+        version: 0.1.1(three@0.187.0)
     devDependencies:
       '@babylonjs/core':
         specifier: 9.31.0
@@ -98,8 +98,8 @@ importers:
   packages/core:
     dependencies:
       '@pmndrs/downsampler':
-        specifier: 0.1.0
-        version: 0.1.0(three@0.187.0)
+        specifier: 0.1.1
+        version: 0.1.1(three@0.187.0)
 
   packages/pixi:
     dependencies:
@@ -375,8 +375,8 @@ packages:
     peerDependencies:
       pixi.js: ^8.23.0
 
-  '@pmndrs/downsampler@0.1.0':
-    resolution: {integrity: sha512-PQf5QLUEy5qRl+2e0gHVfdMcfinqHjG/HJKO4xk+EJrOgeucNzUesGuSHq/eyAy8s22hvf/4oQPV3fntM7WKSw==}
+  '@pmndrs/downsampler@0.1.1':
+    resolution: {integrity: sha512-WIeAeJn4CAfDpZaXo0yXyrrqF8tehcpnzVJUPX//S+V1r5+7FcqxZp+4PQsU3Rphoxg0/3z4x2aBY2T44us1sg==}
     peerDependencies:
       three: '>=0.170.0'
     peerDependenciesMeta:
@@ -1436,7 +1436,7 @@ snapshots:
       meshoptimizer: 1.3.0
       pixi.js: 8.23.0
 
-  '@pmndrs/downsampler@0.1.0(three@0.187.0)':
+  '@pmndrs/downsampler@0.1.1(three@0.187.0)':
     optionalDependencies:
       three: 0.187.0
 
