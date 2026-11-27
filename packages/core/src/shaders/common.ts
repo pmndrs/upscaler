@@ -20,6 +20,11 @@ export const FLAG_RCAS_DENOISE = 512;
 export const FLAG_EXTERNAL_EXPOSURE = 1024;
 // Consumed only by the standalone moments pass (its own constants buffer).
 export const FLAG_MOMENTS_YCOCG = 2048;
+// Consumed only by the shading-change pass (declared in shadingChange.ts, not
+// in WGSL_CONSTANTS, so the shared chunk and every other shader stay as they
+// are): the detector's first frame after turning on seeds its luma history and
+// block memory and reports no change (UpscalerCore's optionalPassTransition).
+export const FLAG_SHADING_PRIME = 4096;
 
 /** Per-frame constants uniform block. Binding 0 in every FSR pass. */
 export const WGSL_CONSTANTS = /* wgsl */ `

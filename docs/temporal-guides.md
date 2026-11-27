@@ -82,7 +82,9 @@ Rules a consumer must follow:
 - **`configure()` reallocates every guide.** Re-read after a resize or path change. The
   textures belong to the upscaler, and `dispose()` releases them.
 - `shadingChange` is only written while `settings.detectShadingChanges` is on, because
-  the detector pass isn't dispatched otherwise.
+  the detector pass isn't dispatched otherwise. Its first frame after turning on (a late
+  pipeline compile, or the setting re-enabled) reads 0 everywhere: the detector spends
+  it seeding its luma history and block memory instead of comparing against stale ones.
 - **The jitter isn't a guide.** Render-resolution products were sampled under this
   frame's jitter; read it from `upscaler.jitter` / `jitterPhase` (or an `upscale()`
   node's `jitterNode`) — see [Jitter](inputs-and-contracts.md#jitter). The `guides`

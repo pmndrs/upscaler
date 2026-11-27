@@ -47,7 +47,8 @@ core.encode(encoder, { color, depth, velocity, deltaTime }, { near, far, perspec
   every size instead. That metering compiles asynchronously, only for a render
   inside that size, and is not part of `isReady`: frames meter with the taps
   until it is ready (`prepare()` waits for it), and a failure warns once and
-  keeps the taps.
+  keeps the taps. Switching forms keeps history: the stored exposure eases
+  toward the new form's target like any other change.
 - **Optional features.** With `timestamp-query` on the device, `gpuTiming: true`
   fills `core.gpuTimings`. Without it the timer silently does nothing. Nothing else
   is feature-gated.

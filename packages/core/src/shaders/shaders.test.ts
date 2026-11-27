@@ -37,6 +37,7 @@ import {
     RECONSTRUCT_CROSS_FRAME_SHADER,
     buildDepthClipVariant,
 } from './reconstructVariants';
+import { FLAG_SHADING_PRIME, WGSL_CONSTANTS } from './common';
 import { SHADING_CHANGE_SHADER } from './shadingChange';
 import { assembleShader } from './wgsl';
 
@@ -114,8 +115,9 @@ const BASELINE_FINGERPRINTS: Record<string, string> = {
     // (fine-line aliasing on a still camera, NEXT-STEPS §14); 2026-10-05: an
     // all-zero (empty) memory restarts instead of pushing (NEXT-STEPS §14).
     // 2026-11-20: reset read from the exposure texel's resolved .a too (the
-    // GPU reset signal), not FLAG_RESET alone.
-    shadingChange: '448ca86f',
+    // GPU reset signal), not FLAG_RESET alone. 2026-11-20: FLAG_SHADING_PRIME
+    // runs a first frame after turning on mid-history as a reset (NEXT-STEPS §18).
+    shadingChange: '9de820c9',
     // Updated 2026-07-21: DeltaPreExposure history correction (NEXT-STEPS item 2);
     // 2026-08-25: alpha resolved alongside color into the locks buffer's .a;
     // 2026-10-02: the alpha clamp takes the color path's still-scene relax;
@@ -670,7 +672,12 @@ describe('reset (issue #102)', () => {
         expect(LUMINANCE_PYRAMID_SHADER).toMatch(resetSignal);
         // ... and every later pass that honours FLAG_RESET also reads it.
         expect(ACCUMULATE_SHADER).toContain('if (hasFlag(FLAG_RESET) || frameInfo.a > 0.5 || offscreen)');
-        expect(SHADING_CHANGE_SHADER).toContain('frameReset = hasFlag(FLAG_RESET) || frameInfo.a > 0.5;');
+        expect(SHADING_CHANGE_SHADER).toContain(
+            'frameReset = hasFlag(FLAG_RESET) || hasFlag(FLAG_SHADING_PRIME) || frameInfo.a > 0.5;',
+        );
+        // The prime bit lives only in this shader; its literal must match the writer's.
+        expect(SHADING_CHANGE_SHADER).toContain(`const FLAG_SHADING_PRIME : u32 = ${FLAG_SHADING_PRIME}u;`);
+        expect(WGSL_CONSTANTS).not.toContain('FLAG_SHADING_PRIME');
         expect(SHADING_CHANGE_SHADER).toContain('if (frameReset) { return neutral; }');
         expect(SHADING_CHANGE_SHADER).toContain('var moving = select(0.0, 1.0, frameReset);');
         // No pass may honour the CPU flag alone (it would ignore a GPU cut).
