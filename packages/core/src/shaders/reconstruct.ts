@@ -1,43 +1,10 @@
 import { WGSL_CONSTANTS, WGSL_DEPTH } from './common';
 import { assembleShader } from './wgsl';
 
-/**
- * Reconstruct pass — FSR2/3's "reconstruct & dilate" stage: dilation plus the
- * reconstructed-previous-depth scatter. Its partner {@link DEPTH_CLIP_SHADER}
- * consumes the scatter after a pass boundary (the scatter must complete for
- * every pixel before any pixel reads it).
- *
- * Per render-resolution pixel:
- * 1. Dilate — find the nearest (closest-to-camera) depth in the 3×3
- *    neighborhood and take that texel's motion vector, so thin foreground
- *    silhouettes drag their motion and don't smear background history.
- * 2. Scatter — write this frame's dilated linear depth into the bilinear
- *    footprint of the pixel's previous-frame position, keeping the nearest
- *    (atomicMin on the u32 bits: positive floats order like their bits).
- *
- * The depth clip then compares each pixel against the nearest CURRENT-frame
- * depth that reprojects onto its previous position. Both sides are
- * same-frame depths, so camera and object motion along the view axis cancel —
- * the cross-frame form this replaced compared depths measured from two camera
- * positions and disoccluded every surface a camera moved away from (issue
- * #67: a frontal wall lost 97% of its history to a 0.3-unit dolly-out).
- *
- * The scatter buffer is a plain storage buffer (WebGPU has no float texture
- * atomics) and is ping-ponged: the depth clip empties each pixel's slot of
- * the buffer the next frame scatters into, so there is no clear dispatch.
- *
- * Bindings:
- * - 1: scene depth (depth texture, render size)
- * - 2: velocity (rgba16float, NDC delta in .xy, render size)
- * - 3: dilated view depth output (r32float storage)
- * - 4: dilated motion output (rgba16float storage, UV delta in .xy; .z
- *      carries the 3×3 depth relief to the depth clip — a reserved channel)
- * - 5: reconstructed previous depth (storage buffer, u32 = f32 bits)
- */
-export const RECONSTRUCT_SHADER = assembleShader(
-    WGSL_CONSTANTS,
-    WGSL_DEPTH,
-    /* wgsl */ `
+// The reconstruct pass body, shared by both depth modes: production binds
+// it as is; the linear-depth variant (RECONSTRUCT_LINEAR_SHADER) is generated
+// from this text, so there is one source of truth.
+const RECONSTRUCT_BODY = /* wgsl */ `
 @group(0) @binding(1) var sceneDepth : texture_depth_2d;
 @group(0) @binding(2) var sceneVelocity : texture_2d<f32>;
 @group(0) @binding(3) var dilatedDepth : texture_storage_2d<r32float, write>;
@@ -110,7 +77,110 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
         atomicMin(&reconstructedDepth[u32(p.y * width + p.x)], encoded);
     }
 }
-`,
+`;
+
+/**
+ * Reconstruct pass — FSR2/3's "reconstruct & dilate" stage: dilation plus the
+ * reconstructed-previous-depth scatter. Its partner {@link DEPTH_CLIP_SHADER}
+ * consumes the scatter after a pass boundary (the scatter must complete for
+ * every pixel before any pixel reads it).
+ *
+ * Per render-resolution pixel:
+ * 1. Dilate — find the nearest (closest-to-camera) depth in the 3×3
+ *    neighborhood and take that texel's motion vector, so thin foreground
+ *    silhouettes drag their motion and don't smear background history.
+ * 2. Scatter — write this frame's dilated linear depth into the bilinear
+ *    footprint of the pixel's previous-frame position, keeping the nearest
+ *    (atomicMin on the u32 bits: positive floats order like their bits).
+ *
+ * The depth clip then compares each pixel against the nearest CURRENT-frame
+ * depth that reprojects onto its previous position. Both sides are
+ * same-frame depths, so camera and object motion along the view axis cancel —
+ * the cross-frame form this replaced compared depths measured from two camera
+ * positions and disoccluded every surface a camera moved away from (issue
+ * #67: a frontal wall lost 97% of its history to a 0.3-unit dolly-out).
+ *
+ * The scatter buffer is a plain storage buffer (WebGPU has no float texture
+ * atomics) and is ping-ponged: the depth clip empties each pixel's slot of
+ * the buffer the next frame scatters into, so there is no clear dispatch.
+ *
+ * Bindings:
+ * - 1: scene depth (depth texture, render size)
+ * - 2: velocity (rgba16float, NDC delta in .xy, render size)
+ * - 3: dilated view depth output (r32float storage)
+ * - 4: dilated motion output (rgba16float storage, UV delta in .xy; .z
+ *      carries the 3×3 depth relief to the depth clip — a reserved channel)
+ * - 5: reconstructed previous depth (storage buffer, u32 = f32 bits)
+ */
+export const RECONSTRUCT_SHADER = assembleShader(
+    WGSL_CONSTANTS,
+    WGSL_DEPTH,
+    RECONSTRUCT_BODY,
+);
+
+/**
+ * Replaces exactly `count` occurrences of `search`, or throws: a production
+ * edit that moves a substituted line must fail loudly at module load, never
+ * silently ship a variant that still reads hardware depth.
+ */
+function substitute(source: string, search: string, replacement: string, count = 1): string {
+    const found = source.split(search).length - 1;
+    if (found !== count) {
+        throw new Error(
+            `@pmndrs/upscaler: linear-depth reconstruct expected ${count} × ${JSON.stringify(search)}, found ${found}.`,
+        );
+    }
+    return source.split(search).join(replacement);
+}
+
+// Linear view-depth input (`depthMode: 'linear'`). `.r` is the view-space
+// distance in either sign convention (positive distance, or three/denoiser's
+// negative view Z), so the sign bit is dropped. Zero, inf and NaN read as the
+// far plane — the value a cleared hardware depth linearizes to. Bit tests,
+// not float compares: WGSL implementations may assume finite floats and fold
+// a NaN/inf compare away.
+const WGSL_LINEAR_DEPTH_INPUT = /* wgsl */ `
+fn loadViewDepth(p : vec2i) -> f32 {
+    let bits = bitcast<u32>(textureLoad(sceneDepth, p, 0).r) & 0x7fffffffu;
+    return select(C.depthNearFar.y, bitcast<f32>(bits), (bits != 0u) && (bits < 0x7f800000u));
+}
+`;
+
+function createLinearReconstructBody(): string {
+    let body = substitute(
+        RECONSTRUCT_BODY,
+        '@group(0) @binding(1) var sceneDepth : texture_depth_2d;',
+        '@group(0) @binding(1) var sceneDepth : texture_2d<f32>;',
+    );
+    body = substitute(body, 'textureLoad(sceneDepth, center, 0)', 'loadViewDepth(center)');
+    body = substitute(body, 'textureLoad(sceneDepth, p, 0)', 'loadViewDepth(p)');
+    body = substitute(
+        body,
+        `    // With a reversed depth buffer larger values are nearer; otherwise smaller.
+    let reversed = hasFlag(FLAG_REVERSED_DEPTH);`,
+        `    // Linear view distance: smaller is always nearer (FLAG_REVERSED_DEPTH
+    // describes hardware depth and is ignored here).
+    let reversed = false;`,
+    );
+    // Already view units: dilation and relief take the distances directly.
+    body = substitute(body, 'linearizeDepth(bestDepth)', 'bestDepth');
+    body = substitute(body, 'linearizeDepth(farthestDepth)', 'farthestDepth');
+    return body;
+}
+
+/**
+ * {@link RECONSTRUCT_SHADER} for a linear view-depth input
+ * (`UpscalerConfig.depthMode: 'linear'`), generated from the production body.
+ * Binding 1 is a float color texture (`texture_2d<f32>`, read with
+ * `textureLoad` only, so unfilterable `r32float` binds) whose `.r` is the
+ * view-space distance; `linearizeDepth` and the reversed/perspective flags
+ * are bypassed. Every other binding and everything downstream is unchanged:
+ * the dilated depth was already linear.
+ */
+export const RECONSTRUCT_LINEAR_SHADER = assembleShader(
+    WGSL_CONSTANTS,
+    WGSL_LINEAR_DEPTH_INPUT,
+    createLinearReconstructBody(),
 );
 
 /**

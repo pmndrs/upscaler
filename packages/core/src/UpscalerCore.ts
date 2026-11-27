@@ -25,12 +25,13 @@ import { EASU_SHADER } from './shaders/easu';
 import { GENERATE_REACTIVE_SHADER } from './shaders/generateReactive';
 import { LUMINANCE_PYRAMID_SHADER } from './shaders/luminancePyramid';
 import { RCAS_SHADER } from './shaders/rcas';
-import { DEPTH_CLIP_SHADER, RECONSTRUCT_SHADER } from './shaders/reconstruct';
+import { DEPTH_CLIP_SHADER, RECONSTRUCT_LINEAR_SHADER, RECONSTRUCT_SHADER } from './shaders/reconstruct';
 import { SHADING_CHANGE_SHADER } from './shaders/shadingChange';
 import {
     DebugView,
     QualityMode,
     type UpscalerConfig,
+    type DepthMode,
     type DispatchInputs,
     type FrameCamera,
     type GuideDispatchInputs,
@@ -49,6 +50,38 @@ function isPerspective(camera: FrameCamera): boolean {
     if (camera.perspective !== undefined) return camera.perspective;
     if (camera.projection) return camera.projection[15] === 0;
     throw new Error('@pmndrs/upscaler: FrameCamera needs `perspective` or a `projection` matrix.');
+}
+
+// Formats a linear-depth input may have: float formats bind to the variant's
+// `texture_2d<f32>` (read with textureLoad only, so unfilterable r32float is
+// fine). Normalized formats would bind too but can't hold a view distance.
+const LINEAR_DEPTH_FORMATS: ReadonlySet<string> = new Set([
+    'r16float', 'r32float', 'rg16float', 'rg32float', 'rgba16float', 'rgba32float',
+]);
+
+/**
+ * Why a depth input can't bind under a depth mode, or null when it can. A
+ * mismatch would otherwise surface as a WebGPU bind-group validation error
+ * that invalidates the whole upscale command buffer (black output).
+ * @param format - The depth input's texture format
+ * @param mode - The configured {@link DepthMode}
+ * @returns An error message, or null
+ * @internal
+ */
+export function depthInputError(format: GPUTextureFormat, mode: DepthMode): string | null {
+    const hardware = format.startsWith('depth');
+    if (mode === 'linear') {
+        if (LINEAR_DEPTH_FORMATS.has(format)) return null;
+        return `@pmndrs/upscaler: depthMode 'linear' expects a float color texture holding view distance ` +
+            `in .r (r32float recommended), got '${format}'` +
+            (hardware ? " — a hardware depth texture needs depthMode 'hardware'." : '.');
+    }
+    // Hardware mode only names the likely mistake — a single-channel float
+    // (linear depth with the mode left at its default); anything else keeps
+    // the pre-depthMode behaviour exactly.
+    if (format !== 'r32float' && format !== 'r16float') return null;
+    return `@pmndrs/upscaler: the depth input is '${format}', not a depth texture — ` +
+        "linear view depth needs depthMode: 'linear' (device depth in a float texture is not supported).";
 }
 
 /** Construction options for {@link UpscalerCore}. */
@@ -253,6 +286,7 @@ export class UpscalerCore<THandle = GPUTexture> {
     private _rcasPass!: ComputePass;
     private _spatialRcasPass!: ComputePass;
     private _reconstructPass!: ComputePass;
+    private _reconstructLinearPass!: ComputePass;
     private _depthClipPass!: ComputePass;
     // Bench-only `camera` identity state (unused in production).
     private _reprojectBuffer: GPUBuffer | null = null;
@@ -274,6 +308,7 @@ export class UpscalerCore<THandle = GPUTexture> {
     private _debugPass!: ComputePass;
 
     private _path: UpscalePath = 'temporal';
+    private _depthMode: DepthMode = 'hardware';
     private _displayWidth = 0;
     private _displayHeight = 0;
     private _renderWidth = 0;
@@ -489,7 +524,8 @@ export class UpscalerCore<THandle = GPUTexture> {
     private _mandatoryPasses(): string[] {
         if (this._path === 'bilinear') return ['blit'];
         if (this._path === 'spatial') return ['easu', 'spatialRcas', 'blit'];
-        const geometry = this._crossFrameReconstruct ? ['reconstruct'] : ['reconstruct', 'depthClip'];
+        const reconstruct = this._depthMode === 'linear' ? 'reconstructLinear' : 'reconstruct';
+        const geometry = this._crossFrameReconstruct ? [reconstruct] : [reconstruct, 'depthClip'];
         return this._path === 'guides' ? geometry :
             [...geometry, 'accumulate', 'exposure', 'generateReactive', 'rcas', 'blit'];
     }
@@ -559,6 +595,7 @@ export class UpscalerCore<THandle = GPUTexture> {
             rcas: ['rcas', this._rcasShader],
             spatialRcas: ['rcas', this._spatialRcasShader ?? this._rcasShader],
             reconstruct: ['reconstruct', this._crossFrameReconstruct?.shader ?? RECONSTRUCT_SHADER],
+            reconstructLinear: ['reconstruct-linear', RECONSTRUCT_LINEAR_SHADER],
             depthClip: ['depth-clip', this._depthClipShader ?? DEPTH_CLIP_SHADER],
             accumulate: ['accumulate', this._accumulateShader ?? ACCUMULATE_SHADER],
             exposure: ['exposure', this._exposureShader ?? LUMINANCE_PYRAMID_SHADER],
@@ -579,6 +616,7 @@ export class UpscalerCore<THandle = GPUTexture> {
                 case 'rcas': this._rcasPass = pass; break;
                 case 'spatialRcas': this._spatialRcasPass = pass; break;
                 case 'reconstruct': this._reconstructPass = pass; break;
+                case 'reconstructLinear': this._reconstructLinearPass = pass; break;
                 case 'depthClip': this._depthClipPass = pass; break;
                 case 'accumulate': this._accumulatePass = pass; break;
                 case 'exposure': this._exposurePass = pass; break;
@@ -653,6 +691,14 @@ export class UpscalerCore<THandle = GPUTexture> {
         // land in gpuTimings after it.
         this._timer?.reset();
         this._path = config.path ?? 'temporal';
+        const depthMode = config.depthMode ?? 'hardware';
+        if (depthMode !== 'hardware' && depthMode !== 'linear') {
+            throw new Error(`@pmndrs/upscaler: unknown depthMode '${String(depthMode)}' (expected 'hardware' or 'linear').`);
+        }
+        if (depthMode === 'linear' && this._crossFrameReconstruct) {
+            throw new Error("@pmndrs/upscaler: the bench cross-frame reconstruct identities read hardware depth only.");
+        }
+        this._depthMode = depthMode;
         this._jitterEnabled = config.jitter ?? true;
         this._displayWidth = Math.max(1, Math.floor(config.displayWidth));
         this._displayHeight = Math.max(1, Math.floor(config.displayHeight));
@@ -1210,8 +1256,11 @@ export class UpscalerCore<THandle = GPUTexture> {
         const velocityGPU = inputs.velocity;
         this._checkMsaa(depthGPU, 'depth');
         this._checkMsaa(velocityGPU, 'velocity');
+        const depthError = depthInputError(depthGPU.format, this._depthMode);
+        if (depthError) throw new Error(depthError);
         // Stencil-less depth formats bind directly; combined formats need a
-        // depth-only view for texture_depth_2d.
+        // depth-only view for texture_depth_2d. (A linear-depth input is a
+        // float color format, never a stencil one.)
         const depthView = depthGPU.createView(
             depthGPU.format.includes('stencil') ? { aspect: 'depth-only' } : undefined,
         );
@@ -1239,7 +1288,9 @@ export class UpscalerCore<THandle = GPUTexture> {
 
         //* Reconstruct — dilate (nearest-depth motion/depth over 3×3) and
         //* scatter this frame's depth to each pixel's previous position.
-        const reconstructBindGroup = this._reconstructPass.createBindGroup([
+        // Same bindings in both depth modes; only binding 1's type differs.
+        const reconstruct = this._depthMode === 'linear' ? this._reconstructLinearPass : this._reconstructPass;
+        const reconstructBindGroup = reconstruct.createBindGroup([
             { buffer: this._constantsEarly.buffer },
             depthView,
             velocityGPU.createView(),
@@ -1251,7 +1302,7 @@ export class UpscalerCore<THandle = GPUTexture> {
             label: 'upscale-reconstruct',
             timestampWrites: this._timer?.passDescriptor('reconstruct'),
         });
-        this._reconstructPass.dispatch(reconstructPass, reconstructBindGroup, w, h);
+        reconstruct.dispatch(reconstructPass, reconstructBindGroup, w, h);
         reconstructPass.end();
 
         //* Depth Clip — disocclusion against the reconstructed previous depth.

@@ -13,6 +13,7 @@ export {
     type JitterOffset,
     type RuntimeSettings,
     type TemporalGuides,
+    type DepthMode,
     type UpscalePath,
 } from './types';
 export { halton, generateJitterSequence } from '@pmndrs/upscaler-core/math/halton';

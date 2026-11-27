@@ -39,6 +39,23 @@ export enum QualityMode {
 export type UpscalePath = 'bilinear' | 'spatial' | 'temporal' | 'guides';
 
 /**
+ * What the temporal path's `depth` input holds (docs/engine-contract.md →
+ * Depth convention).
+ *
+ * - `hardware` (default) — a WebGPU depth texture (`depth32float`,
+ *   `depth24plus`, `…-stencil8`), linearized with the {@link FrameCamera}'s
+ *   `near` / `far` / `perspective` / `reversedDepth`.
+ * - `linear` — a float color texture whose `.r` is the **view-space
+ *   distance**, in either sign convention: positive distance, or the negative
+ *   view Z three's `viewZ` / @pmndrs/denoiser carry (the sign is dropped).
+ *   `r32float` recommended (`r16float` loses depth precision fast); any
+ *   `float` format binds. Zero, inf and NaN read as the camera's `far`, so
+ *   write the background as `far` or leave it 0. `perspective` and
+ *   `reversedDepth` are ignored; `near` / `far` must still be finite.
+ */
+export type DepthMode = 'hardware' | 'linear';
+
+/**
  * A sub-pixel jitter offset in render pixels, each axis in `[-0.5, 0.5]`.
  * x points right and y points down (texel coordinates, top-left origin): the
  * sample for render texel `(i, j)` sits at `(i + 0.5 + x, j + 0.5 + y)` in the
@@ -100,6 +117,13 @@ export interface UpscalerConfig {
     renderHeight?: number;
     /** Which upscaling pipeline to run. Defaults to `'temporal'`. */
     path?: UpscalePath;
+    /**
+     * What the `depth` input holds — hardware depth (default) or linear view
+     * depth. See {@link DepthMode}. Selects the reconstruct pipeline, so it is
+     * configure-time: changing it means calling `configure()` again. Only the
+     * `temporal` and `guides` paths read depth.
+     */
+    depthMode?: DepthMode;
     /**
      * Apply the sub-pixel camera jitter each frame (temporal path only).
      * Defaults to `true`.

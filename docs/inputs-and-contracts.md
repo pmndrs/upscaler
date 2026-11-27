@@ -16,7 +16,7 @@ The **upscale ratio** is display / render, per axis.
 | Input | Resolution | Format | Required for |
 | --- | --- | --- | --- |
 | `color` | render | linear/HDR, filterable float (`HalfFloatType` → `rgba16float`) | every path |
-| `depth` | render | a real depth texture (`DepthTexture`), single-sample | temporal, guides |
+| `depth` | render | a real depth texture (`DepthTexture`), single-sample; or linear view depth (`r32float`) with `depthMode: 'linear'` | temporal, guides |
 | `velocity` | render | three's `velocity` node output: jitter-free NDC delta | temporal, guides |
 | `reactive` | render | red channel in `[0, 1]` | optional, temporal |
 | `reactiveOpaqueColor` | render | opaque-only color, same domain as `color` | optional, temporal |
@@ -84,10 +84,22 @@ must be exactly what that node produces, rendered into a named MRT attachment:
 ## Depth
 
 - **A real depth texture**, bound as `texture_depth_2d`: the render target's
-  `depthTexture`, or `pass.getTextureNode('depth')`. A color texture holding linear
-  depth won't bind. Combined depth-stencil formats work, because the upscaler binds a
-  depth-only view. `FloatType` depth (`depth32float`, as `UpscalePass` allocates)
-  gives the most precision for disocclusion.
+  `depthTexture`, or `pass.getTextureNode('depth')`. Combined depth-stencil formats
+  work, because the upscaler binds a depth-only view. `FloatType` depth
+  (`depth32float`, as `UpscalePass` allocates) gives the most precision for
+  disocclusion.
+- **Or linear view depth**, with `depthMode: 'linear'` in the `Upscaler`'s
+  `configure()` config (or the `upscale()` / `temporalGuides()` options): a float
+  texture whose `.r` is the view-space distance, `r32float` recommended. Either sign
+  works, so a `viewZ` MRT output (negative in three's view space) passes as is.
+  Background texels must hold `far` or 0 (inf and NaN also read as `far`). The
+  camera's `near`/`far` are still required; its projection type and the renderer's
+  reversed-depth setting are ignored. Use it when the depth you have is already
+  linear (a deferred G-buffer, a path tracer); re-encoding it as hardware depth costs
+  a pass and precision. `UpscalePass` and `upscaleScene()` render their own hardware
+  depth and keep the default. Linked `upscale(..., { guides })`: the upscale node
+  configures the shared upscaler, so give both nodes the same `depthMode`. Contract:
+  [engine-contract.md](engine-contract.md#camera-framecamera).
 - **Projection-aware.** Depth is linearized from the camera's `near`/`far`, using
   `isPerspectiveCamera` to tell perspective from orthographic, and
   `renderer.reversedDepthBuffer` to choose standard or reversed depth. Pass the camera

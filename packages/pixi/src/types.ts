@@ -11,6 +11,7 @@ export {
     type FrameCamera,
     type JitterOffset,
     type RuntimeSettings,
+    type DepthMode,
     type UpscalePath,
     type UpscalerConfig,
 } from '@pmndrs/upscaler-core/types';
