@@ -123,3 +123,27 @@ describe('Q20 emitter-pan-overshoot', () => {
         expect(q20.frame(200).cameraTarget[0]).toBe(at(200));
     });
 });
+
+describe('Q30 dense-geometry-disocclusion', () => {
+    const q30 = getBenchmarkScenario('Q30');
+    const position = (frame: number) => q30.frame(frame).cameraPosition;
+
+    it('holds still in every hold segment and moves in the pan and the orbit', () => {
+        expect(q30.frame(0).scene).toBe('dense');
+        expect(position(59)).toEqual(position(0));
+        expect(position(239)).toEqual(position(180));
+        expect(position(419)).toEqual(position(360));
+        expect(position(61)[0]).toBeGreaterThan(position(60)[0]);
+        expect(position(241)).not.toEqual(position(240));
+    });
+
+    it('orbits about the panned target at a fixed distance', () => {
+        const distance = (frame: number) => {
+            const [px, , pz] = position(frame);
+            const [tx, , tz] = q30.frame(frame).cameraTarget;
+            return Math.hypot(px - tx, pz - tz);
+        };
+        expect(distance(300)).toBeCloseTo(distance(200), 9);
+        expect(q30.frame(300).cameraTarget).toEqual(q30.frame(200).cameraTarget);
+    });
+});

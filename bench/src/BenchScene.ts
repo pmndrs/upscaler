@@ -1,6 +1,7 @@
 import * as THREE from 'three/webgpu';
 
 import { CHART_DISTANCE, EMITTER_DISTANCE } from './benchmark/scenarios';
+import { createDenseScene } from './denseScene';
 
 /**
  * The bench scene — deliberately full of upscaler torture tests:
@@ -23,6 +24,8 @@ export interface BenchScene {
     hotSpotScene: THREE.Scene;
     /** Q18: line-pair bars across the render Nyquist, a Siemens star and flat swatches. */
     chartScene: THREE.Scene;
+    /** Q30: dense depth-layered thin geometry under a pan and an orbit (issue #102). */
+    denseScene: THREE.Scene;
     reactiveScene: THREE.Scene;
     /**
      * Q13 transparents the auto-generator must see: hidden while the
@@ -845,6 +848,7 @@ export function createBenchScene(): BenchScene {
         emitterScene,
         hotSpotScene,
         chartScene,
+        denseScene: createDenseScene(),
         reactiveScene,
         autoReactiveObjects: [overlapPanel, diffOnlyPanel],
         update,

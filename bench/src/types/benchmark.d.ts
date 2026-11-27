@@ -59,7 +59,8 @@ declare type BenchmarkScenarioId =
     | 'Q17'
     | 'Q18'
     | 'Q19'
-    | 'Q20';
+    | 'Q20'
+    | 'Q30';
 declare type BenchmarkDebugView =
     | 'final'
     | 'motion-vectors'
@@ -251,7 +252,7 @@ declare interface BenchmarkFrameState {
     /** Q19: show the frontal backdrop wall behind the props. */
     backdrop?: boolean;
     /** Scene rendered as the upscaler input; defaults to the main torture scene. */
-    scene?: 'main' | 'cornell' | 'sparse-wires' | 'emitters' | 'hot-spots' | 'chart';
+    scene?: 'main' | 'cornell' | 'sparse-wires' | 'emitters' | 'hot-spots' | 'chart' | 'dense';
     /**
      * Q13: show the merged-reactive panels, render the opaque-only color for
      * the auto-generator, and render the explicit coverage alongside it.
