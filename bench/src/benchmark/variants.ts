@@ -5,6 +5,8 @@ import {
     createRcasExperimentResolver,
     createRcasNumericParityResolver,
     createDepthClipVariantResolver,
+    createExposureMeteringResolver,
+    createExposureSerialResolver,
     createReconstructExperimentResolver,
     createShadingMemoryResolver,
     createSourceBundleResolver,
@@ -50,6 +52,13 @@ const RESOLVER_FACTORIES = {
     'depth-clip-mean-vote-v1': createDepthClipVariantResolver,
     'depth-clip-upstream-tolerance-v1': createDepthClipVariantResolver,
     'depth-clip-upstream-v1': createDepthClipVariantResolver,
+    'exposure-serial-v1': createExposureSerialResolver,
+    'exposure-taps-v1': createExposureMeteringResolver,
+    'exposure-every-texel-v1': createExposureMeteringResolver,
+    'exposure-every-texel-no-deadband-v1': createExposureMeteringResolver,
+    'exposure-taps-no-deadband-v1': createExposureMeteringResolver,
+    'exposure-every-quad-v1': createExposureMeteringResolver,
+    'exposure-every-quad-no-deadband-v1': createExposureMeteringResolver,
     'source-filter-bundle-v1': createSourceBundleResolver,
     'source-structural-bundle-v1': createSourceBundleResolver,
     'source-spd-resolver-bundle-v1': createSourceBundleResolver,
@@ -98,6 +107,8 @@ function metadata(id: BenchmarkVariantId): BenchmarkVariantMetadata {
     const rcasDenoise = id === 'rcas-fsr315-numeric';
     const reconstructExperiment = id.startsWith('reconstruct-');
     const depthClipVariant = id.startsWith('depth-clip-');
+    const exposureSerial = id === 'exposure-serial-v1';
+    const exposureMetering = id.startsWith('exposure-') && !exposureSerial;
     const shadingMemory = id.startsWith('shading-memory-') || id === 'shading-frame-pair-v1';
     const sourceResourceGraph = spdResolver
         ? [
@@ -172,6 +183,10 @@ function metadata(id: BenchmarkVariantId): BenchmarkVariantMetadata {
                     ? 'Cross-frame depth clip, camera-motion compensated (#67)'
                   : depthClipVariant
                     ? `Depth clip variant (#79): ${id.slice('depth-clip-'.length)}`
+                  : exposureSerial
+                    ? 'Single-invocation exposure metering (pre-parallel production)'
+                  : exposureMetering
+                    ? `Exposure metering (§17): ${id.slice('exposure-'.length, -'-v1'.length)}`
                   : id === 'shading-frame-pair-v1'
                     ? 'Shading change, frame pair only (pre block memory)'
                   : shadingMemory
@@ -210,6 +225,8 @@ function metadata(id: BenchmarkVariantId): BenchmarkVariantMetadata {
                 shadingMemory ||
                 reconstructExperiment ||
                 depthClipVariant ||
+                exposureSerial ||
+                exposureMetering ||
                 id === 'production' ||
                 id.startsWith('accumulate-')
                 ? id

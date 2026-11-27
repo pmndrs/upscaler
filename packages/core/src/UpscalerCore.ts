@@ -1,6 +1,7 @@
 import { ComputePass } from './internal/ComputePass';
 import { notReadyError } from './initializationError';
 import { ConstantsBuffer } from './internal/ConstantsBuffer';
+import { EveryTexelExposure } from './internal/EveryTexelExposure';
 import { GpuTimer } from './internal/GpuTimer';
 import { JitterSequence } from './math/jitter';
 import { getQualityModeRatio, getRenderResolution } from './math/resolution';
@@ -17,6 +18,7 @@ import {
     FLAG_RESET,
     FLAG_REVERSED_DEPTH,
     FLAG_SHADING_CHANGE,
+    FLAG_SHADING_PRIME,
 } from './shaders/common';
 import { DEBUG_SHADER } from './shaders/debug';
 import { EASU_SHADER } from './shaders/easu';
@@ -81,6 +83,42 @@ export interface UpscalerCoreOptions<THandle = GPUTexture> {
     motionScale?: readonly [number, number];
 }
 
+/** Bench-only exposure metering forms (EveryTexelExposure, NEXT-STEPS §17). */
+type ExposureMetering = 'taps' | 'every-texel' | 'every-texel-no-deadband' | 'every-quad' | 'every-quad-no-deadband';
+
+// Auto-exposure meters every render texel up to this many (2^19 = 524,288,
+// ≈960×540), and the 1024 bilinear taps above (NEXT-STEPS §17). The taps' jitter
+// wobble grows as the render shrinks and crossed the adaptation dead-band at
+// 640×360, re-conditioning still scenes; every texel stays far inside it, at a
+// cost that grows with the render (+3–4 µs at ≤ 960×540, +15–39 µs at
+// 1280×720–1920×1080 in a worktree), where the taps are already steady.
+const EVERY_TEXEL_MAX_TEXELS = 1 << 19;
+
+/**
+ * Whether a render size meters every texel (the size gate).
+ * @param width - Render width
+ * @param height - Render height
+ * @returns True up to 2^19 texels
+ * @internal
+ */
+export function everyTexelGate(width: number, height: number): boolean {
+    return width * height <= EVERY_TEXEL_MAX_TEXELS;
+}
+
+/**
+ * Whether a device can run the every-texel metering: the scalar reduction's
+ * 256-invocation, 256-wide workgroups (the WebGPU default; compatibility mode
+ * defaults to 128) and a second bind group.
+ * @param device - The upscaler's device
+ * @returns False keeps the taps at every size
+ * @internal
+ */
+export function everyTexelSupported(device: GPUDevice): boolean {
+    const limits = device.limits;
+    return limits.maxComputeInvocationsPerWorkgroup >= 256 &&
+        limits.maxComputeWorkgroupSizeX >= 256 && limits.maxBindGroups >= 2;
+}
+
 /**
  * Bench-only construction knobs. Not part of the published surface; reached
  * through the private workspace package.
@@ -98,6 +136,15 @@ export type UpscalerCoreInternalOptions<THandle = GPUTexture> = UpscalerCoreOpti
     // Bench-only: a depth-clip shader with production's bindings — the
     // issue #79 variants in shaders/reconstructVariants.ts.
     _depthClipShader?: string;
+    // Bench-only: an exposure shader with production's bindings — the frozen
+    // serial form (LUMINANCE_PYRAMID_SERIAL_SHADER, NEXT-STEPS §16).
+    _exposureShader?: string;
+    // Bench-only: one metering form at every render size instead of
+    // production's size gate (EVERY_TEXEL_MAX_TEXELS): 'taps' (the 1024 taps,
+    // `_exposureShader` if given), or every render texel on @pmndrs/downsampler
+    // (EveryTexelExposure, NEXT-STEPS §17) — each texel, or ('every-quad') each
+    // 2×2 quad's box average; '-no-deadband' also drops the 1/16-stop dead-band.
+    _exposureMetering?: ExposureMetering;
     // Bench-only: an accumulate shader with production's bindings — the
     // motion-gap candidates in bench/src/candidates/shaders/accumulateVariants.ts.
     _accumulateShader?: string;
@@ -109,7 +156,45 @@ export type UpscalerCoreInternalOptions<THandle = GPUTexture> = UpscalerCoreOpti
     // (8 floats, see the three adapter's reprojection writer). Called once per
     // frame, from the guides stage.
     _reprojectData?: () => Float32Array<ArrayBuffer>;
+    // Bench/test-only: true keeps a ready optional pass inactive this frame,
+    // standing in for a slow compile (scripts/measure-late-ready.mjs).
+    _holdOptionalPass?: (pass: OptionalPass) => boolean;
 };
+
+/**
+ * An optional temporal stage that can turn on after dispatching started.
+ * @internal
+ */
+export type OptionalPass = 'shadingChange' | 'everyTexel' | 'debug';
+
+/** Which optional stages ran on a frame. @internal */
+export interface OptionalPassState {
+    shading: boolean;
+    debug: boolean;
+    everyTexel: boolean;
+}
+
+/**
+ * What a frame does when its optional stages differ from the previous
+ * frame's. None restarts history (NEXT-STEPS §18): a late compile or a
+ * runtime toggle would otherwise pop the whole frame. The shading detector
+ * primes on its first frame (FLAG_SHADING_PRIME): its luma history and block
+ * memory are stale or empty, so it seeds them and reports no change. The
+ * metering form needs nothing — the exposure eases from its stored value
+ * toward the new form's target, inside the adaptation dead-band when they
+ * agree; the debug view only replaces the output pass.
+ * @param previous - The stages the last encoded frame ran (a staged frame
+ * that threw before encoding doesn't count, or the next frame would skip its prime)
+ * @param next - The stages this frame runs
+ * @returns `primeShading`: this frame is the detector's first
+ * @internal
+ */
+export function optionalPassTransition(
+    previous: OptionalPassState,
+    next: OptionalPassState,
+): { primeShading: boolean } {
+    return { primeShading: next.shading && !previous.shading };
+}
 
 /**
  * The engine-agnostic FSR3-style upscaler: raw WGSL compute passes on a
@@ -148,9 +233,16 @@ export class UpscalerCore<THandle = GPUTexture> {
     private readonly _spatialRcasShader: string | null;
     private readonly _shadingChangeShader: string | null;
     private readonly _depthClipShader: string | null;
+    private readonly _exposureShader: string | null;
+    private readonly _exposureMetering: ExposureMetering | null;
     private readonly _accumulateShader: string | null;
     private readonly _crossFrameReconstruct: { shader: string; cameraCompensated: boolean } | null;
-    private _constants!: ConstantsBuffer;
+    // One constants buffer per frame stage. `queue.writeBuffer` lands before
+    // anything encoded this frame executes, so a single shared buffer would
+    // hand the guides stage the upscale stage's constants whenever both sit
+    // in one command encoder (docs/engine-contract.md → Submission).
+    private _constantsEarly!: ConstantsBuffer;
+    private _constantsLate!: ConstantsBuffer;
     // Null while GPU timing is off: nothing is allocated, nothing attached.
     private _timer: GpuTimer | null = null;
     private _gpuTiming: boolean;
@@ -167,6 +259,16 @@ export class UpscalerCore<THandle = GPUTexture> {
     private readonly _reprojectData: (() => Float32Array<ArrayBuffer>) | null;
     private _accumulatePass!: ComputePass;
     private _exposurePass!: ComputePass;
+    // Every-texel metering (renders ≤ EVERY_TEXEL_MAX_TEXELS, NEXT-STEPS §17).
+    // Optional like the shading detector: compiled async only once the size
+    // gate wants it, never part of isReady, and frames meter with the taps
+    // until it is ready. Any failure falls back to the taps for good.
+    private _everyTexelExposure: EveryTexelExposure | null = null;
+    private _everyTexelRequest: Promise<EveryTexelExposure | null> | null = null;
+    private _everyTexelPreparation: { key: string; promise: Promise<void> } | null = null;
+    private _everyTexelFailed = false;
+    // This frame's metering, frozen at dispatch start (split frames agree).
+    private _everyTexelActive = false;
     private _generateReactivePass!: ComputePass;
     private _shadingChangePass!: ComputePass;
     private _debugPass!: ComputePass;
@@ -195,7 +297,10 @@ export class UpscalerCore<THandle = GPUTexture> {
     private readonly _requests = new Map<string, Promise<void>>();
     private readonly _failures = new Map<string, unknown>();
     private _effectiveSettings: RuntimeSettings;
-    private _shadingActive = false;
+    // The detector's luma history and block memory are current: the last
+    // encoded late stage ran it. Set at encode time, not when a frame is staged,
+    // so a call that throws before encoding can't skip the next frame's prime.
+    private _shadingEncoded = false;
     private _debugActive = false;
 
     // GPU-side working set (owned raw textures + the engine-visible output)
@@ -210,6 +315,9 @@ export class UpscalerCore<THandle = GPUTexture> {
     // scattered into while the depth clip empties the other for next frame.
     private _reconstructedDepth: [GPUBuffer, GPUBuffer] | null = null;
     private _scatterIndex = 0;
+    // This frame's GPU reset signal (DispatchInputs.resetTexture), set by the
+    // guides stage so a split frame's late stage sees it too.
+    private _frameResetSignal: GPUTexture | null = null;
     private _dilatedMotion: GPUTexture | null = null;
     private _masks: GPUTexture | null = null;
     private _easuOutput: GPUTexture | null = null;
@@ -232,6 +340,10 @@ export class UpscalerCore<THandle = GPUTexture> {
     // memory as empty: it suppresses nothing and restarts from the current mean.
     private _shadingBlockMemory: [GPUTexture, GPUTexture] | null = null;
     private _shadingMemoryStale = false;
+    // This frame is the detector's first after turning on: it seeds its luma
+    // history + block memory and publishes no response (FLAG_SHADING_PRIME).
+    private _shadingPrime = false;
+    private readonly _holdOptionalPass: ((pass: OptionalPass) => boolean) | null;
 
     //* Published Guides (contract: docs/temporal-guides.md)
     // The production working set is allocated through the texture allocator
@@ -292,9 +404,12 @@ export class UpscalerCore<THandle = GPUTexture> {
         this._spatialRcasShader = options._spatialRcasShader ?? null;
         this._shadingChangeShader = options._shadingChangeShader ?? null;
         this._depthClipShader = options._depthClipShader ?? null;
+        this._exposureShader = options._exposureShader ?? null;
+        this._exposureMetering = options._exposureMetering ?? null;
         this._accumulateShader = options._accumulateShader ?? null;
         this._crossFrameReconstruct = options._crossFrameReconstruct ?? null;
         this._reprojectData = options._reprojectData ?? null;
+        this._holdOptionalPass = options._holdOptionalPass ?? null;
     }
 
     /** Baseline device capability only; does not compile or allocate anything. */
@@ -348,7 +463,8 @@ export class UpscalerCore<THandle = GPUTexture> {
         void device.lost.then(() => {
             if (generation === this._generation) this._deviceLost = true;
         });
-        this._constants = new ConstantsBuffer(device);
+        this._constantsEarly = new ConstantsBuffer(device, 'upscale-constants-early');
+        this._constantsLate = new ConstantsBuffer(device, 'upscale-constants-late');
         if (this._gpuTiming) this._timer = new GpuTimer(device);
         this._linearSampler = device.createSampler({
             label: 'upscale-linear-clamp', magFilter: 'linear', minFilter: 'linear',
@@ -372,6 +488,57 @@ export class UpscalerCore<THandle = GPUTexture> {
             [...geometry, 'accumulate', 'exposure', 'generateReactive', 'rcas', 'blit'];
     }
 
+    // Whether this configuration meters every texel: the temporal path on a
+    // device with 256-invocation workgroups, not failed before, and the render
+    // within the size gate (or a bench `_exposureMetering` forcing it).
+    private _everyTexelWanted(): boolean {
+        if (this._path !== 'temporal' || this._everyTexelFailed || this._exposureMetering === 'taps') return false;
+        if (!everyTexelSupported(this._device)) return false;
+        return this._exposureMetering !== null || everyTexelGate(this._renderWidth, this._renderHeight);
+    }
+
+    // Compiles (once) and sizes the every-texel metering when wanted. Never
+    // rejects: a failure warns once and leaves the taps for this instance.
+    private _prepareEveryTexel(): Promise<void> {
+        const forced = this._exposureMetering !== null && this._exposureMetering !== 'taps';
+        if (forced && !everyTexelSupported(this._device)) {
+            this._everyTexelFail(new Error('the device lacks 256-invocation workgroups'));
+        }
+        if (!this._everyTexelWanted()) return Promise.resolve();
+        const generation = this._generation;
+        if (!this._everyTexelRequest) {
+            const form = this._exposureMetering ?? 'every-texel';
+            this._everyTexelRequest = EveryTexelExposure.create(
+                this._device,
+                form.startsWith('every-quad') ? 'quad' : 'texel',
+                !form.endsWith('-no-deadband'),
+            ).then(created => {
+                if (generation !== this._generation) return null;
+                return this._everyTexelExposure = created;
+            });
+        }
+        // Called every frame: one promise per render size, not per frame.
+        const width = this._renderWidth, height = this._renderHeight;
+        const key = `${width}x${height}`;
+        if (this._everyTexelPreparation?.key === key) return this._everyTexelPreparation.promise;
+        const promise = this._everyTexelRequest
+            .then(metering => metering?.resize(width, height))
+            .catch(error => {
+                if (generation === this._generation) this._everyTexelFail(error);
+            });
+        this._everyTexelPreparation = { key, promise };
+        return promise;
+    }
+
+    private _everyTexelFail(error: unknown): void {
+        if (this._everyTexelFailed) return;
+        this._everyTexelFailed = true;
+        this._everyTexelExposure?.dispose();
+        this._everyTexelExposure = null;
+        console.warn('@pmndrs/upscaler: every-texel exposure metering is unavailable; ' +
+            'metering with the 1024 taps for this instance.', error);
+    }
+
     private _requestPass(name: string, retry: boolean): Promise<void> {
         if (this._passes.has(name)) return Promise.resolve();
         if (this._failures.has(name)) {
@@ -388,7 +555,7 @@ export class UpscalerCore<THandle = GPUTexture> {
             reconstruct: ['reconstruct', this._crossFrameReconstruct?.shader ?? RECONSTRUCT_SHADER],
             depthClip: ['depth-clip', this._depthClipShader ?? DEPTH_CLIP_SHADER],
             accumulate: ['accumulate', this._accumulateShader ?? ACCUMULATE_SHADER],
-            exposure: ['exposure', LUMINANCE_PYRAMID_SHADER],
+            exposure: ['exposure', this._exposureShader ?? LUMINANCE_PYRAMID_SHADER],
             generateReactive: ['gen-reactive', GENERATE_REACTIVE_SHADER],
             shadingChange: ['shading-change', this._shadingChangeShader ?? SHADING_CHANGE_SHADER],
             debug: ['debug', DEBUG_SHADER],
@@ -430,7 +597,12 @@ export class UpscalerCore<THandle = GPUTexture> {
             if (this.settings.detectShadingChanges) names.push('shadingChange');
             if (this.settings.debugView !== DebugView.None) names.push('debug');
         }
-        return Promise.all(names.filter(name => !this._passes.has(name)).map(name => this._requestPass(name, retry))).then(() => {});
+        // The every-texel metering rides along (prepare() waits for it, so a
+        // prepared frame 0 already uses it) but never rejects or gates isReady.
+        return Promise.all([
+            ...names.filter(name => !this._passes.has(name)).map(name => this._requestPass(name, retry)),
+            this._prepareEveryTexel(),
+        ]).then(() => {});
     }
 
     private _startDispatch(): void {
@@ -439,16 +611,24 @@ export class UpscalerCore<THandle = GPUTexture> {
         }
         // Automatic preparation handles rejection here; explicit prepare() still rejects.
         void this._queuePreparation(false).catch(() => {});
-        const shading = this._path === 'temporal' && this.settings.detectShadingChanges && this._passes.has('shadingChange');
-        const debug = this._path === 'temporal' && this.settings.debugView !== DebugView.None && this._passes.has('debug');
-        if ((shading && !this._shadingActive) || (debug && !this._debugActive)) {
-            // The input may already have rendered with this frame's jitter.
-            // Invalidate history without changing that projection's sample.
-            this._pendingReset = true;
-            this._shadingMemoryStale = true;
-        }
-        this._shadingActive = shading;
+        const held = (pass: OptionalPass) => this._holdOptionalPass?.(pass) === true;
+        const shading = this._path === 'temporal' && this.settings.detectShadingChanges &&
+            this._passes.has('shadingChange') && !held('shadingChange');
+        const debug = this._path === 'temporal' && this.settings.debugView !== DebugView.None &&
+            this._passes.has('debug') && !held('debug');
+        const everyTexel = this._everyTexelWanted() && this._everyTexelExposure?.ready === true && !held('everyTexel');
+        // An optional pass that turns on mid-history (a late compile — seconds
+        // on Windows/DXC — or a runtime toggle) never restarts history: a
+        // restart there is a full-frame pop at an unpredictable frame
+        // (NEXT-STEPS §18). The detector primes instead; the debug view and the
+        // metering form need nothing.
+        const transition = optionalPassTransition(
+            { shading: this._shadingEncoded, debug: this._debugActive, everyTexel: this._everyTexelActive },
+            { shading, debug, everyTexel },
+        );
+        this._shadingPrime = transition.primeShading;
         this._debugActive = debug;
+        this._everyTexelActive = everyTexel;
         this._effectiveSettings = {
             ...this.settings, detectShadingChanges: shading,
             debugView: debug ? this.settings.debugView : DebugView.None,
@@ -698,8 +878,8 @@ export class UpscalerCore<THandle = GPUTexture> {
     /**
      * {@link dispatch} into the caller's encoder, for hosts that batch their
      * own work into one submit. Never submits. Submit before the next
-     * `encode*()`/`dispatch*()` call: the passes share one constants buffer,
-     * written on the queue at encode time. Not GPU-timed.
+     * frame's `encode*()`/`dispatch*()` call: the constants are written on
+     * the queue at encode time. Not GPU-timed.
      * @param encoder - The host's command encoder, outside any pass
      * @param inputs - As {@link dispatch}
      * @param camera - As {@link dispatch}
@@ -727,8 +907,9 @@ export class UpscalerCore<THandle = GPUTexture> {
             throw new Error('@pmndrs/upscaler: configure() must run before dispatch().');
         }
 
-        this._writeConstants(inputs, camera);
-        this._constants.upload();
+        // Only the temporal path encodes the guides stage.
+        if (this._path === 'temporal') this._writeConstants(this._constantsEarly, inputs, camera);
+        this._writeConstants(this._constantsLate, inputs, camera);
     }
 
     private _encodeFrame(encoder: GPUCommandEncoder, inputs: DispatchInputs): void {
@@ -755,6 +936,7 @@ export class UpscalerCore<THandle = GPUTexture> {
     private _endFrame(): void {
         this._frameIndex++;
         this._pendingReset = false;
+        this._frameResetSignal = null;
         if (this._path === 'temporal') {
             this._historyIndex = 1 - this._historyIndex;
             this._depthIndex = 1 - this._depthIndex;
@@ -787,9 +969,9 @@ export class UpscalerCore<THandle = GPUTexture> {
     }
 
     /**
-     * {@link dispatchGuides} into the caller's encoder. Never submits; submit
-     * it before {@link encodeUpscale} (the stages share one constants buffer).
-     * Not GPU-timed.
+     * {@link dispatchGuides} into the caller's encoder. Never submits. The
+     * same encoder may take {@link encodeUpscale} before its one submit: each
+     * stage reads its own constants buffer. Not GPU-timed.
      * @param encoder - The host's command encoder, outside any pass
      * @param inputs - As {@link dispatchGuides}
      * @param camera - As {@link dispatchGuides}
@@ -815,8 +997,7 @@ export class UpscalerCore<THandle = GPUTexture> {
                 '@pmndrs/upscaler: dispatchGuides() already ran this frame — finish with dispatchUpscale().',
             );
         }
-        this._writeConstants(inputs, camera);
-        this._constants.upload();
+        this._writeConstants(this._constantsEarly, inputs, camera);
     }
 
     private _endGuides(): void {
@@ -824,6 +1005,7 @@ export class UpscalerCore<THandle = GPUTexture> {
             // The frame ends here — there is no late stage.
             this._frameIndex++;
             this._pendingReset = false;
+            this._frameResetSignal = null;
             this._depthIndex = 1 - this._depthIndex;
         } else {
             this._guidesPending = true;
@@ -880,17 +1062,17 @@ export class UpscalerCore<THandle = GPUTexture> {
             throw new Error('@pmndrs/upscaler: configure() must run before dispatchUpscale().');
         }
 
-        // Rewritten (not reused) so color-dependent flags — reactive, external
-        // exposure — reflect this call's inputs. Jitter and reset state are
-        // unchanged since the guides stage, so the shared UBO stays coherent.
-        this._writeConstants(inputs, camera);
-        this._constants.upload();
+        // Staged from this call's inputs so color-dependent flags — reactive,
+        // external exposure — are right. Jitter and reset state are unchanged
+        // since the guides stage, so the two stage buffers stay coherent.
+        this._writeConstants(this._constantsLate, inputs, camera);
     }
 
     private _endUpscale(): void {
         this._guidesPending = false;
         this._frameIndex++;
         this._pendingReset = false;
+        this._frameResetSignal = null;
         this._historyIndex = 1 - this._historyIndex;
         this._depthIndex = 1 - this._depthIndex;
     }
@@ -901,11 +1083,17 @@ export class UpscalerCore<THandle = GPUTexture> {
         this._passes.clear();
         this._requests.clear();
         this._failures.clear();
-        this._shadingActive = false;
+        this._shadingEncoded = false;
         this._debugActive = false;
         this._destroyTextures();
-        this._constants?.dispose();
+        this._constantsEarly?.dispose();
+        this._constantsLate?.dispose();
         this._reprojectBuffer?.destroy();
+        this._everyTexelExposure?.dispose();
+        this._everyTexelExposure = null;
+        this._everyTexelRequest = null;
+        this._everyTexelPreparation = null;
+        this._everyTexelActive = false;
         this._timer?.dispose();
         this._timer = null;
         this._initialized = false;
@@ -924,7 +1112,7 @@ export class UpscalerCore<THandle = GPUTexture> {
         alpha: GPUTextureView,
     ): void {
         const bindGroup = this._blitPass.createBindGroup([
-            { buffer: this._constants.buffer },
+            { buffer: this._constantsLate.buffer },
             input,
             this._linearSampler,
             exposure,
@@ -942,7 +1130,7 @@ export class UpscalerCore<THandle = GPUTexture> {
     private _encodeSpatial(encoder: GPUCommandEncoder, colorGPU: GPUTexture): void {
         //* EASU — edge-adaptive upscale into the display-res intermediate
         const easuBindGroup = this._easuPass.createBindGroup([
-            { buffer: this._constants.buffer },
+            { buffer: this._constantsLate.buffer },
             colorGPU.createView(),
             this._easuOutput!.createView(),
         ]);
@@ -984,7 +1172,11 @@ export class UpscalerCore<THandle = GPUTexture> {
         // need only depth + velocity; everything after needs the beauty color.
         // Composed on one encoder here so the monolithic dispatch keeps its
         // single submit — the seam exists for the split-dispatch guides API.
-        this._encodeGuides(encoder, { depth: inputs.depth, velocity: inputs.velocity });
+        this._encodeGuides(encoder, {
+            depth: inputs.depth,
+            velocity: inputs.velocity,
+            resetTexture: inputs.resetTexture,
+        });
         this._encodeLate(encoder, colorGPU, inputs);
     }
 
@@ -1004,6 +1196,10 @@ export class UpscalerCore<THandle = GPUTexture> {
         const depthCur = this._dilatedDepth![this._depthIndex];
         const depthPrev = this._dilatedDepth![1 - this._depthIndex];
         this._latestDepthWrite = this._depthIndex;
+        // The frame's GPU reset signal, kept for the late stage: a split frame
+        // passes it to dispatchGuides(), and the late stage's exposure pass
+        // folds it into the exposure texel's .a for every pass after it.
+        this._frameResetSignal = inputs.resetTexture ?? null;
         const w = this._renderWidth;
         const h = this._renderHeight;
 
@@ -1022,7 +1218,7 @@ export class UpscalerCore<THandle = GPUTexture> {
         //* Reconstruct — dilate (nearest-depth motion/depth over 3×3) and
         //* scatter this frame's depth to each pixel's previous position.
         const reconstructBindGroup = this._reconstructPass.createBindGroup([
-            { buffer: this._constants.buffer },
+            { buffer: this._constantsEarly.buffer },
             depthView,
             velocityGPU.createView(),
             depthCur.createView(),
@@ -1039,12 +1235,13 @@ export class UpscalerCore<THandle = GPUTexture> {
         //* Depth Clip — disocclusion against the reconstructed previous depth.
         // A separate pass: every pixel's scatter must land before any reads.
         const depthClipBindGroup = this._depthClipPass.createBindGroup([
-            { buffer: this._constants.buffer },
+            { buffer: this._constantsEarly.buffer },
             depthCur.createView(),
             this._dilatedMotion!.createView(),
             { buffer: scatterBuffer },
             this._masks!.createView(),
             { buffer: nextScatterBuffer },
+            (this._frameResetSignal ?? this._reactiveDummy!).createView(),
         ]);
         const depthClipPass = encoder.beginComputePass({
             label: 'upscale-depth-clip',
@@ -1064,7 +1261,7 @@ export class UpscalerCore<THandle = GPUTexture> {
         depthCur: GPUTexture,
     ): void {
         const entries: GPUBindingResource[] = [
-            { buffer: this._constants.buffer },
+            { buffer: this._constantsEarly.buffer },
             depthView,
             velocityGPU.createView(),
             depthPrev.createView(),
@@ -1128,7 +1325,7 @@ export class UpscalerCore<THandle = GPUTexture> {
             }
             const opaqueGPU = inputs.reactiveOpaqueColor;
             const genBindGroup = this._generateReactivePass.createBindGroup([
-                { buffer: this._constants.buffer },
+                { buffer: this._constantsLate.buffer },
                 opaqueGPU.createView(),
                 colorGPU.createView(),
                 this._reactiveGenerated!.createView(),
@@ -1164,28 +1361,50 @@ export class UpscalerCore<THandle = GPUTexture> {
         const hostPreExposureView = inputs.preExposureTexture
             ? inputs.preExposureTexture.createView()
             : this._reactiveDummy!.createView();
-        const exposureBindGroup = this._exposurePass.createBindGroup([
-            { buffer: this._constants.buffer },
-            colorGPU.createView(),
-            this._linearSampler,
-            exposurePrev.createView(),
-            exposureCur.createView(),
-            externalExposureView,
-            hostPreExposureView,
-        ]);
+        // GPU reset signal — this call's, else the guides stage's; the zero
+        // dummy reads as "no reset". Every metering form binds it: the shared
+        // epilogue folds it into the exposure texel's .a.
+        const resetSignalView = (inputs.resetTexture ?? this._frameResetSignal ?? this._reactiveDummy!).createView();
         const exposurePass = encoder.beginComputePass({
             label: 'upscale-exposure',
             timestampWrites: this._timer?.passDescriptor('exposure'),
         });
-        // One workgroup performs the whole reduction (see luminancePyramid.ts).
-        this._exposurePass.dispatch(exposurePass, exposureBindGroup, 8, 8);
+        if (this._everyTexelActive && this._everyTexelExposure?.ready) {
+            // Every render texel: workgroup partials, then a one-workgroup
+            // combine that runs the same epilogue (EveryTexelExposure).
+            this._everyTexelExposure.encodePass(exposurePass, {
+                constants: this._constantsLate.buffer,
+                color: colorGPU.createView(),
+                sampler: this._linearSampler,
+                previous: exposurePrev.createView(),
+                next: exposureCur.createView(),
+                external: externalExposureView,
+                host: hostPreExposureView,
+                reset: resetSignalView,
+            });
+        } else {
+            const exposureBindGroup = this._exposurePass.createBindGroup([
+                { buffer: this._constantsLate.buffer },
+                colorGPU.createView(),
+                this._linearSampler,
+                exposurePrev.createView(),
+                exposureCur.createView(),
+                externalExposureView,
+                hostPreExposureView,
+                resetSignalView,
+            ]);
+            // One workgroup performs the whole reduction (see luminancePyramid.ts).
+            this._exposurePass.dispatch(exposurePass, exposureBindGroup, 8, 8);
+        }
         exposurePass.end();
 
         //* Shading Change — fused multi-scale block-mean detector (skipped
         //* entirely when the detector is off; accumulate then reads a zero dummy).
         let shadingSignalView = this._reactiveDummy!.createView();
-        if (!this._effectiveSettings.detectShadingChanges) this._shadingMemoryStale = true;
-        else {
+        if (!this._effectiveSettings.detectShadingChanges) {
+            this._shadingMemoryStale = true;
+            this._shadingEncoded = false;
+        } else {
             const shadingMemoryIn = this._shadingBlockMemory![this._historyIndex];
             if (this._shadingMemoryStale) {
                 this._shadingMemoryStale = false;
@@ -1199,7 +1418,7 @@ export class UpscalerCore<THandle = GPUTexture> {
             const shadingLumaIn = this._shadingLumaHistory![this._historyIndex];
             const shadingLumaOut = this._shadingLumaHistory![1 - this._historyIndex];
             const shadingBindGroup = this._shadingChangePass.createBindGroup([
-                { buffer: this._constants.buffer },
+                { buffer: this._constantsLate.buffer },
                 colorGPU.createView(),
                 shadingLumaIn.createView(),
                 this._dilatedMotion!.createView(),
@@ -1225,11 +1444,12 @@ export class UpscalerCore<THandle = GPUTexture> {
             );
             shadingPass.end();
             shadingSignalView = this._shadingSignal!.createView();
+            this._shadingEncoded = true;
         }
 
         //* Accumulate — jittered upsample + history reprojection/rectification
         const accumulateBindGroup = this._accumulatePass.createBindGroup([
-            { buffer: this._constants.buffer },
+            { buffer: this._constantsLate.buffer },
             colorGPU.createView(),
             this._dilatedMotion!.createView(),
             this._masks!.createView(),
@@ -1258,7 +1478,7 @@ export class UpscalerCore<THandle = GPUTexture> {
         //* Output — debug view, RCAS sharpen, or plain resolve
         if (this._effectiveSettings.debugView !== DebugView.None) {
             const debugBindGroup = this._debugPass.createBindGroup([
-                { buffer: this._constants.buffer },
+                { buffer: this._constantsLate.buffer },
                 this._dilatedMotion!.createView(),
                 this._masks!.createView(),
                 depthCur.createView(),
@@ -1306,7 +1526,7 @@ export class UpscalerCore<THandle = GPUTexture> {
     ): void {
         const rcasPass = this._path === 'spatial' ? this._spatialRcasPass : this._rcasPass;
         const bindGroup = rcasPass.createBindGroup([
-            { buffer: this._constants.buffer },
+            { buffer: this._constantsLate.buffer },
             input,
             exposure,
             this._outputView(),
@@ -1351,13 +1571,14 @@ export class UpscalerCore<THandle = GPUTexture> {
         return flags;
     }
 
-    // Accepts either dispatch shape — the guides stage has no color, and every
-    // field this reads is shared between the two input types.
+    // Stages and uploads one stage's constants. Accepts either dispatch shape —
+    // the guides stage has no color, and every field this reads is shared
+    // between the two input types.
     private _writeConstants(
+        c: ConstantsBuffer,
         inputs: Omit<DispatchInputs, 'color'>,
         camera: FrameCamera,
     ): void {
-        const c = this._constants;
         c.setRenderSize(this._renderWidth, this._renderHeight);
         c.setDisplaySize(this._displayWidth, this._displayHeight);
 
@@ -1388,11 +1609,16 @@ export class UpscalerCore<THandle = GPUTexture> {
         if (this._path === 'temporal') flags |= FLAG_INPUT_REINHARD;
         if (this._effectiveSettings.lockThinFeatures) flags |= FLAG_LOCKS;
         if (this._effectiveSettings.autoExposure) flags |= FLAG_AUTO_EXPOSURE;
-        if (this._effectiveSettings.detectShadingChanges) flags |= FLAG_SHADING_CHANGE;
+        // A priming frame runs the detector to seed it, and accumulate does
+        // not consult it (a frozen bench detector without the prime bit would
+        // otherwise age history off its stale luma history).
+        if (this._shadingPrime) flags |= FLAG_SHADING_PRIME;
+        else if (this._effectiveSettings.detectShadingChanges) flags |= FLAG_SHADING_CHANGE;
         if (inputs.reactive || inputs.reactiveOpaqueColor) flags |= FLAG_REACTIVE;
         if (inputs.exposureTexture) flags |= FLAG_EXTERNAL_EXPOSURE;
         if (this._effectiveSettings.rcasDenoise) flags |= FLAG_RCAS_DENOISE;
         c.setFlags(flags);
+        c.upload();
     }
 
     //* Texture Allocation
@@ -1445,15 +1671,17 @@ export class UpscalerCore<THandle = GPUTexture> {
             const exposure1 = this._createSharedTexture('exposure-1', 1, 1, 'rgba16float');
             this._guideTex.exposure = [exposure0, exposure1];
             this._exposure = [exposure0.gpu, exposure1.gpu];
-            // Sampled-only (no storage) so a non-storage format is fine; zero-init
-            // gives a "nothing reactive" default when the caller passes no mask.
-            this._reactiveDummy = this._device.createTexture({
-                label: 'upscale-reactive-dummy',
-                size: { width: 1, height: 1 },
-                format: 'r8unorm',
-                usage: GPUTextureUsage.TEXTURE_BINDING,
-            });
         }
+        // Sampled-only (no storage) so a non-storage format is fine; zero-init
+        // gives a "nothing reactive" / "no reset" default when the caller
+        // passes no mask or reset signal. Every path allocates it: the guides
+        // path's depth clip binds it for an absent reset signal.
+        this._reactiveDummy = this._device.createTexture({
+            label: 'upscale-reactive-dummy',
+            size: { width: 1, height: 1 },
+            format: 'r8unorm',
+            usage: GPUTextureUsage.TEXTURE_BINDING,
+        });
 
         if (this._path === 'spatial') {
             this._easuOutput = this._createTexture('easu-output', dw, dh, 'rgba16float');

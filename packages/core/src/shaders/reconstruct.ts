@@ -130,6 +130,13 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
  * - 3: reconstructed previous depth (read; this frame's scatter)
  * - 4: mask output (rgba8unorm storage; r = disocclusion)
  * - 5: the other reconstructed-depth buffer (emptied here for next frame)
+ * - 6: reset signal (app-supplied 1×1-typical texture, `.r > 0.5` = reset,
+ *      e.g. a GPU cut detector's flag; a zero dummy when absent)
+ *
+ * On a reset frame (FLAG_RESET or the signal) every pixel reads fully
+ * disoccluded, so the published guide agrees with the history the late stage
+ * drops (issue #102). The next-buffer clear still runs first: the scatter
+ * keeps no other cross-frame state, so nothing stale reaches the next frame.
  */
 export const DEPTH_CLIP_SHADER = assembleShader(
     WGSL_CONSTANTS,
@@ -139,6 +146,7 @@ export const DEPTH_CLIP_SHADER = assembleShader(
 @group(0) @binding(3) var<storage, read> reconstructedDepth : array<u32>;
 @group(0) @binding(4) var maskOutput : texture_storage_2d<rgba8unorm, write>;
 @group(0) @binding(5) var<storage, read_write> nextReconstructedDepth : array<u32>;
+@group(0) @binding(6) var resetSignal : texture_2d<f32>;
 
 // AMD's separation tolerance (ffx_fsr2_depth_clip.h): the minimum view-depth
 // gap that reads as a different surface scales with viewport resolution and
@@ -157,6 +165,10 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
     // Ping-pong clear: one texel per slot, so every slot of the buffer the
     // next frame scatters into is emptied without a clear dispatch.
     nextReconstructedDepth[u32(center.y * width + center.x)] = EMPTY_DEPTH;
+    // Reset: no history survives this frame, so none of it is the same surface.
+    // Applied at the store rather than as an early return, so the signal's
+    // fetch overlaps the pass's own loads instead of gating them.
+    let reset = hasFlag(FLAG_RESET) || textureLoad(resetSignal, vec2i(0), 0).r > 0.5;
 
     let curDepth = textureLoad(dilatedDepth, center, 0).r;
     let motion = textureLoad(dilatedMotion, center, 0);
@@ -212,7 +224,7 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
         sawValidTap = true;
     }
     let disocclusion = select(0.0, clamp(1.0 - surfaceConfidence, 0.0, 1.0), sawValidTap);
-    textureStore(maskOutput, gid.xy, vec4f(disocclusion, 0.0, 0.0, 1.0));
+    textureStore(maskOutput, gid.xy, vec4f(select(disocclusion, 1.0, reset), 0.0, 0.0, 1.0));
 }
 `,
 );

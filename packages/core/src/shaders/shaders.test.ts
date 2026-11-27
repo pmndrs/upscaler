@@ -8,7 +8,20 @@ import { DEBUG_SHADER } from './debug';
 import * as easuModule from './easu';
 import { EASU_SHADER } from './easu';
 import { GENERATE_REACTIVE_SHADER } from './generateReactive';
-import { LUMINANCE_PYRAMID_SHADER } from './luminancePyramid';
+import { createScalarKernel } from '@pmndrs/downsampler/webgpu';
+
+import {
+    everyTexelDispatchShape,
+    everyTexelExposureLayout,
+    everyTexelKernelOptions,
+} from '../internal/EveryTexelExposure';
+import {
+    EXPOSURE_EVERY_QUAD_BINDINGS,
+    EXPOSURE_EVERY_TEXEL_BINDINGS,
+    LUMINANCE_PYRAMID_SERIAL_SHADER,
+    LUMINANCE_PYRAMID_SHADER,
+    exposureEveryTexelFinish,
+} from './luminancePyramid';
 import { MOMENTS_SHADER } from './moments';
 import * as rcasModule from './rcas';
 import {
@@ -24,6 +37,7 @@ import {
     RECONSTRUCT_CROSS_FRAME_SHADER,
     buildDepthClipVariant,
 } from './reconstructVariants';
+import { FLAG_SHADING_PRIME, WGSL_CONSTANTS } from './common';
 import { SHADING_CHANGE_SHADER } from './shadingChange';
 import { assembleShader } from './wgsl';
 
@@ -38,6 +52,8 @@ const ALL_SHADERS: Record<string, string> = {
     shadingChange: SHADING_CHANGE_SHADER,
     accumulate: ACCUMULATE_SHADER,
     luminancePyramid: LUMINANCE_PYRAMID_SHADER,
+    // Frozen bench identity (exposure-serial-v1), pre-parallel production.
+    luminancePyramidSerial: LUMINANCE_PYRAMID_SERIAL_SHADER,
     generateReactive: GENERATE_REACTIVE_SHADER,
     debug: DEBUG_SHADER,
     moments: MOMENTS_SHADER,
@@ -50,12 +66,16 @@ const BASELINE_BINDING_COUNTS: Record<string, number> = {
     rcas: 5,
     // 6 since 2026-10-05: dilate + scatter, depth clip split out (issue #67).
     reconstruct: 6,
-    depthClip: 6,
+    // 7 since 2026-11-20: the GPU reset signal (issue #102).
+    depthClip: 7,
     reconstructCrossFrame: 7,
     // 11 since 2026-10-05: per-block memory in/out (NEXT-STEPS §14).
     shadingChange: 11,
     accumulate: 13,
-    luminancePyramid: 7,
+    // 8 since 2026-11-20: the GPU reset signal, resolved into exposure .a —
+    // the frozen serial form too (it shares the head and epilogue).
+    luminancePyramid: 8,
+    luminancePyramidSerial: 8,
     // 5 since 2026-07-22: incoming-mask binding for merge-not-overwrite.
     generateReactive: 5,
     debug: 10,
@@ -83,7 +103,9 @@ const BASELINE_FINGERPRINTS: Record<string, string> = {
     // 2026-10-05: reconstructed-previous-depth scatter (issue #67) — the
     // depth clip moved to its own pass; the old fused form is frozen below.
     reconstruct: '193dec98',
-    depthClip: '800a41f5',
+    // 2026-11-20: a reset frame (FLAG_RESET or the GPU reset signal) writes
+    // every pixel disoccluded (issue #102).
+    depthClip: '4300b381',
     reconstructCrossFrame: 'd944fd8f',
     // Added 2026-07-21: multi-scale shading-change detector (NEXT-STEPS item 4);
     // 2026-10-03: the contrast floor reads both frames' spread, not just the
@@ -92,7 +114,10 @@ const BASELINE_FINGERPRINTS: Record<string, string> = {
     // 2026-10-05: per-block memory of the last 8 means, jump-gated range test
     // (fine-line aliasing on a still camera, NEXT-STEPS §14); 2026-10-05: an
     // all-zero (empty) memory restarts instead of pushing (NEXT-STEPS §14).
-    shadingChange: 'fba11623',
+    // 2026-11-20: reset read from the exposure texel's resolved .a too (the
+    // GPU reset signal), not FLAG_RESET alone. 2026-11-20: FLAG_SHADING_PRIME
+    // runs a first frame after turning on mid-history as a reset (NEXT-STEPS §18).
+    shadingChange: '9de820c9',
     // Updated 2026-07-21: DeltaPreExposure history correction (NEXT-STEPS item 2);
     // 2026-08-25: alpha resolved alongside color into the locks buffer's .a;
     // 2026-10-02: the alpha clamp takes the color path's still-scene relax;
@@ -103,10 +128,19 @@ const BASELINE_FINGERPRINTS: Record<string, string> = {
     // NEXT-STEPS §11);
     // 2026-10-05: pre-exposure read guarded with max(…, 1e-4) like RCAS/blit,
     // so a fixed/external exposure of 0 no longer blacks out accumulation.
-    accumulate: '1505bcb5',
+    // 2026-11-20: reset read from the exposure texel's resolved .a too.
+    accumulate: '3594f274',
     // 2026-10-08: 1/16-stop adaptation dead-band, so the jitter-phase wobble of
     // the metered log-average no longer re-conditions history on still scenes.
-    luminancePyramid: '30144ae9',
+    // 2026-11-11: the 1024 metering taps split across the 64 lanes, then a
+    // workgroup tree sum (NEXT-STEPS §16); the serial form keeps its loop.
+    // 2026-11-20: the GPU reset signal (binding 7), folded with FLAG_RESET
+    // and published in .a for the rest of the late stage (issue #102). The
+    // frozen serial form shares the head and epilogue, so it changes too
+    // (was '30144ae9'); its metering loop is unchanged, and it now assembles
+    // byte-identically to the reset branch's pre-parallel production shader.
+    luminancePyramid: '3722103a',
+    luminancePyramidSerial: 'a1719dab',
     // Updated 2026-07-22: reactive merge-not-overwrite (guides spec M3) — the
     // generator max-merges an incoming mask instead of being suppressed by it.
     generateReactive: '9d0739e5',
@@ -430,6 +464,107 @@ describe('auto-exposure clamp', () => {
     });
 });
 
+describe('parallel exposure metering', () => {
+    // The 64 lanes share the serial form's 1024 taps (NEXT-STEPS §16): only the
+    // summation order may differ, and the row loop keeps the uniform bound that
+    // holds DXC's compile time down (docs/windows-followups.md).
+    const tapMath = [
+        'let uv = (vec2f(f32(x), f32(y)) + 0.5) / f32(EXPOSURE_TAPS);',
+        'let c = textureSampleLevel(inputColor, linearSampler, uv, 0.0).rgb;',
+        'logSum = logSum + log2(max(luma(c), 1.0e-4));',
+    ];
+    const main = (source: string) => source.slice(source.indexOf('@compute'));
+
+    it('takes the serial form’s taps with the same per-tap math', () => {
+        for (const line of tapMath) {
+            expect(LUMINANCE_PYRAMID_SERIAL_SHADER).toContain(line);
+            expect(LUMINANCE_PYRAMID_SHADER).toContain(line);
+        }
+        expect(LUMINANCE_PYRAMID_SHADER).toContain(
+            'for (var y = gid.y; y < C.exposureTaps; y = y + EXPOSURE_LANES) {',
+        );
+        expect(LUMINANCE_PYRAMID_SHADER).toContain('let x = gid.x + i * EXPOSURE_LANES;');
+    });
+
+    it('reduces in workgroup memory before any lane returns', () => {
+        const body = main(LUMINANCE_PYRAMID_SHADER);
+        expect(body.indexOf('return;')).toBeGreaterThan(body.lastIndexOf('workgroupBarrier();'));
+        expect(body).toContain('logSum = laneLogSums[0];');
+    });
+
+    it('shares everything after the metering with the serial form', () => {
+        const tail = (source: string) => source.slice(source.indexOf('    // Meter host-invariantly'));
+        expect(tail(LUMINANCE_PYRAMID_SHADER)).toBe(tail(LUMINANCE_PYRAMID_SERIAL_SHADER));
+    });
+});
+
+describe('every-texel exposure metering', () => {
+    // NEXT-STEPS §17: the same epilogue as `finish` of a @pmndrs/downsampler
+    // ScalarReduction, whose generated kernel owns @group(0).
+    const tail = (source: string) => source.slice(source.indexOf('    // Meter host-invariantly'));
+    const finish = exposureEveryTexelFinish();
+    const bindingsOf = (wgsl: string) =>
+        [...wgsl.matchAll(/@group\((\d)\) @binding\((\d+)\)/g)].map(([, group, binding]) => `${group}:${binding}`);
+
+    it('runs the production epilogue with the log average in place of the tap sum', () => {
+        expect(tail(finish)).toBe(
+            tail(LUMINANCE_PYRAMID_SHADER).replace(
+                'exp2(logSum / f32(EXPOSURE_TAPS * EXPOSURE_TAPS))',
+                'exp2(logAverage)',
+            ),
+        );
+        expect(finish).toContain('let logAverage = value.x;');
+        expect(finish).toContain('> ADAPT_DEADBAND_STOPS');
+    });
+
+    it('drops only the dead-band when asked', () => {
+        const open = exposureEveryTexelFinish(false);
+        expect(open).toContain('abs(log2(targetExposure / prev)) > 0.0) {');
+        expect(open.replace('prev)) > 0.0) {', 'prev)) > ADAPT_DEADBAND_STOPS) {')).toBe(finish);
+    });
+
+    it('declares group 1 only, in the layout the reduction is built with', () => {
+        for (const form of ['texel', 'quad'] as const) {
+            const wgsl = form === 'quad' ? EXPOSURE_EVERY_QUAD_BINDINGS : EXPOSURE_EVERY_TEXEL_BINDINGS;
+            const declared = bindingsOf(wgsl).sort();
+            const layout = everyTexelExposureLayout(form).map((entry) => `1:${entry.binding}`).sort();
+            expect(declared).toEqual(layout);
+        }
+        expect(bindingsOf(EXPOSURE_EVERY_TEXEL_BINDINGS)).not.toContain('1:2');
+    });
+
+    it('assembles with the generated kernel without name collisions', () => {
+        for (const form of ['texel', 'quad'] as const) {
+            const wgsl = createScalarKernel(everyTexelKernelOptions(form));
+            for (const name of ['load', 'finish', 'partials', 'combine'])
+                expect(wgsl.match(new RegExp(`\\bfn ${name}\\(`, 'g'))).toHaveLength(1);
+            // Only the generator's own declarations sit in group 0.
+            expect(bindingsOf(wgsl).filter((b) => b.startsWith('0:')).sort()).toEqual(['0:0', '0:1']);
+        }
+        for (const ours of [EXPOSURE_EVERY_TEXEL_BINDINGS, EXPOSURE_EVERY_QUAD_BINDINGS, finish])
+            expect(ours).not.toMatch(/\bds_/);
+    });
+
+    it('dispatches the generated kernel the way its ScalarReduction would', () => {
+        // EveryTexelExposure compiles the kernel itself (async) and fills the
+        // uniform and workgroup counts the library's class would: pin the
+        // generated shape those depend on (@pmndrs/downsampler 0.1.0, exact).
+        const wgsl = createScalarKernel(everyTexelKernelOptions('texel'));
+        expect(wgsl).toContain(
+            'struct DsParams {\n\tsize: vec2u,\n\tfirstLayer: u32,\n\tgroupsX: u32,\n\tpartialCount: u32,\n\tcount: u32,\n}',
+        );
+        expect(wgsl).toContain('@group(0) @binding(0) var<uniform> ds_params: DsParams;');
+        expect(wgsl).toContain('@group(0) @binding(1) var<storage, read_write> ds_partials: array<vec4f>;');
+        expect(wgsl).toContain('@compute @workgroup_size(16, 16)\nfn partials');
+        expect(wgsl).toContain('@compute @workgroup_size(256)\nfn combine');
+        expect(wgsl).toContain('let origin = group.xy * 64u + local.xy;');
+        expect(everyTexelDispatchShape(960, 540)).toEqual({
+            groups: [15, 9], params: [960, 540, 0, 15, 135, 518400],
+        });
+        expect(everyTexelDispatchShape(1, 1)).toEqual({ groups: [1, 1], params: [1, 1, 0, 1, 1, 1] });
+    });
+});
+
 describe('shading-change block memory', () => {
     // Fine-line aliasing on a still camera (bench Q18, NEXT-STEPS §14): a block
     // mean inside the range of its last 8 means reads as no change, unless the
@@ -461,7 +596,7 @@ describe('shading-change block memory', () => {
     });
 
     it('restarts the memory of blocks that moved, disoccluded or reset', () => {
-        expect(SHADING_CHANGE_SHADER).toContain('var moving = select(0.0, 1.0, hasFlag(FLAG_RESET));');
+        expect(SHADING_CHANGE_SHADER).toContain('var moving = select(0.0, 1.0, frameReset);');
         expect(SHADING_CHANGE_SHADER).toContain(
             'select(memoryDistance(midWords, midMean), 1.0, moving1 > 0.5)',
         );
@@ -503,15 +638,92 @@ describe('reconstructed previous depth (issue #67)', () => {
     });
 });
 
+describe('reset (issue #102)', () => {
+    const resetSignal = /textureLoad\(resetSignal, vec2i\(0\), 0\)\.r > 0\.5/;
+
+    it('writes every pixel disoccluded on a reset frame, after emptying the next buffer', () => {
+        const sources = [DEPTH_CLIP_SHADER, ...Object.values(DEPTH_CLIP_VARIANTS).map(buildDepthClipVariant)];
+        for (const source of sources) {
+            const body = source.split('fn main')[1] ?? '';
+            const reset = body.indexOf(
+                'let reset = hasFlag(FLAG_RESET) || textureLoad(resetSignal, vec2i(0), 0).r > 0.5;',
+            );
+            expect(reset).toBeGreaterThan(0);
+            // The ping-pong clear runs whatever the frame: the scatter keeps no
+            // other cross-frame state, so a skipped clear is the only way a
+            // reset could leak a stale nearer depth into the next frame.
+            expect(body.indexOf('nextReconstructedDepth[')).toBeLessThan(reset);
+            // Every store is 1 on a reset: the off-screen one always, the
+            // final one through the reset select.
+            const stores = [...body.matchAll(/textureStore\(maskOutput, gid\.xy, vec4f\(([^,]+),/g)].map((m) => m[1]);
+            expect(stores.length).toBeGreaterThan(0);
+            for (const value of stores) expect(['1.0', 'select(disocclusion']).toContain(value.trim());
+            expect(body).toContain('vec4f(select(disocclusion, 1.0, reset), 0.0, 0.0, 1.0)');
+        }
+    });
+
+    it('resolves the GPU signal once, in the exposure texel, for the late stage', () => {
+        // The exposure pass folds FLAG_RESET and the signal into .a ...
+        expect(LUMINANCE_PYRAMID_SHADER).toMatch(
+            /let reset = hasFlag\(FLAG_RESET\) \|\| textureLoad\(resetSignal, vec2i\(0\), 0\)\.r > 0\.5;/,
+        );
+        expect(LUMINANCE_PYRAMID_SHADER).toMatch(/if \(!reset && prev > 0\.0\)/);
+        expect(LUMINANCE_PYRAMID_SHADER).toContain('vec4f(exposure, avgLum, host, select(0.0, 1.0, reset))');
+        expect(LUMINANCE_PYRAMID_SHADER).toMatch(resetSignal);
+        // ... and every later pass that honours FLAG_RESET also reads it.
+        expect(ACCUMULATE_SHADER).toContain('if (hasFlag(FLAG_RESET) || frameInfo.a > 0.5 || offscreen)');
+        expect(SHADING_CHANGE_SHADER).toContain(
+            'frameReset = hasFlag(FLAG_RESET) || hasFlag(FLAG_SHADING_PRIME) || frameInfo.a > 0.5;',
+        );
+        // The prime bit lives only in this shader; its literal must match the writer's.
+        expect(SHADING_CHANGE_SHADER).toContain(`const FLAG_SHADING_PRIME : u32 = ${FLAG_SHADING_PRIME}u;`);
+        expect(WGSL_CONSTANTS).not.toContain('FLAG_SHADING_PRIME');
+        expect(SHADING_CHANGE_SHADER).toContain('if (frameReset) { return neutral; }');
+        expect(SHADING_CHANGE_SHADER).toContain('var moving = select(0.0, 1.0, frameReset);');
+        // No pass may honour the CPU flag alone (it would ignore a GPU cut).
+        const sources = [
+            ACCUMULATE_SHADER, SHADING_CHANGE_SHADER, LUMINANCE_PYRAMID_SHADER, DEPTH_CLIP_SHADER,
+            LUMINANCE_PYRAMID_SERIAL_SHADER, exposureEveryTexelFinish(), exposureEveryTexelFinish(false),
+        ];
+        for (const source of sources) {
+            const uses = [...source.matchAll(/hasFlag\(FLAG_RESET\)([^;{]*)/g)].map((match) => match[1]);
+            expect(uses.length).toBeGreaterThan(0);
+            for (const rest of uses) expect(rest).toMatch(/\|\| (frameInfo\.a > 0\.5|textureLoad\(resetSignal)/);
+        }
+    });
+
+    it('binds the signal in every exposure form, which all publish the resolved .a', () => {
+        // The late stage binds the reset whichever metering runs (taps, the
+        // frozen serial identity, every texel / every quad in @group(1)), and
+        // the store lives in the shared epilogue, so `finish` inherits it.
+        const store = 'vec4f(exposure, avgLum, host, select(0.0, 1.0, reset))';
+        for (const source of [LUMINANCE_PYRAMID_SHADER, LUMINANCE_PYRAMID_SERIAL_SHADER]) {
+            expect(source).toContain('@group(0) @binding(7) var resetSignal : texture_2d<f32>;');
+            expect(source.match(/textureStore\(exposureOut/g)).toHaveLength(1);
+            expect(source).toContain(store);
+        }
+        for (const bindings of [EXPOSURE_EVERY_TEXEL_BINDINGS, EXPOSURE_EVERY_QUAD_BINDINGS]) {
+            expect(bindings).toContain('@group(1) @binding(7) var resetSignal : texture_2d<f32>;');
+        }
+        for (const form of ['texel', 'quad'] as const) {
+            expect(everyTexelExposureLayout(form).filter((entry) => entry.binding === 7)).toHaveLength(1);
+        }
+        for (const finish of [exposureEveryTexelFinish(), exposureEveryTexelFinish(false)]) {
+            expect(finish.match(/textureStore\(exposureOut/g)).toHaveLength(1);
+            expect(finish).toContain(store);
+        }
+    });
+});
+
 describe('depth-clip variants (issue #79)', () => {
     // Swapped in through Upscaler's _depthClipShader, which binds production's
-    // six entries, so every variant must declare exactly bindings 0–5.
+    // seven entries, so every variant must declare exactly bindings 0–6.
     it.each(Object.entries(DEPTH_CLIP_VARIANTS))('%s keeps production bindings', (_id, options) => {
         const source = buildDepthClipVariant(options);
         const bindings = [...source.matchAll(/@group\(0\) @binding\((\d+)\)/g)].map((match) =>
             Number(match[1]),
         );
-        expect(bindings).toEqual([0, 1, 2, 3, 4, 5]);
+        expect(bindings).toEqual([0, 1, 2, 3, 4, 5, 6]);
         expect(source.match(/@compute/g)).toHaveLength(1);
         expect(source.match(/struct FsrConstants/g)).toHaveLength(1);
         // Still empties next frame's slot before the off-screen early return.

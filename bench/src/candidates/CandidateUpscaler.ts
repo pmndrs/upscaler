@@ -59,7 +59,8 @@ import {
 import { DEBUG_SHADER } from '@pmndrs/upscaler-core/shaders/debug';
 import { EASU_SHADER } from '@pmndrs/upscaler-core/shaders/easu';
 import { GENERATE_REACTIVE_SHADER } from '@pmndrs/upscaler-core/shaders/generateReactive';
-import { LUMINANCE_PYRAMID_SHADER } from '@pmndrs/upscaler-core/shaders/luminancePyramid';
+// Frozen with the bundles: the serial form they were measured with.
+import { LUMINANCE_PYRAMID_SERIAL_SHADER } from '@pmndrs/upscaler-core/shaders/luminancePyramid';
 import { RCAS_SHADER } from '@pmndrs/upscaler-core/shaders/rcas';
 import { RECONSTRUCT_SHADER } from '@pmndrs/upscaler-core/shaders/reconstruct';
 import { SHADING_CHANGE_SHADER } from '@pmndrs/upscaler-core/shaders/shadingChange';
@@ -368,7 +369,7 @@ export class CandidateUpscaler {
                 ? LUMA_SPD_SOURCE_SHADER
                 : this._candidateBundle
                   ? EXPOSURE_HISTORY_SOURCE_SHADER
-                  : LUMINANCE_PYRAMID_SHADER,
+                  : LUMINANCE_PYRAMID_SERIAL_SHADER,
             this._candidateBundle
                 ? {
                       shaderKey: this._usesSourceResolver
@@ -997,6 +998,8 @@ export class CandidateUpscaler {
             exposureCur.createView(),
             externalExposureView,
             hostPreExposureView,
+            // Production pyramid's reset signal: the zero dummy (no reset).
+            this._reactiveDummy!.createView(),
         ]);
         const exposurePass = encoder.beginComputePass({
             label: 'upscale-exposure',

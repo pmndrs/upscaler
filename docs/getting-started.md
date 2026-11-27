@@ -95,7 +95,8 @@ import { upscale } from '@pmndrs/upscaler';
 const scenePass = pass(scene, camera);
 scenePass.setMRT(mrt({ output, velocity }));
 scenePass.setResolutionScale(0.5); // you choose the input resolution
-// …composite SSGI/SSR/GTAO onto the reduced-res color here → composedColor…
+// Composite SSGI/SSR/GTAO onto the reduced-res color: a plain node, no rtt() needed.
+const composedColor = scenePass.getTextureNode('output').add(gi);
 
 pipeline.outputNode = upscale(
     composedColor,
@@ -108,8 +109,22 @@ pipeline.outputNode = upscale(
 - **The caller controls input resolution.** The node reads the input texture's actual
   size every frame and upscales it to the renderer's drawing-buffer size. `ratio` and
   `quality` only size `upscaleScene`'s own pass.
+- **A composite color renders at render resolution.** When `color` is not a texture or
+  pass node (say `output.add(gi)`), `upscale()` renders it into a float target of the
+  type three's passes use (`renderer.getOutputBufferType()`: half float by default,
+  full float with `outputBufferType: FloatType`, never 8-bit), sized like the
+  depth/velocity pass: `Math.floor(drawingBuffer × pass.getResolutionScale())`, the
+  same rounding as three's `PassNode`, re-derived each frame so a resize lands on every
+  input at once. This prediction needs depth (or velocity) as a pass texture node
+  (`pass.getTextureNode('depth')`); a plain `texture()` reference is followed at its
+  last rendered size, so a resize can leave colour one frame behind. A texture or pass node is used as is, at its own size, with no copy. The same goes
+  for the `reactive` and `reactiveOpaqueColor` options. (Up to 0.5 a composite went
+  through three's `convertToTexture`, which sizes from the drawing buffer: the
+  composite rendered at display size and the upscaler ran at ratio 1 against
+  render-size depth and velocity. An existing `rtt(composite, w, h)` wrapper still
+  works and is left untouched.)
 - **The inputs render in-graph.** Every input node (and `reactive`,
-  `reactiveOpaqueColor`, `exposureTexture`) is registered as a graph dependency, so
+  `reactiveOpaqueColor`, `exposureTexture`, `resetTexture`) is registered as a graph dependency, so
   three renders the whole chain in dependency order before the upscale runs. Hand the
   node a node chain; don't render the inputs yourself.
 - **Jitter defaults on**, because in-graph inputs render under the node's jitter.
@@ -119,7 +134,10 @@ pipeline.outputNode = upscale(
   accumulates and denoises; it just doesn't reconstruct sub-pixel detail. See
   [Jitter](inputs-and-contracts.md#jitter).
 - **Optional inputs:** `reactive` (a mask), `reactiveOpaqueColor` (auto-generated mask),
-  `exposureTexture`, and `guides` (a linked `temporalGuides()` node; see
+  `exposureTexture`, `resetTexture` (a GPU reset signal; a cut detector updated
+  outside the graph lands a frame late, see
+  [Resets and camera cuts](inputs-and-contracts.md#resets-and-camera-cuts)), and
+  `guides` (a linked `temporalGuides()` node; see
   [Temporal guides](temporal-guides.md#tsl-linked-mode)). Host pre-exposure is not
   exposed on the node; use the raw `Upscaler` for it.
 - **Runtime settings:** the node creates its `Upscaler` lazily on first build.
@@ -144,7 +162,9 @@ jitter-free velocity, `upscale()` is strictly better.
 
 The input can also be a texture you fill outside the pipeline, such as a path tracer's
 output or your own render target, wrapped in `texture()`. The node sizes itself from
-whatever it receives. `examples/16-spatial-node` shows both inputs, with RCAS
+whatever it receives. A composite node (not a texture or pass node) has no depth pass
+to size from, so it renders into a half-float target at the drawing buffer / `ratio`
+(or the `quality` preset's ratio, Quality by default). `examples/16-spatial-node` shows both inputs, with RCAS
 `sharpness` / `rcasDenoise` controls (`node.upscaler.settings`) and HDR highlights.
 
 ## `UpscalePass`: the imperative drop-in
@@ -191,6 +211,10 @@ renderer.setAnimationLoop(() => {
 - `three`'s `velocity` node is a singleton, and its projection override is global. Pass
   `new UpscalePass(renderer, { shareVelocityMatrix: false })` for every pass but one
   when several share a renderer.
+- `setResetSignal({ texture, update })` feeds a GPU reset signal (a cut detector's
+  flag) to every temporal `draw()`. `update` runs after the scene render and before
+  the upscale, while the camera is still jittered; `null` clears both halves. See
+  [Resets and camera cuts](inputs-and-contracts.md#resets-and-camera-cuts).
 - `UpscalePass` doesn't expose `exposureTexture` or `preExposureTexture`. Drive
   `pass.upscaler` (the raw API) directly if you need them.
 
@@ -291,7 +315,8 @@ All except `sharpness` and `rcasDenoise` affect only the temporal path.
 
 **Camera cuts:** call `upscaler.resetHistory()`, or pass `reset: true` in that
 frame's dispatch inputs, so the first frame after a teleport doesn't blend against
-the old view.
+the old view. To detect cuts on the GPU instead, pass a cut detector's flag as
+`resetTexture` ([Resets and camera cuts](inputs-and-contracts.md#resets-and-camera-cuts)).
 
 **GPU timings:** off by default, because profiling has a per-frame cost (timestamp
 writes on every pass plus a readback) and nothing in the pipeline needs it. Opt in with
@@ -313,8 +338,11 @@ initialization again when switching to a path whose pipelines are not ready.
 
 `prepare()` explicitly warms the current settings and retries failed compilation.
 A newly enabled debug view or shading-change detector otherwise prepares on first
-dispatch and stays inactive until ready. Activation invalidates affected history
-without changing the input frame's jitter. Settings are frozen across split dispatch.
+dispatch and stays inactive until ready. Activation never restarts history, so a slow
+compile can't pop the image mid-session: the shading-change detector's first active
+frame (after a late compile or re-enabling `detectShadingChanges`) seeds its own
+state and reports no change, so a lighting change on exactly that frame is left to
+the variance clip. Settings are frozen across split dispatch.
 
 TSL nodes prepare automatically, show the input color while pending, and avoid
 jitter until mandatory pipelines are ready. Failed compilation is reported once;

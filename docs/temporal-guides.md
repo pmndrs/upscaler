@@ -56,10 +56,10 @@ frame start ── last frame's products are readable (dilatedDepth still holds 
 | `dilatedMotion` | render | rgba16float, `.xy` | Closest-depth-dilated motion as a **UV delta**, y-flip applied: `prevUV = uv − motion` | after `dispatchGuides` |
 | `dilatedDepth` | render | r32float, nearest only | Dilated linear view depth (eye-Z), reversed depth already resolved | after `dispatchGuides` |
 | `previousDepth` | render | r32float, nearest only | The same, frame N−1 | after `dispatchGuides` (before it, `dilatedDepth` is frame N−1) |
-| `disocclusion` | render | rgba8unorm, `.r` | Graded `0` stable → `1` fresh history | after `dispatchGuides` |
+| `disocclusion` | render | rgba8unorm, `.r` | Graded `0` stable → `1` fresh history; `1` everywhere on a reset frame | after `dispatchGuides` |
 | `reactive` | render | rgba8unorm, `.r` | Merged reactive mask target (see below) | late; `null` on `guides` |
 | `shadingChange` | ⌈render / 2⌉ | r32float, nearest only | `0..1` shading-change response per 2×2 block | late; `null` on `guides` |
-| `exposure` | 1×1 | rgba16float | `r` conditioning exposure, `g` metered average luma of the beauty input, `b` host pre-exposure | late; `null` on `guides` |
+| `exposure` | 1×1 | rgba16float | `r` conditioning exposure, `g` metered average luma of the beauty input, `b` host pre-exposure, `a` 1 on a reset frame (`reset` or `resetTexture`), else 0 | late; `null` on `guides` |
 | `lockStatus` | **display** | rgba16float | `r` lock lifetime, `g` locked luma (conditioned tonemap space), `b` shading-change age, `a` resolved caller alpha | late, N−1 prior; `null` on `guides` |
 | `history` | **display** | rgba16float | `rgb` accumulated color in conditioned tonemap space (not display-ready), `a` accumulation age in frames | late, N−1 prior; `null` on `guides` |
 
@@ -82,7 +82,9 @@ Rules a consumer must follow:
 - **`configure()` reallocates every guide.** Re-read after a resize or path change. The
   textures belong to the upscaler, and `dispose()` releases them.
 - `shadingChange` is only written while `settings.detectShadingChanges` is on, because
-  the detector pass isn't dispatched otherwise.
+  the detector pass isn't dispatched otherwise. Its first frame after turning on (a late
+  pipeline compile, or the setting re-enabled) reads 0 everywhere: the detector spends
+  it seeding its luma history and block memory instead of comparing against stale ones.
 - **The jitter isn't a guide.** Render-resolution products were sampled under this
   frame's jitter; read it from `upscaler.jitter` / `jitterPhase` (or an `upscale()`
   node's `jitterNode`) — see [Jitter](inputs-and-contracts.md#jitter). The `guides`

@@ -17,7 +17,7 @@
  * with the motion one of the compared outputs was built from
  * (pmndrs/motion-vectors docs/MOTION.md §10).
  *
- * Two caveats (bench/docs/NEXT-STEPS.md §17): the warp resamples bilinearly,
+ * Two caveats (bench/docs/NEXT-STEPS.md §20): the warp resamples bilinearly,
  * so a sharper output reads higher (`--warp error` warps the error against the
  * 2×2 reference instead), and the default judge is the input render's, which
  * is jittered on the temporal path (`--judge display` renders it unjittered at

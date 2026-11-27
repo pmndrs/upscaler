@@ -41,7 +41,14 @@ core.encode(encoder, { color, depth, velocity, deltaTime }, { near, far, perspec
 - **Limits.** `UpscalerCore.isSupported(device)` checks the baseline (13 bindings
   per group, 9 sampled and 3 storage textures per stage, and so on). Every
   WebGPU-conformant device passes it at default limits, so you don't need to
-  request higher ones.
+  request higher ones. Auto-exposure meters every render texel up to 2^19 texels
+  (≈960×540) with 256-invocation workgroups, the WebGPU default; a device
+  limited below that (compatibility mode's 128) meters with the 1024 taps at
+  every size instead. That metering compiles asynchronously, only for a render
+  inside that size, and is not part of `isReady`: frames meter with the taps
+  until it is ready (`prepare()` waits for it), and a failure warns once and
+  keeps the taps. Switching forms keeps history: the stored exposure eases
+  toward the new form's target like any other change.
 - **Optional features.** With `timestamp-query` on the device, `gpuTiming: true`
   fills `core.gpuTimings`. Without it the timer silently does nothing. Nothing else
   is feature-gated.
@@ -61,7 +68,8 @@ core.encode(encoder, { color, depth, velocity, deltaTime }, { near, far, perspec
 3. Per frame: `beginFrame()`, render your inputs, then one of `dispatch` / `encode`
    (or the split pair, below).
 4. `resetHistory()` on a camera cut or teleport. Passing `reset: true` in the
-   inputs does the same for one frame.
+   inputs does the same for one frame, and `resetTexture` decides it on the GPU
+   (see [Inputs](#inputs)).
 5. `dispose()` when done.
 
 `core.settings` is the live `RuntimeSettings` object (sharpness, auto-exposure,
@@ -84,6 +92,7 @@ multisampled input; it can't bind). All render-resolution inputs are exactly
 | `reactiveOpaqueColor` | as `color` | Optional. The opaque-only render; the core derives a reactive mask from its difference to `color`. |
 | `exposureTexture` | float, `.r` of texel (0, 0) | Optional. Overrides auto/fixed conditioning exposure. |
 | `preExposureTexture` | float, `.r` of texel (0, 0) | Optional. Exposure already baked into `color`; history is corrected when it changes. |
+| `resetTexture` | float, `.r` of texel (0, 0) | Optional. `> 0.5` makes this frame a reset, decided on the GPU (no readback): a cut detector's flag. Also on `dispatchGuides()`; a split frame's late stage reuses the guides stage's. Absent, a zero placeholder is bound and output is unchanged. |
 
 `depth` and `velocity` are required on the `temporal` and `guides` paths; `bilinear`
 and `spatial` read only `color`. `deltaTime` (seconds) drives exposure adaptation.
@@ -205,14 +214,15 @@ whatever samples the output.
   submits. Encode it after the scene pass and before the pass that samples the
   output, outside any pass, then submit once. `examples/webgpu/hello` sends scene,
   upscale and present in one submit.
-- **One frame in flight per core.** The passes share one constants buffer, which is
-  written with `queue.writeBuffer` at encode time. Submit an `encode*()` call's
-  encoder before the next `encode*()` / `dispatch*()` call on the same core.
+- **One frame in flight per core.** The constants are written with
+  `queue.writeBuffer` at encode time, so they are in place before anything in the
+  encoder runs. Submit a frame's encoder before the next frame's `encode*()` /
+  `dispatch*()` call on the same core.
 - **Split frame.** `dispatchGuides` / `encodeGuides` runs the geometry stage (depth +
   motion → the early guides), and `dispatchUpscale` / `encodeUpscale` finishes with
   color. Effects that want the guides run in between. With the `encode` forms,
-  submit the guides encoder before calling `encodeUpscale`, for the same
-  constants-buffer reason.
+  both stages can go into one encoder and one submit: each stage reads its own
+  constants buffer, so the late stage's write cannot reach the guides passes.
 - **Engines with an open render pass.** The core encodes compute passes, so an
   engine that keeps a render pass open across its frame (Babylon, for one) must
   close it before handing over its encoder, or dispatch on its own encoder after

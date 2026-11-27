@@ -48,8 +48,11 @@ type UpscalerInternalOptions = UpscalerOptions & {
     _spatialRcasShader?: string;
     _shadingChangeShader?: string;
     _depthClipShader?: string;
+    _exposureShader?: string;
+    _exposureMetering?: 'taps' | 'every-texel' | 'every-texel-no-deadband' | 'every-quad' | 'every-quad-no-deadband';
     _accumulateShader?: string;
     _crossFrameReconstruct?: { shader: string; cameraCompensated: boolean };
+    _holdOptionalPass?: (pass: 'shadingChange' | 'everyTexel' | 'debug') => boolean;
 };
 
 /**
@@ -408,6 +411,7 @@ export class Upscaler {
             depth: getGPUTexture(this._renderer, inputs.depth),
             velocity: getGPUTexture(this._renderer, inputs.velocity),
             reset: inputs.reset,
+            resetTexture: inputs.resetTexture && getGPUTexture(this._renderer, inputs.resetTexture),
             deltaTime: inputs.deltaTime,
         };
         core.dispatchGuides(resolved, this._frameInfo(camera));
@@ -452,6 +456,7 @@ export class Upscaler {
             exposureTexture: inputs.exposureTexture && getGPUTexture(r, inputs.exposureTexture),
             preExposureTexture: inputs.preExposureTexture && getGPUTexture(r, inputs.preExposureTexture),
             reset: inputs.reset,
+            resetTexture: inputs.resetTexture && getGPUTexture(r, inputs.resetTexture),
             deltaTime: inputs.deltaTime,
         };
     }

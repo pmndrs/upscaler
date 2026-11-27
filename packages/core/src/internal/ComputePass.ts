@@ -49,11 +49,24 @@ function deviceCache(device: GPUDevice): DeviceCache {
     return cache;
 }
 
-function compile(device: GPUDevice, label: string, code: string, options: ComputePassOptions): Promise<GPUComputePipeline> {
+/** An explicit pipeline layout and entry point, for kernels another generator emits. */
+export interface ExplicitPipelineOptions {
+    entryPoint: string;
+    layout: GPUPipelineLayout;
+    /** Names the layout in the cache key: equal keys must mean group-equivalent layouts. */
+    layoutKey: string;
+}
+
+function compile(
+    device: GPUDevice, label: string, code: string,
+    options: ComputePassOptions & Partial<ExplicitPipelineOptions>,
+): Promise<GPUComputePipeline> {
     const cache = deviceCache(device);
     if (cache.lost) return Promise.reject(new Error('@pmndrs/upscaler: GPU device lost.'));
+    const entryPoint = options.entryPoint ?? 'main';
+    const layout = options.layout ?? 'auto';
     const constants = Object.fromEntries(Object.entries(options.constants ?? {}).sort(([a], [b]) => a.localeCompare(b)));
-    const key = JSON.stringify([code, 'main', 'auto', Object.entries(constants).map(
+    const key = JSON.stringify([code, entryPoint, options.layoutKey ?? 'auto', Object.entries(constants).map(
         ([name, value]) => [name, typeof value, Object.is(value, -0) ? '-0' : String(value)],
     )]);
     const existing = cache.pipelines.get(key);
@@ -70,8 +83,8 @@ function compile(device: GPUDevice, label: string, code: string, options: Comput
                         cache.modules.set(code, module);
                     }
                     const result = await device.createComputePipelineAsync({
-                        label: `upscale-${label}`, layout: 'auto',
-                        compute: { module, entryPoint: 'main', constants },
+                        label: `upscale-${label}`, layout,
+                        compute: { module, entryPoint, constants },
                     });
                     if (cache.lost) throw new Error('@pmndrs/upscaler: GPU device lost.');
                     resolve(result);
@@ -91,6 +104,22 @@ function compile(device: GPUDevice, label: string, code: string, options: Comput
         cache.modules.delete(code);
     });
     return pipeline;
+}
+
+/**
+ * Compiles a pipeline with an explicit layout and entry point through the same
+ * per-device async queue and cache as every {@link ComputePass}: never a
+ * synchronous `createComputePipeline` (docs/windows-cross-device.md).
+ * @param device - The upscaler's device
+ * @param label - Pipeline label (prefixed `upscale-`)
+ * @param code - WGSL
+ * @param options - Entry point, explicit layout and its cache key
+ * @returns The compiled pipeline; rejects on a compile or validation failure
+ */
+export function compileComputePipeline(
+    device: GPUDevice, label: string, code: string, options: ExplicitPipelineOptions,
+): Promise<GPUComputePipeline> {
+    return compile(device, label, code, options);
 }
 
 export class ComputePass {

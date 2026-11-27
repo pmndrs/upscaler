@@ -31,7 +31,13 @@ export default defineConfig({
             formats: ['es'],
         },
         rollupOptions: {
-            external: ['three', 'three/tsl', 'three/webgpu', /^@babylonjs\/core(\/|$)/, /^pixi\.js(\/|$)/],
+            // Engines are optional peers; @pmndrs/downsampler is a dependency
+            // (engine-free, imported by core's exposure metering), external so
+            // an app that also uses it shares one copy.
+            external: [
+                'three', 'three/tsl', 'three/webgpu', /^@babylonjs\/core(\/|$)/, /^pixi\.js(\/|$)/,
+                /^@pmndrs\/downsampler(\/|$)/,
+            ],
             output: { chunkFileNames: 'chunks/upscaler-[hash].js' },
         },
     },

@@ -119,7 +119,11 @@ veloc ─┘  (dilate +      dilatedDepth   │        Lanczos2 upsample        
 2. **Generate reactive** (`generateReactive.ts`): only when `reactiveOpaqueColor` is
    given. It max-merges any incoming mask.
 3. **Exposure** (`luminancePyramid.ts`): a single 1×1 log-average with eye
-   adaptation. It also carries the external and host pre-exposure inputs.
+   adaptation. It also carries the external and host pre-exposure inputs. Up to
+   2^19 render texels (≈960×540) it averages every texel, two dispatches of
+   `@pmndrs/downsampler`'s generated scalar reduction (`internal/EveryTexelExposure.ts`);
+   above that, 1024 bilinear taps in one workgroup, which are steady there and
+   cheaper (`bench/docs/NEXT-STEPS.md` §17).
 4. **Shading change** (`shadingChange.ts`): one fused half-resolution dispatch
    comparing block-mean luma at 4×4 and 8×8 against a one-frame luma history. Per texel
    the previous value is the closest one in the reprojected bilinear footprint's tap
@@ -169,7 +173,10 @@ encoding or any other presentation transform.
 ## Shared constants
 
 Every pass binds one uniform buffer at `@group(0) @binding(0)`: the `FsrConstants`
-struct (96 bytes of payload, in a 256-byte buffer), written once per frame. The WGSL
+struct (96 bytes of payload, in a 256-byte buffer). The core keeps two of them, one
+per frame stage: the guides passes (reconstruct, depth clip) bind the early buffer and
+everything after binds the late one. Each is written once per frame, with the same
+layout, so a split frame can be recorded into a single command encoder. The WGSL
 layout (`WGSL_CONSTANTS` in [`packages/core/src/shaders/common.ts`](../packages/core/src/shaders/common.ts)) and
 the CPU writer ([`packages/core/src/internal/ConstantsBuffer.ts`](../packages/core/src/internal/ConstantsBuffer.ts))
 must stay byte-for-byte in sync. A field added or reordered on one side only silently

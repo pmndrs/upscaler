@@ -349,7 +349,7 @@ along motion, and the reference reads 0. The error image is still resampled
 bilinearly, so cross-mode rankings keep a weaker bias. Use it for onset-versus-steady
 questions and A/Bs, and confirm cross-mode claims against
 `measure-reference-quality.mjs`. It needs `float32-filterable`, which Metal and
-most desktop GPUs have. Evidence: NEXT-STEPS §17.
+most desktop GPUs have. Evidence: NEXT-STEPS §20.
 
 **Baseline** (2026-11-20, `production`, Q19, ratio 2, 1280×720, Metal, r186.1;
 52 s for all four modes):
@@ -376,8 +376,8 @@ temporal 0.00542, reference 0.
 The scene-recede "onset spike" (0.0024–0.0027 over frames 720–725) is not an
 onset effect. The last frames of scene-approach, at the same scene positions
 but 50 frames into motion, read the same, and under `--warp error` the onset is
-flat (NEXT-STEPS §17). Regenerate the baseline with the first command above;
-NEXT-STEPS §16–17 have the record.
+flat (NEXT-STEPS §20). Regenerate the baseline with the first command above;
+NEXT-STEPS §19–20 have the record.
 
 ---
 
@@ -431,9 +431,11 @@ several runs — or several worktrees — can share a machine without colliding.
 | `measure-emitter-retention.mjs` | bench, `http://127.0.0.1:5199` | `--port` (9333) |
 | `measure-shading-restart.mjs` | bench, `http://127.0.0.1:5199` | `--port` (9333) |
 | `measure-receding-disocclusion.mjs` | bench, `http://127.0.0.1:5199` | `--port` (9333) |
+| `measure-exposure-parallel.mjs` | examples `--examples-url` (`http://127.0.0.1:5312`) and bench `--bench-url` (`http://127.0.0.1:5313`) | `--port` (9352) |
 | `measure-reference-quality.mjs` | bench, `http://127.0.0.1:5199` | `--port` (9333) |
 | `measure-motion-stability.mjs` | bench (`motion-upscaler.html`), `http://127.0.0.1:5199` | `--port` (9335) |
 | `measure-motion-upscaler.mjs` | bench (`motion-upscaler.html`), `http://127.0.0.1:5199` | `--port` (9334) |
+| `verify-split-encoder.mjs` | bench, `http://127.0.0.1:5199` | `--port` (9333) |
 | `verify-packed-guides.mjs` | its own `vite preview` on `--port` (a free port) | `--cdp-port` (a free port) |
 
 ```bash

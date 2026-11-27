@@ -68,7 +68,7 @@ export const ACCUMULATE_BILINEAR_HISTORY_SHADER = replaceOnce(
 );
 
 /**
- * Diagnostic only (motion-onset study, bench/docs/NEXT-STEPS.md §17): the
+ * Diagnostic only (motion-onset study, bench/docs/NEXT-STEPS.md §20): the
  * still-scene relax switched off (`STILL_CLAMP_RELAX` 0, which `alphaRelax`
  * already guards). Tests whether a converged still pixel entering motion with
  * the widened box and old history is what the warp meter sees at onset.

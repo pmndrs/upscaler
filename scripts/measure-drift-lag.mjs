@@ -63,6 +63,7 @@ import { parseCliOrExit } from './cli-flags.mjs';
 import {
     DEFAULT_BENCH_URL,
     parsePort,
+    closeOwnedCdpBrowser,
     removeTempDirectory,
     resolveServerUrl,
     spawnVite,
@@ -465,7 +466,8 @@ async function main() {
         if (logRecords.some((record) => /error|exception|validation/i.test(record) && !/favicon|404/.test(record)))
             console.warn(`browser log records:\n${logRecords.join('\n')}`);
     } finally {
-        client?.close();
+        // On Windows the browser can outlive its launcher process, so close it over CDP first.
+        await closeOwnedCdpBrowser(client);
         await stopChild(chrome);
         await removeTempDirectory(profile, 'Chrome profile');
         await stopChild(viteServer);
