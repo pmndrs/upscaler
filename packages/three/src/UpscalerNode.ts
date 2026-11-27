@@ -8,7 +8,6 @@ import {
     pass,
     passTexture,
     uniform,
-    velocity,
 } from 'three/tsl';
 
 import { Upscaler } from './Upscaler';
@@ -18,6 +17,7 @@ import { getPipelineEvents, installRenderPipelineHooks } from './internal/render
 import { RenderResolutionInputNode, materializeInput } from './internal/renderResolutionInput';
 import { getPassRenderResolution, getQualityModeRatio } from '@pmndrs/upscaler-core/math/resolution';
 import { QualityMode, type DepthMode, type UpscalePath } from './types';
+import { resolveVelocitySource, type ResolvedVelocitySource, type VelocityNodeSource } from './velocitySource';
 
 // three's node base + its builder/frame carry incomplete TS types and expect a
 // WebGPURenderer the public d.ts only types as `Renderer`, so setup()/
@@ -141,6 +141,24 @@ export interface UpscalerNodeOptions {
      * the shared upscaler, so give both the same value.
      */
     depthMode?: DepthMode;
+    /**
+     * The motion source behind the velocity input. Default: three's
+     * `velocity`, which reports deformation (`positionNode`, morph targets,
+     * `displacementMap`) wrongly. {@link upscaleScene} writes it into its
+     * scene pass's MRT output `velocity`; {@link upscale} takes the velocity
+     * texture as an argument, so there it only names who gets the unjittered
+     * projection. While this node owns the jitter it hands the source
+     * {@link Upscaler.unjitteredProjectionMatrix} (`setProjectionMatrix()` on a
+     * node that has it, `projectionMatrix` on a producer such as
+     * `MotionVectors.for(renderer)` from `@pmndrs/motion-vectors/three`) and
+     * calls a producer's `beginFrame()` when the pipeline frame begins; when
+     * another node owns the view offset it sets `null`. With `jitter: false`
+     * neither happens: call `beginFrame()` yourself if the app renders more
+     * than once per animation tick. A node with no projection hook must be made
+     * jitter-free by the caller. See {@link VelocityNodeSource} and
+     * docs/inputs-and-contracts.md → Motion vectors.
+     */
+    velocityNode?: VelocityNodeSource;
 }
 
 /**
@@ -189,6 +207,9 @@ export class UpscalerNode extends Node<'vec4'> {
     private readonly _color: TextureNodeLike;
     private readonly _depth: TextureNodeLike;
     private readonly _velocity: TextureNodeLike;
+    // Who writes the velocity input: gets the unjittered projection (and a
+    // per-frame beginFrame, for a producer) while this node jitters.
+    private readonly _velocitySource: ResolvedVelocitySource;
     // Optional reactive inputs — an explicit mask, and/or an opaque-color
     // buffer we auto-diff into one (with both, the explicit mask max-merges
     // into the generated one). Both render in-graph like the other inputs
@@ -245,6 +266,7 @@ export class UpscalerNode extends Node<'vec4'> {
         this._color = colorNode;
         this._depth = depthNode;
         this._velocity = velocityNode;
+        this._velocitySource = resolveVelocitySource(options.velocityNode);
         this._reactive = options.reactive ?? null;
         this._reactiveOpaqueColor = options.reactiveOpaqueColor ?? null;
         this._exposureTexture = options.exposureTexture ?? null;
@@ -289,11 +311,11 @@ export class UpscalerNode extends Node<'vec4'> {
 
             }
             // When we jitter, motion vectors must stay jitter-free — feed the
-            // velocity node the upscaler's (stable) unjittered projection. When
+            // velocity source the upscaler's (stable) unjittered projection. When
             // we don't jitter, the camera projection is already jitter-free, so
-            // the velocity node needs no compensation.
+            // the velocity source needs no compensation.
             if (this._jitter) {
-                velocity.setProjectionMatrix(this._upscaler.unjitteredProjectionMatrix);
+                this._velocitySource.setProjection(this._upscaler.unjitteredProjectionMatrix);
             }
         }
 
@@ -392,7 +414,7 @@ export class UpscalerNode extends Node<'vec4'> {
         this._jitterActive = active;
         // The view-offset owner manages the shared velocity projection itself
         // (TRAA/TAAU set and clear it per frame); only pin it while we own jitter.
-        velocity.setProjectionMatrix(active ? this._upscaler!.unjitteredProjectionMatrix : null);
+        this._velocitySource.setProjection(active ? this._upscaler!.unjitteredProjectionMatrix : null);
         if (!active) this._jitterUniform.value.set(0, 0);
         if (this._configured) this._configureUpscaler();
     }
@@ -407,6 +429,9 @@ export class UpscalerNode extends Node<'vec4'> {
             }
             this._frameOpen = true;
             this._upscaler!.beginFrame(this._camera as never);
+            // Before any in-graph input renders: the producer's previous frame
+            // is this pipeline frame's predecessor, however often the app renders.
+            this._velocitySource.beginFrame();
             const jitter = this._upscaler!.jitter;
             this._jitterUniform.value.set(jitter.x, jitter.y);
         },
@@ -638,9 +663,11 @@ export const upscaleSpatial = (
  *
  * @param scene - Scene to render at reduced resolution and upscale
  * @param camera - Scene camera
- * @param options - Quality / ratio / path (see {@link UpscalerNodeOptions})
+ * @param options - Quality / ratio / path, and `velocityNode` for a motion source
+ *   other than three's `velocity` (see {@link UpscalerNodeOptions})
  * @returns A TSL node whose value is the upscaled display-resolution texture
  *   (linear/HDR — presentation stays with the render pipeline)
+ * @throws {TypeError} When `options.velocityNode` is neither a node nor a producer
  */
 export const upscaleScene = (
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -652,10 +679,11 @@ export const upscaleScene = (
 
     //* Render the scene at 1/ratio with a color + velocity MRT — the two inputs
     //* FSR3's temporal path needs (depth is the pass's own depth buffer). The
-    //* `velocity` node is the shared TSL singleton whose projection the upscaler
-    //* pins to its unjittered matrix each frame, so motion vectors stay jitter-free.
+    //* velocity source (three's shared `velocity` unless `velocityNode` says
+    //* otherwise) gets the upscaler's unjittered projection, so motion vectors
+    //* stay jitter-free. MRT routes by name: the output is `velocity` either way.
     const scenePass = pass(scene, camera as never);
-    scenePass.setMRT(mrt({ output, velocity }));
+    scenePass.setMRT(mrt({ output, velocity: resolveVelocitySource(options.velocityNode).node }));
     scenePass.setResolutionScale(1 / ratio);
 
     return upscale(scenePass.getTextureNode('output'), scenePass.getTextureNode('depth'), scenePass.getTextureNode('velocity'), camera, {

@@ -127,6 +127,13 @@ if (pipeline && (scenario.id === 'Q6' || scenario.id === 'Q7' || scenario.id ===
     pipeline.configureEffectScenario(scenario.id, config.subrun, bench.roomScene, camera);
 if (pipeline && scenario.id === 'Q14')
     pipeline.configureEffectScenario('Q14', config.subrun, bench.wireRoomScene, camera);
+// `?velocity=motion-vectors` (Q21's A/B): @pmndrs/motion-vectors' node writes
+// the scene MRT's velocity. Loaded only on request, so default runs never
+// construct it (it patches every node material's position stage).
+if (pipeline && config.velocitySource === 'motion-vectors') {
+    const { MotionVectors } = await import('@pmndrs/motion-vectors/three');
+    pipeline.useMotionVectors(MotionVectors.for(renderer));
+}
 // Q11 drives an app-baked pre-exposure through the scene color + resolver.
 if (pipeline && scenario.id === 'Q11') pipeline.enableHostPreExposureDrive();
 

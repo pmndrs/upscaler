@@ -1,4 +1,5 @@
 import * as THREE from 'three/webgpu';
+import { normalLocal, positionLocal, sin, uniform } from 'three/tsl';
 
 import { CHART_DISTANCE, EMITTER_DISTANCE } from './benchmark/scenarios';
 
@@ -23,6 +24,8 @@ export interface BenchScene {
     hotSpotScene: THREE.Scene;
     /** Q18: line-pair bars across the render Nyquist, a Siemens star and flat swatches. */
     chartScene: THREE.Scene;
+    /** Q21: a `positionNode` wave, a morph-target blob and a rigid control box. */
+    deformScene: THREE.Scene;
     reactiveScene: THREE.Scene;
     /**
      * Q13 transparents the auto-generator must see: hidden while the
@@ -573,6 +576,80 @@ export function createBenchScene(): BenchScene {
     chartWall.rotation.z = (1.2 * Math.PI) / 180;
     chartScene.add(chartWall);
 
+    //* Deformers (Q21) ===================================================
+    // Geometry three's `velocity` gets wrong and @pmndrs/motion-vectors' node
+    // gets right: a vertex wave from `positionNode` and a morph-target blob,
+    // both checker-textured so a wrong reprojection smears visible detail,
+    // plus a rigid box as the control (both sources are exact on it). Driven
+    // by `deformTime` alone, so a held deformation is exactly still.
+    const deformScene = new THREE.Scene();
+    deformScene.background = new THREE.Color(0x10141a);
+    const deformLight = new THREE.DirectionalLight(0xfff2df, 3.2);
+    deformLight.position.set(4, 6, 5);
+    deformScene.add(deformLight, new THREE.AmbientLight(0x8090b0, 0.6));
+    const deformTexture = (repeat: number) => {
+        const map = createGridTexture();
+        map.wrapS = map.wrapT = THREE.RepeatWrapping;
+        map.repeat.set(repeat, repeat);
+        return map;
+    };
+    const deformWall = new THREE.Mesh(
+        new THREE.PlaneGeometry(18, 9),
+        new THREE.MeshStandardMaterial({ map: deformTexture(6), roughness: 0.85 }),
+    );
+    deformWall.position.set(0, 3.5, -3);
+    const deformFloor = new THREE.Mesh(
+        new THREE.PlaneGeometry(18, 12),
+        new THREE.MeshStandardMaterial({ map: deformTexture(6), roughness: 0.85 }),
+    );
+    deformFloor.rotation.x = -Math.PI / 2;
+    deformFloor.position.z = 3;
+    deformScene.add(deformWall, deformFloor);
+
+    // Wave: ±0.14 units along the normal, a travelling wave in x and y.
+    const wavePhase = uniform(0);
+    const waveMaterial = new THREE.MeshStandardNodeMaterial({ map: deformTexture(2), roughness: 0.6 });
+    waveMaterial.side = THREE.DoubleSide;
+    waveMaterial.positionNode = positionLocal.add(
+        normalLocal.mul(sin(positionLocal.x.mul(4).add(positionLocal.y.mul(2.5)).sub(wavePhase)).mul(0.14)),
+    );
+    const wave = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 2.4, 160, 120), waveMaterial);
+    wave.position.set(-2.3, 1.5, -0.2);
+    wave.rotation.y = 0.35;
+
+    // Morph blob: a sphere whose single target pushes six-fold lobes out.
+    const blobGeometry = new THREE.SphereGeometry(0.85, 96, 64);
+    const blobPositions = blobGeometry.attributes.position;
+    const lobes = new Float32Array(blobPositions.count * 3);
+    const point = new THREE.Vector3();
+    for (let index = 0; index < blobPositions.count; index++) {
+        point.fromBufferAttribute(blobPositions, index);
+        const direction = point.clone().normalize();
+        const bulge = 1 + 0.3 * Math.sin(6 * Math.atan2(direction.z, direction.x)) * (1 - direction.y * direction.y);
+        point.multiplyScalar(bulge);
+        lobes.set([point.x, point.y, point.z], index * 3);
+    }
+    blobGeometry.morphAttributes.position = [new THREE.BufferAttribute(lobes, 3)];
+    const blob = new THREE.Mesh(
+        blobGeometry,
+        new THREE.MeshStandardMaterial({ map: deformTexture(2), roughness: 0.5 }),
+    );
+    blob.position.set(0.5, 1.2, 0.6);
+    blob.updateMorphTargets();
+
+    const control = new THREE.Mesh(
+        new THREE.BoxGeometry(1.1, 1.1, 1.1),
+        new THREE.MeshStandardMaterial({ map: deformTexture(1), roughness: 0.6 }),
+    );
+    deformScene.add(wave, blob, control);
+
+    function updateDeformers(time: number): void {
+        wavePhase.value = 3 * time;
+        blob.morphTargetInfluences![0] = 0.5 + 0.5 * Math.sin(2.1 * time);
+        control.position.set(2.7, 0.9 + 0.25 * Math.sin(1.3 * time), 0.2);
+        control.rotation.set(0.3, 0.6 * time, 0);
+    }
+
     //* Floor
     const floor = new THREE.Mesh(
         new THREE.PlaneGeometry(120, 120),
@@ -828,6 +905,7 @@ export function createBenchScene(): BenchScene {
         sun.intensity = frame.directionalIntensity;
         sparseLight.intensity = frame.directionalIntensity;
         chartLight.intensity = frame.directionalIntensity;
+        updateDeformers(frame.deformTime ?? 0);
         // The Q11 host pre-exposure multiplier lives in the MRT output node,
         // which the background never passes through — scale it here so the
         // whole frame is uniformly pre-exposed like a real app's render.
@@ -845,6 +923,7 @@ export function createBenchScene(): BenchScene {
         emitterScene,
         hotSpotScene,
         chartScene,
+        deformScene,
         reactiveScene,
         autoReactiveObjects: [overlapPanel, diffOnlyPanel],
         update,

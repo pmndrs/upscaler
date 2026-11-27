@@ -124,6 +124,14 @@ function seededDenoise(
     return effect;
 }
 
+/** The part of `@pmndrs/motion-vectors`' `MotionVectors` the bench drives (structural: loaded on demand). */
+export interface BenchMotionVectors {
+    readonly velocity: THREE.Node;
+    projectionMatrix: THREE.Matrix4 | null;
+    beginFrame(): void;
+    reset(): void;
+}
+
 /**
  * Owns everything between "a scene + camera" and "pixels on the canvas":
  * the low-resolution scene render target (color + velocity MRT + depth),
@@ -165,6 +173,10 @@ export class BenchPipeline {
     private _effectTemporalNodes: unknown[] = [];
     private _effectTextures: TextureExpectation[] = [];
     private _velocitySeedFrame = -2;
+    //* Velocity Source — three's `velocity` unless `?velocity=motion-vectors`
+    //* swapped in @pmndrs/motion-vectors' node (useMotionVectors).
+    private _velocityNode: THREE.Node = velocity as unknown as THREE.Node;
+    private _motion: BenchMotionVectors | null = null;
 
     private _mode: BenchMode = 'upscale-temporal';
     private _debugView: DebugView = DebugView.None;
@@ -207,6 +219,21 @@ export class BenchPipeline {
             colorWrite: false,
             depthWrite: true,
         });
+    }
+
+    /**
+     * Writes `@pmndrs/motion-vectors`' node as the scene MRT's `velocity`
+     * (Q21's A/B, `?velocity=motion-vectors`) instead of three's. Call before
+     * the first render and before {@link enableHostPreExposureDrive}. The node
+     * measures with the resolver's unjittered projection and starts one frame
+     * per input render; a pipeline reset resets it.
+     * @param motion - `MotionVectors.for(renderer)`
+     */
+    useMotionVectors(motion: BenchMotionVectors): void {
+        this._motion = motion;
+        this._velocityNode = motion.velocity;
+        motion.projectionMatrix = this.resolver.unjitteredProjectionMatrix as THREE.Matrix4;
+        this._mrtNode = mrt({ output, velocity: motion.velocity });
     }
 
     get mode(): BenchMode {
@@ -737,6 +764,7 @@ export class BenchPipeline {
         // rendering into a count:2 target without the velocity output leaves
         // color attachment 0 unwritten (black). Non-temporal modes therefore
         // use a single-output MRT into a count:1 target (see configure()).
+        if (temporal) this._motion?.beginFrame();
         this._renderer.setMRT(temporal ? this._mrtNode : this._mrtOutputOnly);
         this._renderer.setRenderTarget(rt);
         this._renderer.render(scene, camera);
@@ -798,7 +826,7 @@ export class BenchPipeline {
      * the resolver as `preExposureTexture` every dispatch.
      */
     enableHostPreExposureDrive(): void {
-        this._mrtNode = mrt({ output: output.mul(this._hostPreExposure), velocity });
+        this._mrtNode = mrt({ output: output.mul(this._hostPreExposure), velocity: this._velocityNode });
         this._mrtOutputOnly = mrt({ output: output.mul(this._hostPreExposure) });
         this._hostPreExposureValue = 1;
     }
@@ -1105,6 +1133,7 @@ export class BenchPipeline {
      */
     reset(scene?: THREE.Scene, camera?: THREE.PerspectiveCamera, frame = 0): void {
         this.resolver.reset();
+        this._motion?.reset();
         this._resetNodeFrame(frame);
         if (camera) this._resetEffectState(camera);
         const activeScene = this._effectScenario?.scene ?? scene;

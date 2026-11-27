@@ -24,6 +24,13 @@ describe('scenarioPlan', () => {
         expect(plan.end).toBe(registry.BENCHMARK_SCENARIOS.Q19.endFrame);
     });
 
+    test('Q21 takes its segments from the bench registry and covers the scenario', () => {
+        const plan = scenarioPlan('Q21', registry);
+        expect(plan.segments).toEqual(registry.Q21_SEGMENTS.map((s) => ({ ...s })));
+        expect(plan.segments.at(-1).end).toBe(registry.BENCHMARK_SCENARIOS.Q21.endFrame);
+        expect(plan.end).toBe(registry.BENCHMARK_SCENARIOS.Q21.endFrame);
+    });
+
     test('Q4 and Q3 cover their scenario exactly, contiguously', () => {
         for (const id of ['Q4', 'Q3']) {
             const plan = scenarioPlan(id, registry);

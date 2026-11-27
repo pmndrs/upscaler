@@ -62,7 +62,8 @@ declare type BenchmarkScenarioId =
     | 'Q17'
     | 'Q18'
     | 'Q19'
-    | 'Q20';
+    | 'Q20'
+    | 'Q21';
 declare type BenchmarkDebugView =
     | 'final'
     | 'motion-vectors'
@@ -92,6 +93,11 @@ declare interface BenchmarkRunConfig {
     warmupFrames: number;
     sampleFrames: number;
     authoritativeTiming: boolean;
+    /**
+     * What the scene MRT writes as motion: three's `velocity` (default) or
+     * `@pmndrs/motion-vectors`' `MotionVectors` node (`?velocity=motion-vectors`).
+     */
+    velocitySource: 'three' | 'motion-vectors';
 }
 
 declare interface BenchmarkPipelineMetadata {
@@ -254,7 +260,9 @@ declare interface BenchmarkFrameState {
     /** Q19: show the frontal backdrop wall behind the props. */
     backdrop?: boolean;
     /** Scene rendered as the upscaler input; defaults to the main torture scene. */
-    scene?: 'main' | 'cornell' | 'sparse-wires' | 'emitters' | 'hot-spots' | 'chart';
+    scene?: 'main' | 'cornell' | 'sparse-wires' | 'emitters' | 'hot-spots' | 'chart' | 'deformers';
+    /** Q21: the deformers' clock in seconds (wave phase, morph weight, control box); held = still. */
+    deformTime?: number;
     /**
      * Q13: show the merged-reactive panels, render the opaque-only color for
      * the auto-generator, and render the explicit coverage alongside it.

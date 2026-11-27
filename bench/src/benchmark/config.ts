@@ -49,6 +49,7 @@ const SCENARIOS = [
     'Q18',
     'Q19',
     'Q20',
+    'Q21',
 ] as const;
 
 function numberParam(params: URLSearchParams, name: string, fallback: number): number {
@@ -122,6 +123,7 @@ export function parseBenchmarkConfig(search = window.location.search): Benchmark
         warmupFrames,
         sampleFrames,
         authoritativeTiming: mode === 'performance',
+        velocitySource: enumParam(params, 'velocity', ['three', 'motion-vectors'] as const, 'three'),
     };
 }
 
