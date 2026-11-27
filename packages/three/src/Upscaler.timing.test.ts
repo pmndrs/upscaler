@@ -20,6 +20,9 @@ function mockRenderer(features: string[] = ['timestamp-query']) {
     const device = {
         lost: new Promise<GPUDeviceLostInfo>(() => {}),
         features: new Set(features),
+        // Below the every-texel metering's 256 invocations, so the only error
+        // scopes are the timer's (the metering compiles inside one too).
+        limits: { maxComputeInvocationsPerWorkgroup: 128, maxComputeWorkgroupSizeX: 128, maxBindGroups: 4 },
         queue: { writeBuffer: vi.fn(), submit: vi.fn() },
         pushErrorScope: vi.fn(),
         popErrorScope: vi.fn(() => Promise.resolve(null)),

@@ -21,6 +21,7 @@ import {
     RCAS_SHADER,
     RCAS_TONEMAP_SPACE_SHADER,
 } from '@pmndrs/upscaler-core/shaders/rcas';
+import { LUMINANCE_PYRAMID_SERIAL_SHADER, LUMINANCE_PYRAMID_SHADER } from '@pmndrs/upscaler-core/shaders/luminancePyramid';
 
 interface BenchmarkTimerBridge {
     readonly enabled: boolean;
@@ -185,6 +186,9 @@ class BenchmarkResolverAdapter implements BenchmarkResolver {
     }
 }
 
+// Bench-only exposure metering forms (NEXT-STEPS §17), forwarded to the core.
+type ExposureMetering = 'taps' | 'every-texel' | 'every-texel-no-deadband' | 'every-quad' | 'every-quad-no-deadband';
+
 function createProductionUpscaler(
     renderer: THREE.WebGPURenderer,
     rcasShader?: string,
@@ -192,6 +196,8 @@ function createProductionUpscaler(
     shadingChangeShader?: string,
     crossFrameReconstruct?: CrossFrameReconstruct,
     depthClipShader?: string,
+    exposureShader?: string,
+    exposureMetering?: ExposureMetering,
 ): Upscaler {
     // The bench always times: its HUD and the benchmark protocol read the timer.
     const options = {
@@ -202,6 +208,8 @@ function createProductionUpscaler(
         _shadingChangeShader: shadingChangeShader,
         _crossFrameReconstruct: crossFrameReconstruct,
         _depthClipShader: depthClipShader,
+        _exposureShader: exposureShader,
+        _exposureMetering: exposureMetering,
     };
     return new Upscaler(options);
 }
@@ -232,6 +240,8 @@ export class BaselineBenchmarkResolver extends BenchmarkResolverAdapter {
         shadingChangeShader?: string,
         crossFrameReconstruct?: CrossFrameReconstruct,
         depthClipShader?: string,
+        exposureShader?: string,
+        exposureMetering?: ExposureMetering,
     ) {
         super(
             createProductionUpscaler(
@@ -241,6 +251,8 @@ export class BaselineBenchmarkResolver extends BenchmarkResolverAdapter {
                 shadingChangeShader,
                 crossFrameReconstruct,
                 depthClipShader,
+                exposureShader,
+                exposureMetering,
             ),
             metadata,
         );
@@ -448,5 +460,78 @@ export function createDepthClipVariantResolver(
         undefined,
         undefined,
         buildDepthClipVariant(options),
+    );
+}
+
+/**
+ * Creates the `exposure-serial-v1` identity: the `baseline` pipeline (same
+ * frozen temporal RCAS, production spatial RCAS) with the exposure pass on the
+ * frozen single-invocation metering it replaced (NEXT-STEPS §16).
+ * @param renderer - Initialized three WebGPU renderer
+ * @param metadata - Registry metadata carrying the experiment identity
+ * @returns One experiment resolver instance
+ */
+export function createExposureSerialResolver(
+    renderer: unknown,
+    metadata: BenchmarkVariantMetadata,
+): BenchmarkResolver {
+    return new BaselineBenchmarkResolver(
+        renderer as THREE.WebGPURenderer,
+        metadata,
+        RCAS_LEGACY_SHADER,
+        RCAS_SHADER,
+        undefined,
+        undefined,
+        undefined,
+        LUMINANCE_PYRAMID_SERIAL_SHADER,
+        // At every render size, as production metered before §17.
+        'taps',
+    );
+}
+
+/**
+ * Creates the exposure-metering identities of NEXT-STEPS §17 on the `baseline`
+ * pipeline (same frozen temporal RCAS, production spatial RCAS), with only the
+ * exposure pass changed. Production meters every texel up to 2^19 render
+ * texels and the 1024 taps above; each identity uses one form at every size:
+ * - `exposure-taps-v1`: the 1024 taps (production before §17)
+ * - `exposure-every-texel-v1`: every render texel on @pmndrs/downsampler's
+ *   ScalarReduction, production epilogue (1/16-stop dead-band kept)
+ * - `exposure-every-texel-no-deadband-v1`: the same without the dead-band
+ * - `exposure-every-quad-v1` / `exposure-every-quad-no-deadband-v1`: every
+ *   2×2 render-texel quad's box average (one bilinear tap) before the log
+ * - `exposure-taps-no-deadband-v1`: production's 1024 taps without the dead-band
+ * @param renderer - Initialized three WebGPU renderer
+ * @param metadata - Registry metadata carrying the experiment identity
+ * @returns One experiment resolver instance
+ */
+export function createExposureMeteringResolver(
+    renderer: unknown,
+    metadata: BenchmarkVariantMetadata,
+): BenchmarkResolver {
+    const id = metadata.id;
+    const meterings: Partial<Record<BenchmarkVariantMetadata['id'], ExposureMetering>> = {
+        'exposure-taps-v1': 'taps',
+        'exposure-taps-no-deadband-v1': 'taps',
+        'exposure-every-texel-v1': 'every-texel',
+        'exposure-every-texel-no-deadband-v1': 'every-texel-no-deadband',
+        'exposure-every-quad-v1': 'every-quad',
+        'exposure-every-quad-no-deadband-v1': 'every-quad-no-deadband',
+    };
+    const metering = meterings[id];
+    const tapsShader = id === 'exposure-taps-no-deadband-v1'
+        ? LUMINANCE_PYRAMID_SHADER.replace('> ADAPT_DEADBAND_STOPS', '> 0.0')
+        : undefined;
+    if (!metering) throw new Error(`Unknown exposure metering identity: ${id}`);
+    return new BaselineBenchmarkResolver(
+        renderer as THREE.WebGPURenderer,
+        metadata,
+        RCAS_LEGACY_SHADER,
+        RCAS_SHADER,
+        undefined,
+        undefined,
+        undefined,
+        tapsShader,
+        metering,
     );
 }

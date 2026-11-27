@@ -22,6 +22,9 @@ function mockRenderer() {
     const device = {
         lost: new Promise<GPUDeviceLostInfo>(() => {}),
         features: new Set<string>(),
+        // Below the every-texel metering's 256 invocations: the taps meter at
+        // every size, and no downsampler pipeline is built.
+        limits: { maxComputeInvocationsPerWorkgroup: 128, maxComputeWorkgroupSizeX: 128, maxBindGroups: 4 },
         queue: {
             writeBuffer: vi.fn((_buffer: unknown, _offset: number, data: ArrayBuffer) => {
                 writes.push(new Float32Array(data.slice(0)));

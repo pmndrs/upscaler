@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { UpscalerCore } from './UpscalerCore';
+import { UpscalerCore, everyTexelGate, everyTexelSupported } from './UpscalerCore';
 import { FLAG_PERSPECTIVE, FLAG_RESET, FLAG_REVERSED_DEPTH } from './shaders/common';
 import type { CoreTexture, CoreTextureDescriptor } from './textures';
 
@@ -9,6 +9,8 @@ import type { CoreTexture, CoreTextureDescriptor } from './textures';
 
 function mockDevice() {
     const writes: Uint32Array[] = [];
+    // Per compute pass: its label and the workgroup counts of its dispatches.
+    const passes: Array<{ label?: string; dispatches: number[][] }> = [];
     // The label of each writeBuffer target, parallel to `writes`.
     const writeTargets: Array<string | undefined> = [];
     const resource = (descriptor: { size?: number; label?: string } = {}) => ({
@@ -24,12 +26,27 @@ function mockDevice() {
         destroy: vi.fn(),
     });
     const encoder = {
-        beginComputePass: () => ({ setPipeline() {}, setBindGroup() {}, dispatchWorkgroups() {}, end() {} }),
+        beginComputePass: (descriptor: { label?: string } = {}) => {
+            const pass = { label: descriptor.label, dispatches: [] as number[][] };
+            passes.push(pass);
+            return {
+                setPipeline() {}, setBindGroup() {}, end() {},
+                dispatchWorkgroups: (...counts: number[]) => { pass.dispatches.push(counts); },
+            };
+        },
         finish: () => ({}),
     };
     const device = {
         lost: new Promise<GPUDeviceLostInfo>(() => {}),
         features: new Set<string>(),
+        limits: { maxComputeInvocationsPerWorkgroup: 256, maxComputeWorkgroupSizeX: 256, maxBindGroups: 4 },
+        // The every-texel metering creates its layouts and buffers inside error
+        // scopes; its pipelines go through createComputePipelineAsync.
+        pushErrorScope: vi.fn(),
+        popErrorScope: vi.fn(async (): Promise<GPUError | null> => null),
+        createBindGroupLayout: resource,
+        createPipelineLayout: resource,
+        createComputePipeline: vi.fn(resource),
         queue: {
             writeBuffer: vi.fn((buffer: { label?: string }, _offset: number, data: ArrayBuffer) => {
                 writeTargets.push(buffer.label);
@@ -39,14 +56,17 @@ function mockDevice() {
             submit: vi.fn(),
         },
         createShaderModule: resource,
-        createComputePipelineAsync: async () => resource(),
+        createComputePipelineAsync: vi.fn(async (descriptor: { label?: string } = {}) => resource(descriptor)),
         createSampler: resource,
         createBuffer: resource,
         createTexture: vi.fn(resource),
         createBindGroup: vi.fn(resource),
         createCommandEncoder: vi.fn(() => encoder),
     };
-    return { device, writes, writeTargets, encoder, gpu: (label: string) => resource({ label }) as unknown as GPUTexture };
+    return {
+        device, writes, writeTargets, encoder, passes,
+        gpu: (label: string) => resource({ label }) as unknown as GPUTexture,
+    };
 }
 
 // The flags word of the most recent constants upload (ConstantsBuffer u32[20]).
@@ -56,6 +76,7 @@ describe('UpscalerCore without an engine', () => {
     beforeEach(() => {
         vi.stubGlobal('GPUBufferUsage', { MAP_READ: 1, COPY_SRC: 4, COPY_DST: 8, UNIFORM: 64, STORAGE: 128 });
         vi.stubGlobal('GPUTextureUsage', { COPY_SRC: 1, COPY_DST: 2, TEXTURE_BINDING: 4, STORAGE_BINDING: 8 });
+        vi.stubGlobal('GPUShaderStage', { COMPUTE: 4 });
     });
 
     afterEach(() => {
@@ -197,6 +218,131 @@ describe('UpscalerCore without an engine', () => {
         await core.prepare();
         core.dispatch({ color: gpu('color') }, { near: 0.1, far: 100, perspective: true });
         expect(writeTargets).toEqual(['upscale-constants-late']);
+    });
+
+    describe('every-texel exposure metering (NEXT-STEPS §17)', () => {
+        const camera = { near: 0.1, far: 100, perspective: true };
+        type Passes = Array<{ label?: string; dispatches: number[][] }>;
+        const exposureDispatches = (passes: Passes) =>
+            passes.filter((p) => p.label === 'upscale-exposure').at(-1)!.dispatches;
+        const everyTexelLabels = (device: ReturnType<typeof mockDevice>['device']) =>
+            device.createComputePipelineAsync.mock.calls
+                .map(([d]) => d?.label)
+                .filter((label) => label?.includes('every-texel'));
+
+        it('gates on 2^19 render texels (≈960×540)', () => {
+            expect(everyTexelGate(960, 540)).toBe(true);
+            expect(everyTexelGate(1024, 512)).toBe(true); // exactly 2^19
+            expect(everyTexelGate(1025, 512)).toBe(false);
+            expect(everyTexelGate(1280, 720)).toBe(false);
+        });
+
+        it('needs 256-invocation, 256-wide workgroups and a second bind group', () => {
+            const limits = { maxComputeInvocationsPerWorkgroup: 256, maxComputeWorkgroupSizeX: 256, maxBindGroups: 4 };
+            const supported = (patch: Partial<typeof limits>) =>
+                everyTexelSupported({ limits: { ...limits, ...patch } } as unknown as GPUDevice);
+            expect(supported({})).toBe(true);
+            expect(supported({ maxComputeInvocationsPerWorkgroup: 128 })).toBe(false);
+            expect(supported({ maxComputeWorkgroupSizeX: 128 })).toBe(false);
+            expect(supported({ maxBindGroups: 1 })).toBe(false);
+        });
+
+        it('meters every texel within the gate and the taps above, compiling only when gated in', async () => {
+            const { device, passes, gpu } = mockDevice();
+            const core = new UpscalerCore({ device: device as unknown as GPUDevice });
+            const inputs = { color: gpu('color'), depth: gpu('depth'), velocity: gpu('velocity') };
+
+            // 1280×720 renders: the taps' single 8×8 workgroup, nothing compiled for the gate.
+            core.configure({ displayWidth: 1920, displayHeight: 1080, customUpscaleRatio: 1.5 });
+            await core.prepare();
+            core.dispatch(inputs, camera);
+            expect(exposureDispatches(passes)).toEqual([[1, 1]]);
+            expect(everyTexelLabels(device)).toEqual([]);
+
+            // 960×540: 64×64-texel partials (15×9 workgroups), then the combine.
+            core.configure({ displayWidth: 1920, displayHeight: 1080, customUpscaleRatio: 2 });
+            await core.prepare();
+            core.dispatch(inputs, camera);
+            expect(exposureDispatches(passes)).toEqual([[15, 9, 1], [1, 1, 1]]);
+            expect(everyTexelLabels(device).sort()).toEqual([
+                'upscale-exposure-every-texel-combine', 'upscale-exposure-every-texel-partials',
+            ]);
+            // Every pipeline is created asynchronously (docs/windows-cross-device.md).
+            expect(device.createComputePipeline).not.toHaveBeenCalled();
+            expect(device.pushErrorScope.mock.calls.map(([filter]) => filter))
+                .toEqual(expect.arrayContaining(['validation', 'internal', 'out-of-memory']));
+        });
+
+        it('meters with the taps until the every-texel metering is ready', async () => {
+            const { device, passes, gpu } = mockDevice();
+            let release: () => void = () => {};
+            const gate = new Promise<void>((resolve) => { release = resolve; });
+            const original = device.createComputePipelineAsync.getMockImplementation()!;
+            device.createComputePipelineAsync.mockImplementation(async (d = {}) => {
+                if (d.label?.includes('every-texel')) await gate;
+                return original(d);
+            });
+            const core = new UpscalerCore({ device: device as unknown as GPUDevice });
+            core.configure({ displayWidth: 64, displayHeight: 32, customUpscaleRatio: 2 });
+            await vi.waitFor(() => expect(core.isReady).toBe(true));
+            const inputs = { color: gpu('color'), depth: gpu('depth'), velocity: gpu('velocity') };
+            core.dispatch(inputs, camera);
+            expect(exposureDispatches(passes)).toEqual([[1, 1]]);
+            release();
+            await core.prepare();
+            core.dispatch(inputs, camera);
+            expect(exposureDispatches(passes)).toEqual([[1, 1, 1], [1, 1, 1]]);
+        });
+
+        it('falls back to the taps for good, warning once, when the compile fails', async () => {
+            const { device, passes, gpu } = mockDevice();
+            const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+            const original = device.createComputePipelineAsync.getMockImplementation()!;
+            device.createComputePipelineAsync.mockImplementation(async (d = {}) => {
+                if (d.label?.includes('every-texel')) throw new Error('compile failed');
+                return original(d);
+            });
+            const core = new UpscalerCore({ device: device as unknown as GPUDevice });
+            core.configure({ displayWidth: 64, displayHeight: 32, customUpscaleRatio: 2 });
+            await core.prepare();
+            expect(core.isReady).toBe(true);
+            const inputs = { color: gpu('color'), depth: gpu('depth'), velocity: gpu('velocity') };
+            core.dispatch(inputs, camera);
+            core.configure({ displayWidth: 64, displayHeight: 32, customUpscaleRatio: 3 });
+            await core.prepare();
+            core.dispatch(inputs, camera);
+            expect(exposureDispatches(passes)).toEqual([[1, 1]]);
+            expect(warn).toHaveBeenCalledTimes(1);
+            // Both entry points were tried once, and never again.
+            expect(everyTexelLabels(device)).toHaveLength(2);
+        });
+
+        it('falls back to the taps when an allocation scope reports an error', async () => {
+            const { device, passes, gpu } = mockDevice();
+            const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+            // The layout scopes (pops 1–3) pop clean; the buffers' first pop
+            // (out-of-memory) does not.
+            let pops = 0;
+            device.popErrorScope.mockImplementation(async () =>
+                (++pops === 4 ? ({ message: 'out of memory' } as GPUError) : null));
+            const core = new UpscalerCore({ device: device as unknown as GPUDevice });
+            core.configure({ displayWidth: 64, displayHeight: 32, customUpscaleRatio: 2 });
+            await core.prepare();
+            core.dispatch({ color: gpu('color'), depth: gpu('depth'), velocity: gpu('velocity') }, camera);
+            expect(exposureDispatches(passes)).toEqual([[1, 1]]);
+            expect(warn).toHaveBeenCalledTimes(1);
+        });
+
+        it('keeps the taps at every size without 256-invocation workgroups', async () => {
+            const { device, passes, gpu } = mockDevice();
+            device.limits.maxComputeInvocationsPerWorkgroup = 128;
+            const core = new UpscalerCore({ device: device as unknown as GPUDevice });
+            core.configure({ displayWidth: 64, displayHeight: 32, customUpscaleRatio: 2 });
+            await core.prepare();
+            core.dispatch({ color: gpu('color'), depth: gpu('depth'), velocity: gpu('velocity') }, camera);
+            expect(exposureDispatches(passes)).toEqual([[1, 1]]);
+            expect(everyTexelLabels(device)).toEqual([]);
+        });
     });
 
     it('advances jitter only on the temporal path with jitter on', async () => {
