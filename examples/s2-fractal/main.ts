@@ -90,7 +90,7 @@ let marchMRT: ReturnType<typeof mrt>;
  * preset. All three read one march result — a node shared by the three
  * outputs (three caches a node used more than once in a temporary), so the
  * generated fragment shader calls `fractal_march` once
- * (checked against the WGSL three emits).
+ * (checked against the WGSL three r187 emits: one definition, one call).
  * @param quality - Key into {@link QUALITY_PRESETS}
  */
 function buildMarchMaterial(quality: string): void {

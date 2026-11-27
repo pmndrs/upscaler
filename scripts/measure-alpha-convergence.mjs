@@ -39,6 +39,7 @@ import { join, resolve } from 'node:path';
 
 import {
     parsePort,
+    closeOwnedCdpBrowser,
     removeTempDirectory,
     resolveServerUrl,
     spawnVite,
@@ -513,7 +514,8 @@ async function main() {
         console.log(`artifacts: ${outputDirectory}`);
         if (logRecords.length) console.warn(`browser log records:\n${logRecords.join('\n')}`);
     } finally {
-        client?.close();
+        // On Windows the browser can outlive its launcher process, so close it over CDP first.
+        await closeOwnedCdpBrowser(client);
         await stopChild(chrome);
         await removeTempDirectory(profile, 'Chrome profile');
         await stopChild(viteServer);
