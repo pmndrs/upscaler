@@ -108,3 +108,18 @@ describe('Q18 fine-line-chart', () => {
         }
     });
 });
+
+describe('Q20 emitter-pan-overshoot', () => {
+    const q20 = getBenchmarkScenario('Q20');
+
+    it('converges still, then pans laterally on the hot-spot wall and holds', () => {
+        const at = (frame: number) => q20.frame(frame).cameraPosition[0];
+        expect(q20.frame(0).scene).toBe('hot-spots');
+        expect(at(119)).toBe(at(0));
+        expect(at(121)).toBeGreaterThan(at(120));
+        expect(at(299)).toBe(at(240));
+        expect(at(419)).toBe(at(360));
+        // The camera looks straight at the wall: the target pans with it.
+        expect(q20.frame(200).cameraTarget[0]).toBe(at(200));
+    });
+});
