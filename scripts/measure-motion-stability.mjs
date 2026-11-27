@@ -69,7 +69,8 @@ import {
 
 const ROOT = resolve(import.meta.dirname, '..');
 const USAGE = `Usage: node scripts/measure-motion-stability.mjs [options]
-  --scenario <id>        Q19 (default; segmented camera + object motion), Q4 (camera
+  --scenario <id>        Q19 (default; segmented camera + object motion), Q21 (deformed
+                         geometry, still then orbiting camera), Q4 (camera
                          orbit/truck/hold) or Q3 (object motion, still camera)
   --ratio <n>            upscale ratio (default 2; native always renders at 1)
   --modes <list>         ${MODES.join(',')} (default temporal; reference =
@@ -77,6 +78,12 @@ const USAGE = `Usage: node scripts/measure-motion-stability.mjs [options]
   --variant <id>         bench variant for the upscaled modes (default production)
   --comparison <id>      a second variant: every upscaled mode runs both, with deltas
   --settings <json>      RuntimeSettings merged over the probe's defaults
+  --velocity <source>    what the upscaler is fed: three (default, three's velocity),
+                         motion-vectors (@pmndrs/motion-vectors' node) or camera
+                         (motion from depth). The judge is always the node, and its
+                         position-stage patch also reaches three's velocity in the
+                         probe, so three vs motion-vectors is NOT an A/B on deformers
+                         (Q21; NEXT-STEPS §22) — use measure-reference-quality.mjs there.
   --heat [frames]        save heat maps (comma-separated frames; bare = the middle
                          of each motion segment)
   --end <frame>          stop early (smoke runs); default the scenario's end
@@ -93,7 +100,7 @@ const USAGE = `Usage: node scripts/measure-motion-stability.mjs [options]
 Writes bench/results/raw/motion-stability/<label>-<scenario>-<ratio>x/.`;
 const cli = parseCliOrExit(
     process.argv.slice(2),
-    ['scenario', 'ratio', 'modes', 'variant', 'comparison', 'settings', 'heat', 'end', 'judge', 'warp', 'width', 'height', 'label', 'url', 'port'],
+    ['scenario', 'ratio', 'modes', 'variant', 'comparison', 'settings', 'velocity', 'heat', 'end', 'judge', 'warp', 'width', 'height', 'label', 'url', 'port'],
     USAGE,
 );
 
@@ -102,6 +109,8 @@ function fail(message) {
     process.exit(1);
 }
 
+/** --velocity names → the probe's `velocity` request field. */
+const PROBE_VELOCITY = { three: 'engine', 'motion-vectors': 'node', camera: 'camera' };
 const registry = await import(pathToFileURL(join(ROOT, 'bench/src/benchmark/scenarios.ts')).href);
 let plan;
 let conditions;
@@ -111,6 +120,8 @@ try {
     const variants = [cli.variant ?? 'production', ...(cli.comparison ? [cli.comparison] : [])];
     conditions = expandConditions((cli.modes ?? 'temporal').split(',').filter(Boolean), variants);
     settings = cli.settings ? JSON.parse(cli.settings) : undefined;
+    if (cli.velocity !== undefined && !(cli.velocity in PROBE_VELOCITY))
+        throw new Error(`Unknown --velocity ${cli.velocity} (${Object.keys(PROBE_VELOCITY).join(', ')}).`);
 } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
 }
@@ -226,6 +237,7 @@ async function main() {
                 ...(cli.warp ? { warpTarget: cli.warp } : {}),
                 ...(condition.variant ? { variant: condition.variant } : {}),
                 ...(settings ? { settings } : {}),
+                ...(cli.velocity ? { velocity: PROBE_VELOCITY[cli.velocity] } : {}),
             };
             const response = await client.send(
                 'Runtime.evaluate',
@@ -279,7 +291,7 @@ async function main() {
         await writeFile(join(outputDirectory, 'browser-log.txt'), `${records.join('\n')}\n`);
         await writeFile(
             join(outputDirectory, 'summary.json'),
-            `${JSON.stringify({ scenario: plan.id, ratio, width, height, start: plan.start, end, judge: cli.judge ?? 'input', warp: cli.warp ?? 'output', settings: settings ?? null, heatFrames, results, comparisons }, null, 2)}\n`,
+            `${JSON.stringify({ scenario: plan.id, ratio, width, height, start: plan.start, end, velocity: cli.velocity ?? 'three', judge: cli.judge ?? 'input', warp: cli.warp ?? 'output', settings: settings ?? null, heatFrames, results, comparisons }, null, 2)}\n`,
         );
         if (records.some((line) => /error|exception|validation|invalid/i.test(line))) {
             console.warn(`\nbrowser log:\n${records.join('\n')}`);

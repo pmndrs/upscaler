@@ -291,6 +291,39 @@ function q20(frame: number): BenchmarkFrameState {
     return { ...state(frame, [x, 0, EMITTER_DISTANCE], [x, 0, 0]), scene: 'hot-spots' };
 }
 
+/**
+ * Q21: deformed geometry under a still and an orbiting camera (BenchScene
+ * 'deformers': a `positionNode` wave, a morph-target blob, a rigid control
+ * box). The deformation is held (non-zero, still) while history converges,
+ * animates under a still camera, keeps animating under an orbit, then holds
+ * with the camera still again. Run with `?velocity=three|motion-vectors` to
+ * A/B the motion source (bench/docs/NEXT-STEPS.md §22).
+ */
+export const Q21_SEGMENTS = [
+    { name: 'still-held', start: 0, end: 119 },
+    { name: 'deform', start: 120, end: 239 },
+    { name: 'orbit-deform', start: 240, end: 359 },
+    { name: 'hold', start: 360, end: 419 },
+] as const;
+/** Q21's held deformation clock: wave and morph both mid-stroke, not at rest. */
+const Q21_HELD_TIME = 0.7;
+const Q21_TARGET = [0, 1.3, 0] as const;
+/** Q21 orbit speed: 0.4°/frame about the target's vertical axis. */
+const Q21_ORBIT_STEP = (0.4 * Math.PI) / 180;
+
+function q21(frame: number): BenchmarkFrameState {
+    const ramp = (start: number, length: number) => Math.min(Math.max(frame - start + 1, 0), length);
+    const deformTime = Q21_HELD_TIME + ramp(120, 240) / 60;
+    const yaw = Q21_ORBIT_STEP * ramp(240, 120);
+    const radius = 8;
+    const position = [
+        Q21_TARGET[0] + radius * Math.sin(yaw),
+        2.4,
+        Q21_TARGET[2] + radius * Math.cos(yaw),
+    ] as const;
+    return { ...state(frame, position, Q21_TARGET), scene: 'deformers', deformTime };
+}
+
 const SCENARIOS: Record<BenchmarkScenarioId, BenchmarkScenarioDefinition> = {
     Q0: {
         id: 'Q0',
@@ -661,6 +694,25 @@ const SCENARIOS: Record<BenchmarkScenarioId, BenchmarkScenarioDefinition> = {
         subruns: [],
         unsupported: null,
         frame: q20,
+    },
+    Q21: {
+        id: 'Q21',
+        name: 'deformer-motion',
+        // Capture-only: A/B `?velocity=three|motion-vectors` with
+        // scripts/measure-reference-quality.mjs and measure-motion-stability.mjs.
+        endFrame: 419,
+        captures: ['0', '119', '180', '300', '419'],
+        debugViews: ['final', 'motion-vectors', 'disocclusion', 'accumulation-age'],
+        // At the still-camera pose (still-held, deform); the orbit moves them.
+        rois: {
+            full: [0, 0, 1, 1],
+            wave: [0.195, 0.305, 0.258, 0.34],
+            blob: [0.455, 0.4, 0.178, 0.25],
+            control: [0.64, 0.43, 0.137, 0.215],
+        },
+        subruns: [],
+        unsupported: null,
+        frame: q21,
     },
 };
 

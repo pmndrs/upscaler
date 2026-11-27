@@ -61,8 +61,11 @@ import { SingleVariantRegistry } from '../benchmark/variants';
  * (`camera`, `MotionFromDepthPass`). Both velocity nodes render every frame,
  * in one MRT: the node takes the slot named `velocity` (three tracks previous
  * positions of instanced and skinned meshes only for that name), three's
- * `velocity` a third slot. The bench has no deformers, so the node's patched
- * position stage leaves three's motion unchanged.
+ * `velocity` a third slot. Installing the node patches every material's
+ * position stage, and three's `velocity` in the same MRT reads the patched
+ * stage too: on Q21's deformers `engine` measured the same as `node` (≤ 4e-6
+ * warp error per frame), so this probe can't A/B the two there — Q21's A/B is
+ * the main bench's `?velocity=` (bench/docs/NEXT-STEPS.md §22).
  */
 
 // `reference`: the 2×2-supersampled render (see **reference** above) as the
@@ -200,7 +203,9 @@ function applyFrame(scenario: string, frame: number): { scene: THREE.Scene; rese
                 ? bench.emitterScene
                 : state.scene === 'chart'
                   ? bench.chartScene
-                  : bench.scene;
+                  : state.scene === 'deformers'
+                    ? bench.deformScene
+                    : bench.scene;
     scene.updateMatrixWorld(true);
     return { scene, resetHistory: state.resetHistory };
 }

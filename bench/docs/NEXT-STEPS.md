@@ -2251,6 +2251,104 @@ node scripts/run-benchmark.mjs --smoke --ratios 2 --blocks 4 \
 # per-frame records: bench/results/raw/history-overshoot/<label>-2x/summary.json
 ```
 
+## 22. Deformed geometry: caller-supplied velocity + `@pmndrs/motion-vectors` — DONE (2026-11-28)
+
+**Question.** three's `velocity` reports deformation (`positionNode`, morph targets,
+`displacementMap`) as motion; `@pmndrs/motion-vectors`' own lab measures 3.2 px
+(static displacement), 51.9 px (moving `positionNode`) and 11.6 px (held morph)
+of error where its `MotionVectors` node stays under 0.01 px. Does that reach the
+upscaler's output, and is the node worth recommending?
+
+**Library change.** `UpscalePass` (constructor) and `upscaleScene()` take
+`velocityNode`: a node, or a producer `{ velocity, projectionMatrix, beginFrame? }`
+(the shape of `MotionVectors.for(renderer)`, matched structurally — the library
+never imports the package). The MRT output stays `velocity`; the surfaces set the
+producer's `projectionMatrix` to the unjittered projection (`null` on a view-offset
+conflict, like three's node via `_setJitterActive`) and call `beginFrame()` once per
+upscaler frame. `upscale()` takes it too, for the projection only. Default (three's
+`velocity`) unchanged. Rejected: asking the caller to wire `beginFrame()` (the
+surfaces own the render, so they know the frame); accepting `motion.velocity` and
+guessing its owner (a bare node has no projection to set).
+
+**Scenario.** Q21 `deformer-motion` (BenchScene `deformScene`): checker-textured
+`positionNode` wave, morph-target blob, rigid control box. The bench knob is
+`?velocity=three|motion-vectors` (`BenchPipeline.useMotionVectors`; the module is
+imported only on request, so default runs never construct the node).
+
+**Quality vs a 64-spp supersampled reference** (temporal, ratio 2, 1280×720, 16
+frames per window; ROIs at the still-camera pose, so in `orbit-deform`/`hold` they
+cover whatever sits there after the orbit):
+
+| segment | ROI | PSNR three | PSNR MV | SSIM three | SSIM MV | tErr three | tErr MV |
+|---|---|---|---|---|---|---|---|
+| still-held | full | 24.96 | 26.13 | 0.808 | 0.856 | 0.679 | 0.162 |
+| still-held | wave | 21.02 | 26.41 | 0.458 | 0.830 | 3.882 | 0.142 |
+| still-held | blob | 21.25 | 27.06 | 0.580 | 0.878 | 4.229 | 0.146 |
+| still-held | control | 28.28 | 28.28 | 0.869 | 0.869 | 0.154 | 0.154 |
+| deform | full | 24.95 | 25.93 | 0.803 | 0.845 | 0.762 | 0.362 |
+| deform | wave | 21.08 | 25.96 | 0.458 | 0.810 | 3.989 | 0.727 |
+| deform | blob | 21.43 | 24.86 | 0.565 | 0.790 | 3.777 | 1.277 |
+| deform | control | 25.98 | 25.98 | 0.728 | 0.728 | 3.396 | 3.396 |
+| orbit-deform | full | 23.75 | 24.34 | 0.740 | 0.772 | 10.272 | 9.923 |
+| orbit-deform | wave | 21.81 | 24.87 | 0.504 | 0.724 | 10.821 | 8.473 |
+| orbit-deform | blob | 20.35 | 23.76 | 0.522 | 0.748 | 11.030 | 8.141 |
+| orbit-deform | control | 24.05 | 24.06 | 0.722 | 0.723 | 7.238 | 7.232 |
+| hold | full | 25.49 | 26.18 | 0.831 | 0.855 | 0.499 | 0.131 |
+| hold | wave | 24.06 | 27.62 | 0.711 | 0.854 | 2.426 | 0.127 |
+| hold | blob | 21.74 | 25.85 | 0.604 | 0.813 | 3.081 | 0.162 |
+| hold | control | 25.14 | 25.14 | 0.794 | 0.794 | 0.160 | 0.159 |
+
+tErr = mean |Δoutput − Δreference| per frame on the 0–255 display scale; on a held
+window the reference is still, so it is pure flicker. With three's velocity the
+motionless deformers **boil**: 3.9–4.2 /255 per frame against 0.14 (≈ 27×), and
+PSNR loses 5.4 dB (wave) / 5.8 dB (blob). The rigid control box is identical in
+every window — the node changes nothing where three is already right. Whole-frame
+PSNR gains are 0.6–1.2 dB because the deformers cover ~15 % of the frame.
+
+**Debug views** (`scripts/capture-velocity-views.mjs`, frames 110/180/300/410):
+three's Motion Vectors view paints the wave and the blob with motion on the held
+frames (110, 410) where the node's view is flat neutral everywhere; under the orbit
+(300) three's view shows the deformers as patches inconsistent with the smooth
+camera gradient around them. Disocclusion: three leaves partial outlines and specks
+on the held deformers and the accumulation-age view shows them never fully maturing
+(grey streaks); with the node both are clean (black / white) on held frames, and
+under deformation only the moving silhouettes reset. The final frames show the
+smear directly: the wave's checker turns into streaks and the blob's grid smears
+with three's velocity on a still camera.
+
+**Flicker meter (`measure-motion-stability.mjs --judge display --warp error`).** Not
+an A/B on deformers: the probe judges with the node, and installing the node on a
+renderer patches every material's position stage, which three's `velocity` in the
+same MRT then reads too — the "three" and "motion-vectors" conditions differ by at
+most 3.9e-6 warp error per frame (segment means: still-held 0.00013, deform 0.00051,
+orbit-deform 0.00750, hold 0.00016 for both). The reference meter's tErr above is the
+clean flicker comparison. (Likely mechanism; not isolated further.)
+
+**Cost.** Upscaler GPU time unchanged: Q21 ratio 2, 400 timed frames, median
+compute sum 320.8 / 320.7 µs (three's velocity) vs 321.7 / 320.7 µs (node), ABAB
+in one worktree session — within noise. The scene render isn't timed by the bench;
+the package reports +7–15 µs per frame for its node (their number, not ours).
+
+**Verdict.** Recommend `MotionVectors` whenever a scene has `positionNode`, morph or
+displacement deformation; three's velocity remains fine for rigid/camera motion.
+Transparents and particles still need the reactive mask. Docs:
+docs/inputs-and-contracts.md → "When three's velocity is wrong".
+
+**GPU verification of the option** (temporary harness, not committed): `UpscalePass`
+and `upscaleScene()` with `velocityNode: MotionVectors.for(renderer)` on a held
+`positionNode` wave render clean, the Motion Vectors view reads exactly the
+background's neutral value on the wave (three's: offset), `motion.frame` advances
+once per rendered frame on both surfaces, no WebGPU/WGSL errors.
+
+```bash
+node scripts/measure-reference-quality.mjs --scenario Q21 --ratio 2 --modes temporal --velocity three --label vel-three
+node scripts/measure-reference-quality.mjs --scenario Q21 --ratio 2 --modes temporal --velocity motion-vectors --label vel-motion-vectors
+# bench/results/raw/reference-quality/vel-<source>-Q21-2x/summary.json (windows → summary → rois)
+node scripts/capture-velocity-views.mjs --scenario Q21
+# bench/results/raw/velocity-views/Q21-2x/grid-f<frame>.png (rows: three, motion-vectors)
+node scripts/measure-motion-stability.mjs --scenario Q21 --judge display --warp error --velocity three --label vel-three
+```
+
 ## Explicitly not planned (measured against)
 
 - Lanczos2/bicubic history filtering (+47% accumulate, no visible win).
