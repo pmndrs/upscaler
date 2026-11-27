@@ -1442,7 +1442,10 @@ export class UpscalerCore<THandle = GPUTexture> {
             label: 'upscale-exposure',
             timestampWrites: this._timer?.passDescriptor('exposure'),
         });
-        if (this._everyTexelActive && this._everyTexelExposure?.ready) {
+        // Metering is unused when a fixed or app-supplied exposure overrides
+        // it; the taps form then publishes without metering (issue #98).
+        const metered = this._effectiveSettings.autoExposure && !inputs.exposureTexture;
+        if (metered && this._everyTexelActive && this._everyTexelExposure?.ready) {
             // Every render texel: workgroup partials, then a one-workgroup
             // combine that runs the same epilogue (EveryTexelExposure).
             this._everyTexelExposure.encodePass(exposurePass, {
