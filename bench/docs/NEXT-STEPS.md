@@ -1902,7 +1902,7 @@ compute sums read 1015 → 1130 µs and 1066 → 1092 µs, inside their own nois
 ratios 0.92–1.49).
 
 **Packaging.** `@pmndrs/downsampler` is a regular `dependency` of the published package
-and of `packages/core`, **pinned to exactly `0.1.0`**: a patch that changed the generated
+and of `packages/core`, **pinned to exactly `0.1.1`**: a patch that changed the generated
 WGSL would otherwise change our exposure without a release of ours, so a bump is a
 deliberate change that re-runs this section's checks. It is **external** in both the JS
 and the `.d.ts` builds: engine-free with no dependencies of its own, its MIT code is not
@@ -1910,6 +1910,13 @@ re-shipped inside ours, and an app on the same version shares the install (only 
 generator is used, so there is no pipeline cache to share). `verify-packed-subpaths`
 allows `@pmndrs/downsampler/webgpu` from every entry (the shared chunk reaches it) and
 installs it in each consumer.
+
+**Bump 0.1.0 → 0.1.1 (2026-11-28).** 0.1.1 adds async pipeline compile and self-dispatch
+helpers and does not touch the scalar kernel: `createScalarKernel` and
+`scalarLayoutEntries` output for all four forms we build (texel / quad, with and
+without the dead-band) is byte-identical between the two versions (45,460 bytes of
+WGSL + layout, compared with `cmp`), so the metering shader is unchanged and this
+section's GPU checks were not re-run. §16–§17's numbers were measured on 0.1.0.
 
 **Open.** Windows (DXC compile time of the scalar kernel, now async through our queue)
 and a quiet-machine re-time of ratios 2–3. Folding the metering into a pass that
