@@ -420,6 +420,8 @@ export function buildDepthClipVariant(options: DepthClipVariantOptions): string 
 @group(0) @binding(3) var<storage, read> reconstructedDepth : array<u32>;
 @group(0) @binding(4) var maskOutput : texture_storage_2d<rgba8unorm, write>;
 @group(0) @binding(5) var<storage, read_write> nextReconstructedDepth : array<u32>;
+// Production's reset signal (issue #102): bound by the same encode path.
+@group(0) @binding(6) var resetSignal : texture_2d<f32>;
 
 override TAN_HALF_VFOV : f32 = 0.46630766;
 const DEPTH_SEPARATION_CONSTANT : f32 = 1.37e-5;
@@ -445,6 +447,7 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
     let maxCoord = vec2i(C.renderSize) - 1;
     let width = i32(C.renderSize.x);
     nextReconstructedDepth[u32(center.y * width + center.x)] = EMPTY_DEPTH;
+    let reset = hasFlag(FLAG_RESET) || textureLoad(resetSignal, vec2i(0), 0).r > 0.5;
 
     let curDepth = textureLoad(dilatedDepth, center, 0).r;
     let motion = textureLoad(dilatedMotion, center, 0);
@@ -479,7 +482,7 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
         let difference = curDepth - tapDepth;${vote}
     }
     ${resolve}${surface}
-    textureStore(maskOutput, gid.xy, vec4f(disocclusion, 0.0, 0.0, 1.0));
+    textureStore(maskOutput, gid.xy, vec4f(select(disocclusion, 1.0, reset), 0.0, 0.0, 1.0));
 }
 `,
     );

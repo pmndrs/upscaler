@@ -44,6 +44,8 @@ export class FrameGraphUpscaleTask extends FrameGraphTask {
     exposureTexture?: FrameGraphTextureHandle;
     /** Optional host pre-exposure baked into the color (red of texel 0, 0). */
     preExposureTexture?: FrameGraphTextureHandle;
+    /** Optional GPU reset signal: history drops this frame when red of texel (0, 0) > 0.5. */
+    resetTexture?: FrameGraphTextureHandle;
     /** The camera the inputs are rendered with. */
     camera?: Camera;
 
@@ -90,6 +92,7 @@ export class FrameGraphUpscaleTask extends FrameGraphTask {
             this.reactiveOpaqueColorTexture,
             this.exposureTexture,
             this.preExposureTexture,
+            this.resetTexture,
         ].filter((handle): handle is FrameGraphTextureHandle => handle !== undefined);
         this.dependencies = new Set(inputs);
 
@@ -118,6 +121,7 @@ export class FrameGraphUpscaleTask extends FrameGraphTask {
                     reactiveOpaqueColor: resolve(this.reactiveOpaqueColorTexture),
                     exposureTexture: resolve(this.exposureTexture),
                     preExposureTexture: resolve(this.preExposureTexture),
+                    resetTexture: resolve(this.resetTexture),
                     deltaTime: this._frameGraph.engine.getDeltaTime() / 1000,
                 },
                 camera,

@@ -106,6 +106,19 @@ export interface UpscalerNodeOptions {
      */
     exposureTexture?: TextureNodeLike;
     /**
+     * Optional GPU **reset signal** texture node: history drops on any frame
+     * where its red texel (0, 0) is above 0.5, consumed with no readback.
+     * Registered as a graph dependency like the other inputs; its texture
+     * needs a GPU allocation before the first dispatch. Same-frame only if
+     * the verdict is written before this node's `updateBefore` in the same
+     * pipeline run: a cut detector updated outside the graph reads last
+     * frame's in-graph depth and resets one frame late (the cut frame ghosts);
+     * see docs/inputs-and-contracts.md. With `guides`, give it to the guides node
+     * as well so the disocclusion guide reflects the reset. Mirrors
+     * {@link DispatchInputs.resetTexture}.
+     */
+    resetTexture?: TextureNodeLike;
+    /**
      * Optional {@link TemporalGuidesNode} to share one upscaler with (temporal
      * path only). When set, the guides node dispatches the early geometry
      * stage as soon as depth+velocity have rendered, effects in the graph can
@@ -169,6 +182,7 @@ export class UpscalerNode extends Node<'vec4'> {
     private readonly _reactive: TextureNodeLike;
     private readonly _reactiveOpaqueColor: TextureNodeLike;
     private readonly _exposureTexture: TextureNodeLike;
+    private readonly _resetTexture: TextureNodeLike;
     // Linked guides node (split-frame sharing) — see UpscalerNodeOptions.guides.
     private readonly _guidesNode: TemporalGuidesNode | null;
     private readonly _camera: CameraLike;
@@ -220,6 +234,7 @@ export class UpscalerNode extends Node<'vec4'> {
         this._reactive = options.reactive ?? null;
         this._reactiveOpaqueColor = options.reactiveOpaqueColor ?? null;
         this._exposureTexture = options.exposureTexture ?? null;
+        this._resetTexture = options.resetTexture ?? null;
         this._guidesNode = options.guides ?? null;
         this._camera = camera;
         this._options = options;
@@ -289,6 +304,7 @@ export class UpscalerNode extends Node<'vec4'> {
         if (this._reactive) props.reactiveNode = this._reactive;
         if (this._reactiveOpaqueColor) props.reactiveOpaqueColorNode = this._reactiveOpaqueColor;
         if (this._exposureTexture) props.exposureNode = this._exposureTexture;
+        if (this._resetTexture) props.resetNode = this._resetTexture;
 
         // Apply the sub-pixel jitter before the input passes render — the same
         // pipeline hooks (and view-offset claim) three's TRAANode/TAAUNode use.
@@ -472,6 +488,7 @@ export class UpscalerNode extends Node<'vec4'> {
         const exposureTexture = this._exposureTexture
             ? this._texture(this._exposureTexture)
             : null;
+        const resetTexture = this._resetTexture ? this._texture(this._resetTexture) : null;
 
         const dispatchInputs = {
             color,
@@ -480,6 +497,7 @@ export class UpscalerNode extends Node<'vec4'> {
             reactive: reactive ?? undefined,
             reactiveOpaqueColor: reactiveOpaqueColor ?? undefined,
             exposureTexture: exposureTexture ?? undefined,
+            resetTexture: resetTexture ?? undefined,
             deltaTime: dt,
         };
         // Linked guides mode: the guides node already dispatched the early

@@ -997,6 +997,8 @@ export class CandidateUpscaler {
             exposureCur.createView(),
             externalExposureView,
             hostPreExposureView,
+            // Production pyramid's reset signal: the zero dummy (no reset).
+            this._reactiveDummy!.createView(),
         ]);
         const exposurePass = encoder.beginComputePass({
             label: 'upscale-exposure',

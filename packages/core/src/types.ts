@@ -240,6 +240,22 @@ export interface DispatchInputs<TTexture = GPUTexture> {
     preExposureTexture?: TTexture;
     /** Drop all history this frame (camera cut, teleport, resize). */
     reset?: boolean;
+    /**
+     * Optional **GPU reset signal**: drop all history this frame when the red
+     * channel of texel (0, 0) is above 0.5 (any float format — a 1×1 is
+     * typical). Equivalent to {@link reset} but decided on the GPU, so a
+     * GPU-side cut detector's verdict lands in the same frame with no readback
+     * stall. `@pmndrs/motion-vectors`' `CutDetector.flag` (1×1 rgba16float,
+     * `.r` = 1 on a cut) can be passed as is. Read by every stage that honours
+     * {@link reset}: disocclusion (all 1), exposure (snaps, no adaptation),
+     * shading change, accumulation age and locks. Unlike `resetHistory()` it
+     * cannot restart the jitter sequence (CPU state), which only changes the
+     * phase the fresh history starts at. When omitted a zero placeholder is
+     * bound, and output is byte-identical to not having the input. Adapters
+     * resolve it like every input: an engine texture with no GPU allocation
+     * yet throws at dispatch.
+     */
+    resetTexture?: TTexture;
     /** Seconds since the previous frame. */
     deltaTime?: number;
 }
@@ -258,6 +274,13 @@ export interface GuideDispatchInputs<TTexture = GPUTexture> {
     velocity: TTexture;
     /** Drop all history this frame (camera cut, teleport, resize). */
     reset?: boolean;
+    /**
+     * Optional GPU reset signal, as {@link DispatchInputs.resetTexture}. On a
+     * split frame pass it here: the disocclusion guide is written in this
+     * stage, and the late stage reuses it unless `dispatchUpscale()` is given
+     * its own.
+     */
+    resetTexture?: TTexture;
     /** Seconds since the previous frame. */
     deltaTime?: number;
 }

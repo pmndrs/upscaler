@@ -5,6 +5,28 @@ import { Upscaler } from './Upscaler';
 import { getQualityModeRatio } from '@pmndrs/upscaler-core/math/resolution';
 import { DebugView, QualityMode, type RuntimeSettings, type UpscalePath } from './types';
 
+/**
+ * A GPU reset signal for {@link UpscalePass.setResetSignal}: the texture the
+ * upscale reads and the callback that writes this frame's verdict into it.
+ * They are set and cleared together, so a stale verdict can't outlive its
+ * producer.
+ */
+export interface UpscalePassResetSignal {
+    /**
+     * Float texture whose red texel (0, 0) > 0.5 makes the frame a reset, e.g.
+     * `@pmndrs/motion-vectors`' `MotionFromDepthPass.cutFlag`. It must have a
+     * GPU allocation by the first {@link UpscalePass.draw} (render to it, or
+     * `renderer.initTexture()`), as for every input.
+     */
+    texture: THREE.Texture;
+    /**
+     * Encodes this frame's verdict. Called by {@link UpscalePass.draw} on the
+     * temporal path right after the scene renders into `target` and before the
+     * upscale dispatches, while `camera` still holds its jittered projection.
+     */
+    update: (target: THREE.RenderTarget, camera: THREE.Camera) => void;
+}
+
 /** Options for {@link UpscalePass.configure}. */
 export interface UpscalePassConfig {
     /** Output size in physical pixels. */
@@ -50,6 +72,7 @@ export class UpscalePass {
     private _path: UpscalePath = 'temporal';
     private _reactive: THREE.Texture | null = null;
     private _reactiveOpaque: THREE.Texture | null = null;
+    private _resetSignal: UpscalePassResetSignal | null = null;
 
     /**
      * @param renderer - An initialized `WebGPURenderer`
@@ -168,6 +191,7 @@ export class UpscalePass {
         this._renderer.render(scene, camera);
         this._renderer.setRenderTarget(null);
         this._renderer.setMRT(null);
+        if (this.upscaler.isReady && temporal) this._resetSignal?.update(rt, camera);
         if (this.upscaler.isReady) this.upscaler.endFrame(camera);
         if (!this.upscaler.isReady) return;
 
@@ -178,6 +202,7 @@ export class UpscalePass {
                 velocity: temporal ? rt.textures[1] : undefined,
                 reactive: this._reactive ?? undefined,
                 reactiveOpaqueColor: this._reactiveOpaque ?? undefined,
+                resetTexture: temporal ? this._resetSignal?.texture : undefined,
                 deltaTime,
             },
             camera,
@@ -248,6 +273,20 @@ export class UpscalePass {
      */
     setReactiveOpaqueColor(texture: THREE.Texture | null): void {
         this._reactiveOpaque = texture;
+    }
+
+    /**
+     * Sets a GPU reset signal for every following {@link draw} on the temporal
+     * path: each frame the `update` callback encodes a verdict (a cut
+     * detector) between the scene render and the upscale, and history drops on
+     * any frame whose `texture` reads red > 0.5 — same frame, no readback.
+     * The texture and its producer are one unit: `null` clears both, so a
+     * last verdict of 1 can't keep resetting (and aliasing) every frame after
+     * its producer is gone. See docs/inputs-and-contracts.md.
+     * @param signal - The verdict texture and its per-frame producer, or null
+     */
+    setResetSignal(signal: UpscalePassResetSignal | null): void {
+        this._resetSignal = signal;
     }
 
     /**
