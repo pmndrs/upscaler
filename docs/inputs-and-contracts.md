@@ -211,6 +211,12 @@ all: the exposure pass only publishes the value you supplied (about 10 µs saved
 frame on Apple M5 Pro, issue #98). If you already compute exposure, pass it in this way
 rather than leaving auto-exposure on.
 
+You can change a fixed exposure or an `exposureTexture` freely, including a step in a
+single frame: the upscaler rescales the accumulated history by the ratio of this
+frame's value to last frame's, so the step doesn't show (issue #99). Auto-exposure
+changes are not rescaled. It adapts gradually, and letting old history decode at the
+new exposure helps it follow lighting changes.
+
 The conditioning exposure also sets the **HDR headroom** of the temporal output.
 Values resolve up to about `999 / exposure` in the input's linear domain. Below
 that they lose precision as they approach it, and sub-pixel highlights are

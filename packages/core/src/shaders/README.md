@@ -591,8 +591,9 @@ resolver variant, with debug visualization for every signal that scales the box.
 
 #### Exposure history
 
-- **Current status:** Host pre-exposure parity adopted (2026-07-21, NEXT-STEPS item 2);
-  conditioning-exposure drift remains uncorrected by design.
+- **Current status:** Host pre-exposure parity adopted (2026-07-21, NEXT-STEPS item 2).
+  A fixed or app-supplied conditioning exposure is corrected the same way (2026-11-28,
+  issue #99, NEXT-STEPS §23); auto-exposure drift stays uncorrected by design.
 - **Local implementation:** The pyramid publishes the app's `preExposureTexture` value
   in the 1×1 exposure texel's `.b` (1.0 when absent) and meters auto-exposure
   host-invariantly (divides host out of the measured average, as FSR2 divides
@@ -608,13 +609,18 @@ resolver variant, with debug visualization for every signal that scales the box.
   without it), and output brightness tracks the drive in a single frame. Without a
   `preExposureTexture` both texels publish 1.0 and captures are **byte-identical** to
   the pre-change build — the correction is free for existing users.
-- **Still divergent:** Conditioning (auto/fixed/external) exposure changes are not
-  ratio-corrected; adaptation is eased slowly (`ADAPT_SPEED`) to keep the per-frame
-  mismatch between history conditioned under last frame's exposure and the current
-  frame small. (The shading-change detector is unaffected: it scales both frames by the
-  current conditioning exposure.) Correcting it would change output for
-  all auto-exposure users and needs its own captures — revisit only with evidence of
-  pumping on real content.
+- **Fixed / external conditioning exposure (issue #99):** accumulate multiplies the
+  history ratio by `exposure / previous.r` when `FLAG_AUTO_EXPOSURE` is off or
+  `FLAG_EXTERNAL_EXPOSURE` is on (the previous texel is already loaded for `.b`). An
+  app can step these in one frame; uncorrected, a 1 → 4 step on Q12 read −15.5 % and
+  8 → 1 on Q20 +157 % (15 hot pixels), fading over 50+ frames. Corrected, both stay at
+  the conditioning floor.
+- **Still divergent:** Auto-exposure changes are not ratio-corrected; adaptation is
+  eased (`ADAPT_SPEED`), so the per-frame mismatch is small, and it moves old history
+  toward the new lighting. Correcting it measured +55 % Q15 drift lag and +10 % on Q9
+  with no flicker gain (`accumulate-conditioning-correction-v1`). (The shading-change
+  detector is unaffected either way: it scales both frames by the current
+  conditioning exposure.)
 
 #### Locks
 
@@ -997,8 +1003,9 @@ factor before the invertible tonemap; `rcas.ts` or `blit.ts` later divides by th
 factor before linear/HDR output.
 
 This conditions the local accumulation range, but it does not guarantee unchanged final
-brightness. In particular, stored history is not corrected when exposure changes, so
-adaptation can cause pumping or trails. Toggle `settings.autoExposure`
+brightness. In particular, stored history is not corrected when auto-exposure adapts, so
+adaptation can cause pumping or trails (a fixed or external exposure change is
+corrected; see "Exposure history"). Toggle `settings.autoExposure`
 (`FLAG_AUTO_EXPOSURE`); with it off, `settings.exposure` follows the same local path.
 Passing `dispatch({ exposureTexture })` overrides both values with the texture's red
 channel, but still feeds this local conditioning/history path. It is not a way to

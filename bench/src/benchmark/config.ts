@@ -9,6 +9,8 @@ const VARIANTS = [
     'accumulate-still-relax0-v1',
     'accumulate-history-unclamped-v1',
     'accumulate-history-tap-clamp-v1',
+    'accumulate-conditioning-correction-v1',
+    'accumulate-uncorrected-conditioning-v1',
     'local-baseline-5d6a65e',
     'local-baseline-through-e00-harness',
     'rcas-fsr315-limiter',

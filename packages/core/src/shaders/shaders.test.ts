@@ -130,7 +130,9 @@ const BASELINE_FINGERPRINTS: Record<string, string> = {
     // so a fixed/external exposure of 0 no longer blacks out accumulation.
     // 2026-11-20: reset read from the exposure texel's resolved .a too.
     // 2026-11-27: Catmull-Rom history colour bounded by its 2x2 texels (#118).
-    accumulate: 'de5cba82',
+    // 2026-11-28: fixed/external conditioning-exposure history correction
+    // (#99; was 'de5cba82').
+    accumulate: '733e241f',
     // 2026-10-08: 1/16-stop adaptation dead-band, so the jitter-phase wobble of
     // the metered log-average no longer re-conditions history on still scenes.
     // 2026-11-11: the 1024 metering taps split across the 64 lanes, then a
@@ -467,6 +469,26 @@ describe('linear HDR output domain', () => {
             expect(source).toContain('texture_storage_2d<rgba16float, write>');
             expect(source).not.toContain('texture_storage_2d<rgba8unorm, write>');
         }
+    });
+});
+
+describe('conditioning-exposure history correction (issue #99)', () => {
+    // A fixed or app-supplied exposure can step in one frame, so history is
+    // rescaled by this frame's over last frame's conditioning exposure (.r of
+    // binding 11, already loaded for the host delta: no new fetch, no UBO
+    // change). Auto-exposure stays uncorrected (NEXT-STEPS §23).
+    it('folds the conditioning ratio into the host delta, outside auto-exposure only', () => {
+        expect(ACCUMULATE_SHADER.match(/textureLoad\(exposurePrevTex/g)).toHaveLength(1);
+        expect(ACCUMULATE_SHADER).toContain(
+            'if ((!hasFlag(FLAG_AUTO_EXPOSURE) || hasFlag(FLAG_EXTERNAL_EXPOSURE)) && framePrev.r > 1.0e-4) {',
+        );
+        expect(ACCUMULATE_SHADER).toContain('historyRatio = historyRatio * (exposure / framePrev.r);');
+        expect(ACCUMULATE_SHADER).toContain(
+            'history = vec4f(tonemapInvertible(tonemapInvert(history.rgb) * historyRatio), history.a);',
+        );
+        // Applied after the reset early-out and the de-ringed resample.
+        expect(ACCUMULATE_SHADER.indexOf('historyRatio = historyRatio *'))
+            .toBeGreaterThan(ACCUMULATE_SHADER.indexOf('var history = sampleHistoryCatmullRom(prevUV);'));
     });
 });
 

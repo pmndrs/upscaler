@@ -45,8 +45,8 @@ import { browserExecutable } from './browser-executable.mjs';
  *
  * --settings is passed to every capture() as its settings override (the same
  * plumbing measure-convergence.mjs uses). Auto-exposure is worth isolating: an adapting exposure re-decodes
- * history conditioned under the previous exposure (no conditioning-exposure
- * history correction, NEXT-STEPS "not planned"), which reads as lag of its
+ * history conditioned under the previous exposure (auto-exposure is not
+ * history-corrected, NEXT-STEPS §23), which reads as lag of its
  * own, independent of the variance clip.
  *
  * Starts the bench dev server on --url's port if nothing answers there.

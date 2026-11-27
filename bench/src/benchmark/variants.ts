@@ -42,6 +42,8 @@ const RESOLVER_FACTORIES = {
     'accumulate-still-relax0-v1': createAccumulateVariantResolver,
     'accumulate-history-unclamped-v1': createAccumulateVariantResolver,
     'accumulate-history-tap-clamp-v1': createAccumulateVariantResolver,
+    'accumulate-conditioning-correction-v1': createAccumulateVariantResolver,
+    'accumulate-uncorrected-conditioning-v1': createAccumulateVariantResolver,
     'local-baseline-5d6a65e': createBaselineResolver,
     'local-baseline-through-e00-harness': createBaselineResolver,
     'rcas-fsr315-limiter': createRcasNumericParityResolver,
@@ -205,6 +207,10 @@ function metadata(id: BenchmarkVariantId): BenchmarkVariantMetadata {
                     ? 'Accumulate without the still-scene relax (motion-onset diagnostic)'
                   : id === 'accumulate-history-unclamped-v1'
                     ? 'Accumulate with the pre-#118 history resample (no upper clamp)'
+                  : id === 'accumulate-conditioning-correction-v1'
+                    ? 'Accumulate with conditioning-exposure correction under auto-exposure too (rejected #99 form)'
+                  : id === 'accumulate-uncorrected-conditioning-v1'
+                    ? 'Accumulate without conditioning-exposure correction (pre-#99)'
                   : id === 'accumulate-history-tap-clamp-v1'
                     ? 'Accumulate with the history resample bounded by its five bilinear taps (rejected #118 form)'
                   : id.startsWith('accumulate-motion-cap')
