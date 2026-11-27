@@ -39,6 +39,7 @@ import { parseCliOrExit } from './cli-flags.mjs';
 import {
     DEFAULT_BENCH_URL,
     parsePort,
+    closeOwnedCdpBrowser,
     removeTempDirectory,
     resolveServerUrl,
     spawnVite,
@@ -225,7 +226,8 @@ async function main() {
         if (logRecords.length) console.log(`\nbrowser log:\n${logRecords.join('\n')}`);
         console.log(`\nartifacts: ${outputDirectory}`);
     } finally {
-        client?.close();
+        // On Windows the browser can outlive its launcher process, so close it over CDP first.
+        await closeOwnedCdpBrowser(client);
         await stopChild(chrome);
         await removeTempDirectory(profile, 'Chrome profile');
         await stopChild(viteServer);

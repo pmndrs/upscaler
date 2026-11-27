@@ -31,6 +31,7 @@ import { join, resolve } from 'node:path';
 import {
     DEFAULT_BENCH_URL,
     parsePort,
+    closeOwnedCdpBrowser,
     removeTempDirectory,
     resolveServerUrl,
     spawnVite,
@@ -117,8 +118,8 @@ const PAGE_HELPERS = `
 window.__shadingRestart = {
   upscaler() { return window.__UPSCALER_BENCH__._context.pipeline.resolver._upscaler; },
   async read(rois) {
-    // The GPU state lives on the engine-free core since the monorepo split.
-    const up = this.upscaler()._core; const device = up._device; const texture = up._shadingSignal;
+    // The device and the detector's signal live on the engine-agnostic core.
+    const core = this.upscaler()._core; const device = core._device; const texture = core._shadingSignal;
     const w = texture.width, h = texture.height, bytesPerRow = Math.ceil((w * 4) / 256) * 256;
     const buffer = device.createBuffer({ size: bytesPerRow * h, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
     const encoder = device.createCommandEncoder();
@@ -233,7 +234,9 @@ async function main() {
         const problems = client.logs.filter((record) => /error|exception|validation|WGSL/i.test(record));
         if (problems.length) console.warn(`browser log records:\n${problems.join('\n')}`);
     } finally {
-        client?.socket.close();
+        // On Windows the browser can outlive its launcher process, so close it over CDP first.
+        // This script's client has no close() of its own.
+        await closeOwnedCdpBrowser(client && { socket: client.socket, close: () => client.socket.close() });
         await stopChild(chrome);
         await removeTempDirectory(profile, 'Chrome profile');
         await stopChild(viteServer);

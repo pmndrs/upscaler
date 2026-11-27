@@ -64,7 +64,8 @@ app.ticker.add(() => {
   (`renderer.renderTarget.finishRenderPass()`) and records into pixi's frame
   encoder (`renderer.encoder.commandEncoder`), so the upscale lands in order.
   The caller's engine must rebind its render target before drawing again. Only
-  one `encode()` per frame: the passes share one constants buffer.
+  one `encode()` per frame: the constants are written at encode time, so a second
+  frame's write would reach the first one's passes.
 
 ## 3D content (pixi-3d)
 

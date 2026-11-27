@@ -2,8 +2,10 @@
  * CPU-side writer for the `FsrConstants` uniform block.
  *
  * The layout here must match `WGSL_CONSTANTS` in `shaders/common.ts` —
- * offsets are documented there. A single 256-byte buffer is shared by every
- * pass (bound at `@group(0) @binding(0)`), written once per frame.
+ * offsets are documented there. Every pass binds one 256-byte buffer at
+ * `@group(0) @binding(0)`. The core keeps one instance per frame stage (early
+ * guides, late upscale), each written once per frame, so both stages of a
+ * split frame can sit in one command encoder.
  */
 export class ConstantsBuffer {
     /** Uniform block size. 96 bytes of payload, padded to a round 256. */
@@ -16,12 +18,16 @@ export class ConstantsBuffer {
     private readonly _u32 = new Uint32Array(this._data);
     private readonly _device: GPUDevice;
 
-    constructor(device: GPUDevice) {
+    /**
+     * @param device - The device the buffer lives on
+     * @param label - GPU debug label (also what tells the stage buffers apart)
+     */
+    constructor(device: GPUDevice, label = 'upscale-constants') {
         this._device = device;
         // Fixed 32×32 metering. A uniform loop bound keeps Windows shader compiles small.
         this._u32[23] = 32;
         this.buffer = device.createBuffer({
-            label: 'upscale-constants',
+            label,
             size: ConstantsBuffer.SIZE,
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
         });

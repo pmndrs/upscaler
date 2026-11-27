@@ -233,7 +233,12 @@ export class UpscalerCore<THandle = GPUTexture> {
     private readonly _exposureShader: string | null;
     private readonly _exposureMetering: ExposureMetering | null;
     private readonly _crossFrameReconstruct: { shader: string; cameraCompensated: boolean } | null;
-    private _constants!: ConstantsBuffer;
+    // One constants buffer per frame stage. `queue.writeBuffer` lands before
+    // anything encoded this frame executes, so a single shared buffer would
+    // hand the guides stage the upscale stage's constants whenever both sit
+    // in one command encoder (docs/engine-contract.md → Submission).
+    private _constantsEarly!: ConstantsBuffer;
+    private _constantsLate!: ConstantsBuffer;
     // Null while GPU timing is off: nothing is allocated, nothing attached.
     private _timer: GpuTimer | null = null;
     private _gpuTiming: boolean;
@@ -453,7 +458,8 @@ export class UpscalerCore<THandle = GPUTexture> {
         void device.lost.then(() => {
             if (generation === this._generation) this._deviceLost = true;
         });
-        this._constants = new ConstantsBuffer(device);
+        this._constantsEarly = new ConstantsBuffer(device, 'upscale-constants-early');
+        this._constantsLate = new ConstantsBuffer(device, 'upscale-constants-late');
         if (this._gpuTiming) this._timer = new GpuTimer(device);
         this._linearSampler = device.createSampler({
             label: 'upscale-linear-clamp', magFilter: 'linear', minFilter: 'linear',
@@ -867,8 +873,8 @@ export class UpscalerCore<THandle = GPUTexture> {
     /**
      * {@link dispatch} into the caller's encoder, for hosts that batch their
      * own work into one submit. Never submits. Submit before the next
-     * `encode*()`/`dispatch*()` call: the passes share one constants buffer,
-     * written on the queue at encode time. Not GPU-timed.
+     * frame's `encode*()`/`dispatch*()` call: the constants are written on
+     * the queue at encode time. Not GPU-timed.
      * @param encoder - The host's command encoder, outside any pass
      * @param inputs - As {@link dispatch}
      * @param camera - As {@link dispatch}
@@ -896,8 +902,9 @@ export class UpscalerCore<THandle = GPUTexture> {
             throw new Error('@pmndrs/upscaler: configure() must run before dispatch().');
         }
 
-        this._writeConstants(inputs, camera);
-        this._constants.upload();
+        // Only the temporal path encodes the guides stage.
+        if (this._path === 'temporal') this._writeConstants(this._constantsEarly, inputs, camera);
+        this._writeConstants(this._constantsLate, inputs, camera);
     }
 
     private _encodeFrame(encoder: GPUCommandEncoder, inputs: DispatchInputs): void {
@@ -957,9 +964,9 @@ export class UpscalerCore<THandle = GPUTexture> {
     }
 
     /**
-     * {@link dispatchGuides} into the caller's encoder. Never submits; submit
-     * it before {@link encodeUpscale} (the stages share one constants buffer).
-     * Not GPU-timed.
+     * {@link dispatchGuides} into the caller's encoder. Never submits. The
+     * same encoder may take {@link encodeUpscale} before its one submit: each
+     * stage reads its own constants buffer. Not GPU-timed.
      * @param encoder - The host's command encoder, outside any pass
      * @param inputs - As {@link dispatchGuides}
      * @param camera - As {@link dispatchGuides}
@@ -985,8 +992,7 @@ export class UpscalerCore<THandle = GPUTexture> {
                 '@pmndrs/upscaler: dispatchGuides() already ran this frame — finish with dispatchUpscale().',
             );
         }
-        this._writeConstants(inputs, camera);
-        this._constants.upload();
+        this._writeConstants(this._constantsEarly, inputs, camera);
     }
 
     private _endGuides(): void {
@@ -1051,11 +1057,10 @@ export class UpscalerCore<THandle = GPUTexture> {
             throw new Error('@pmndrs/upscaler: configure() must run before dispatchUpscale().');
         }
 
-        // Rewritten (not reused) so color-dependent flags — reactive, external
-        // exposure — reflect this call's inputs. Jitter and reset state are
-        // unchanged since the guides stage, so the shared UBO stays coherent.
-        this._writeConstants(inputs, camera);
-        this._constants.upload();
+        // Staged from this call's inputs so color-dependent flags — reactive,
+        // external exposure — are right. Jitter and reset state are unchanged
+        // since the guides stage, so the two stage buffers stay coherent.
+        this._writeConstants(this._constantsLate, inputs, camera);
     }
 
     private _endUpscale(): void {
@@ -1076,7 +1081,8 @@ export class UpscalerCore<THandle = GPUTexture> {
         this._shadingEncoded = false;
         this._debugActive = false;
         this._destroyTextures();
-        this._constants?.dispose();
+        this._constantsEarly?.dispose();
+        this._constantsLate?.dispose();
         this._reprojectBuffer?.destroy();
         this._everyTexelExposure?.dispose();
         this._everyTexelExposure = null;
@@ -1101,7 +1107,7 @@ export class UpscalerCore<THandle = GPUTexture> {
         alpha: GPUTextureView,
     ): void {
         const bindGroup = this._blitPass.createBindGroup([
-            { buffer: this._constants.buffer },
+            { buffer: this._constantsLate.buffer },
             input,
             this._linearSampler,
             exposure,
@@ -1119,7 +1125,7 @@ export class UpscalerCore<THandle = GPUTexture> {
     private _encodeSpatial(encoder: GPUCommandEncoder, colorGPU: GPUTexture): void {
         //* EASU — edge-adaptive upscale into the display-res intermediate
         const easuBindGroup = this._easuPass.createBindGroup([
-            { buffer: this._constants.buffer },
+            { buffer: this._constantsLate.buffer },
             colorGPU.createView(),
             this._easuOutput!.createView(),
         ]);
@@ -1207,7 +1213,7 @@ export class UpscalerCore<THandle = GPUTexture> {
         //* Reconstruct — dilate (nearest-depth motion/depth over 3×3) and
         //* scatter this frame's depth to each pixel's previous position.
         const reconstructBindGroup = this._reconstructPass.createBindGroup([
-            { buffer: this._constants.buffer },
+            { buffer: this._constantsEarly.buffer },
             depthView,
             velocityGPU.createView(),
             depthCur.createView(),
@@ -1224,7 +1230,7 @@ export class UpscalerCore<THandle = GPUTexture> {
         //* Depth Clip — disocclusion against the reconstructed previous depth.
         // A separate pass: every pixel's scatter must land before any reads.
         const depthClipBindGroup = this._depthClipPass.createBindGroup([
-            { buffer: this._constants.buffer },
+            { buffer: this._constantsEarly.buffer },
             depthCur.createView(),
             this._dilatedMotion!.createView(),
             { buffer: scatterBuffer },
@@ -1250,7 +1256,7 @@ export class UpscalerCore<THandle = GPUTexture> {
         depthCur: GPUTexture,
     ): void {
         const entries: GPUBindingResource[] = [
-            { buffer: this._constants.buffer },
+            { buffer: this._constantsEarly.buffer },
             depthView,
             velocityGPU.createView(),
             depthPrev.createView(),
@@ -1314,7 +1320,7 @@ export class UpscalerCore<THandle = GPUTexture> {
             }
             const opaqueGPU = inputs.reactiveOpaqueColor;
             const genBindGroup = this._generateReactivePass.createBindGroup([
-                { buffer: this._constants.buffer },
+                { buffer: this._constantsLate.buffer },
                 opaqueGPU.createView(),
                 colorGPU.createView(),
                 this._reactiveGenerated!.createView(),
@@ -1362,7 +1368,7 @@ export class UpscalerCore<THandle = GPUTexture> {
             // Every render texel: workgroup partials, then a one-workgroup
             // combine that runs the same epilogue (EveryTexelExposure).
             this._everyTexelExposure.encodePass(exposurePass, {
-                constants: this._constants.buffer,
+                constants: this._constantsLate.buffer,
                 color: colorGPU.createView(),
                 sampler: this._linearSampler,
                 previous: exposurePrev.createView(),
@@ -1373,7 +1379,7 @@ export class UpscalerCore<THandle = GPUTexture> {
             });
         } else {
             const exposureBindGroup = this._exposurePass.createBindGroup([
-                { buffer: this._constants.buffer },
+                { buffer: this._constantsLate.buffer },
                 colorGPU.createView(),
                 this._linearSampler,
                 exposurePrev.createView(),
@@ -1407,7 +1413,7 @@ export class UpscalerCore<THandle = GPUTexture> {
             const shadingLumaIn = this._shadingLumaHistory![this._historyIndex];
             const shadingLumaOut = this._shadingLumaHistory![1 - this._historyIndex];
             const shadingBindGroup = this._shadingChangePass.createBindGroup([
-                { buffer: this._constants.buffer },
+                { buffer: this._constantsLate.buffer },
                 colorGPU.createView(),
                 shadingLumaIn.createView(),
                 this._dilatedMotion!.createView(),
@@ -1438,7 +1444,7 @@ export class UpscalerCore<THandle = GPUTexture> {
 
         //* Accumulate — jittered upsample + history reprojection/rectification
         const accumulateBindGroup = this._accumulatePass.createBindGroup([
-            { buffer: this._constants.buffer },
+            { buffer: this._constantsLate.buffer },
             colorGPU.createView(),
             this._dilatedMotion!.createView(),
             this._masks!.createView(),
@@ -1467,7 +1473,7 @@ export class UpscalerCore<THandle = GPUTexture> {
         //* Output — debug view, RCAS sharpen, or plain resolve
         if (this._effectiveSettings.debugView !== DebugView.None) {
             const debugBindGroup = this._debugPass.createBindGroup([
-                { buffer: this._constants.buffer },
+                { buffer: this._constantsLate.buffer },
                 this._dilatedMotion!.createView(),
                 this._masks!.createView(),
                 depthCur.createView(),
@@ -1515,7 +1521,7 @@ export class UpscalerCore<THandle = GPUTexture> {
     ): void {
         const rcasPass = this._path === 'spatial' ? this._spatialRcasPass : this._rcasPass;
         const bindGroup = rcasPass.createBindGroup([
-            { buffer: this._constants.buffer },
+            { buffer: this._constantsLate.buffer },
             input,
             exposure,
             this._outputView(),
@@ -1560,13 +1566,14 @@ export class UpscalerCore<THandle = GPUTexture> {
         return flags;
     }
 
-    // Accepts either dispatch shape — the guides stage has no color, and every
-    // field this reads is shared between the two input types.
+    // Stages and uploads one stage's constants. Accepts either dispatch shape —
+    // the guides stage has no color, and every field this reads is shared
+    // between the two input types.
     private _writeConstants(
+        c: ConstantsBuffer,
         inputs: Omit<DispatchInputs, 'color'>,
         camera: FrameCamera,
     ): void {
-        const c = this._constants;
         c.setRenderSize(this._renderWidth, this._renderHeight);
         c.setDisplaySize(this._displayWidth, this._displayHeight);
 
@@ -1606,6 +1613,7 @@ export class UpscalerCore<THandle = GPUTexture> {
         if (inputs.exposureTexture) flags |= FLAG_EXTERNAL_EXPOSURE;
         if (this._effectiveSettings.rcasDenoise) flags |= FLAG_RCAS_DENOISE;
         c.setFlags(flags);
+        c.upload();
     }
 
     //* Texture Allocation

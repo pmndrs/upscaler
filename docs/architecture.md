@@ -173,7 +173,10 @@ encoding or any other presentation transform.
 ## Shared constants
 
 Every pass binds one uniform buffer at `@group(0) @binding(0)`: the `FsrConstants`
-struct (96 bytes of payload, in a 256-byte buffer), written once per frame. The WGSL
+struct (96 bytes of payload, in a 256-byte buffer). The core keeps two of them, one
+per frame stage: the guides passes (reconstruct, depth clip) bind the early buffer and
+everything after binds the late one. Each is written once per frame, with the same
+layout, so a split frame can be recorded into a single command encoder. The WGSL
 layout (`WGSL_CONSTANTS` in [`packages/core/src/shaders/common.ts`](../packages/core/src/shaders/common.ts)) and
 the CPU writer ([`packages/core/src/internal/ConstantsBuffer.ts`](../packages/core/src/internal/ConstantsBuffer.ts))
 must stay byte-for-byte in sync. A field added or reordered on one side only silently

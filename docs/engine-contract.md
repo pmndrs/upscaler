@@ -214,14 +214,15 @@ whatever samples the output.
   submits. Encode it after the scene pass and before the pass that samples the
   output, outside any pass, then submit once. `examples/webgpu/hello` sends scene,
   upscale and present in one submit.
-- **One frame in flight per core.** The passes share one constants buffer, which is
-  written with `queue.writeBuffer` at encode time. Submit an `encode*()` call's
-  encoder before the next `encode*()` / `dispatch*()` call on the same core.
+- **One frame in flight per core.** The constants are written with
+  `queue.writeBuffer` at encode time, so they are in place before anything in the
+  encoder runs. Submit a frame's encoder before the next frame's `encode*()` /
+  `dispatch*()` call on the same core.
 - **Split frame.** `dispatchGuides` / `encodeGuides` runs the geometry stage (depth +
   motion → the early guides), and `dispatchUpscale` / `encodeUpscale` finishes with
   color. Effects that want the guides run in between. With the `encode` forms,
-  submit the guides encoder before calling `encodeUpscale`, for the same
-  constants-buffer reason.
+  both stages can go into one encoder and one submit: each stage reads its own
+  constants buffer, so the late stage's write cannot reach the guides passes.
 - **Engines with an open render pass.** The core encodes compute passes, so an
   engine that keeps a render pass open across its frame (Babylon, for one) must
   close it before handing over its encoder, or dispatch on its own encoder after

@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
     parsePort,
+    closeOwnedCdpBrowser,
     removeTempDirectory,
     spawnVite,
     stopChild,
@@ -438,7 +439,8 @@ async function runGpuSmoke(outputDirectory, packageEntry, options) {
         // Teardown only warns: Chrome keeps writing its cache for a moment after
         // SIGTERM, so it must have exited before its profile is deleted, and a
         // leftover temp dir must never turn a PASS into a failure.
-        client?.close();
+        // On Windows the browser can outlive its launcher process, so close it over CDP first.
+        await closeOwnedCdpBrowser(client);
         await stopChild(chrome);
         await stopChild(preview);
         await removeTempDirectory(profile, 'Chrome profile');

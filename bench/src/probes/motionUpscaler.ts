@@ -98,7 +98,13 @@ const internals = renderer as unknown as {
     _nodes?: { nodeFrame?: { update(): void; time: number; deltaTime: number } };
 };
 const nodeFrame = internals._nodes?.nodeFrame;
-if (!internals._animation || typeof internals._animation.stop !== 'function' || !nodeFrame || typeof nodeFrame.update !== 'function')
+if (
+    !internals._animation ||
+    typeof internals._animation.stop !== 'function' ||
+    typeof internals._animation.start !== 'function' ||
+    !nodeFrame ||
+    typeof nodeFrame.update !== 'function'
+)
     throw new Error('Pinned renderer._animation / _nodes.nodeFrame shape changed.');
 internals._animation.stop();
 // r187 restarts the loop from every render()/compute() (three#35278): pin it off.
