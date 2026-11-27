@@ -337,6 +337,25 @@ describe('UpscalerCore without an engine', () => {
             expect(warn).toHaveBeenCalledTimes(1);
         });
 
+        it('meters nothing when the exposure is fixed or supplied (issue #98)', async () => {
+            const { device, passes, gpu } = mockDevice();
+            const core = new UpscalerCore({ device: device as unknown as GPUDevice });
+            core.configure({ displayWidth: 64, displayHeight: 32, customUpscaleRatio: 2 });
+            await core.prepare();
+            const inputs = { color: gpu('color'), depth: gpu('depth'), velocity: gpu('velocity') };
+            core.dispatch(inputs, camera);
+            expect(exposureDispatches(passes)).toEqual([[1, 1, 1], [1, 1, 1]]);
+            // An app-supplied exposure: the taps pipeline, which publishes without metering.
+            core.dispatch({ ...inputs, exposureTexture: gpu('exposure') }, camera);
+            expect(exposureDispatches(passes)).toEqual([[1, 1]]);
+            core.settings.autoExposure = false;
+            core.dispatch(inputs, camera);
+            expect(exposureDispatches(passes)).toEqual([[1, 1]]);
+            core.settings.autoExposure = true;
+            core.dispatch(inputs, camera);
+            expect(exposureDispatches(passes)).toEqual([[1, 1, 1], [1, 1, 1]]);
+        });
+
         it('keeps the taps at every size without 256-invocation workgroups', async () => {
             const { device, passes, gpu } = mockDevice();
             device.limits.maxComputeInvocationsPerWorkgroup = 128;

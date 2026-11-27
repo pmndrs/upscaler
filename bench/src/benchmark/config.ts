@@ -28,6 +28,7 @@ const VARIANTS = [
     'exposure-taps-no-deadband-v1',
     'exposure-every-quad-v1',
     'exposure-every-quad-no-deadband-v1',
+    'exposure-fixed-v1',
     'source-filter-bundle-v1',
     'source-structural-bundle-v1',
     'source-spd-resolver-bundle-v1',

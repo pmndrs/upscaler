@@ -206,6 +206,11 @@ final brightness**. Three sources, in increasing priority:
    `upscale()` node's `exposureTexture` option. It mirrors FSR3's `exposure`
    resource.
 
+With a fixed exposure or an `exposureTexture`, the upscaler does not meter the scene at
+all: the exposure pass only publishes the value you supplied (about 10 µs saved per
+frame on Apple M5 Pro, issue #98). If you already compute exposure, pass it in this way
+rather than leaving auto-exposure on.
+
 The conditioning exposure also sets the **HDR headroom** of the temporal output.
 Values resolve up to about `999 / exposure` in the input's linear domain. Below
 that they lose precision as they approach it, and sub-pixel highlights are

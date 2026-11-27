@@ -2251,6 +2251,73 @@ node scripts/run-benchmark.mjs --smoke --ratios 2 --blocks 4 \
 # per-frame records: bench/results/raw/history-overshoot/<label>-2x/summary.json
 ```
 
+## 22. No metering when the exposure is supplied — DONE (2026-11-28, issue #98)
+
+**Question (from #91).** `dispatch({ exposureTexture })` overrides the conditioning
+exposure, and so does `autoExposure: false` (`settings.exposure`), but the metering
+reduction still ran every frame and its result was thrown away (only the published
+`.g`, which no shader reads, kept it). #91 proposed an `exposureMode: 'provided'` option
+plus CPU exposure / host pre-exposure scalars.
+
+**What ran before.** Both overrides ran the full metering: every render texel through
+`@pmndrs/downsampler` up to 2^19 texels (two dispatches, §17), the 1024 taps above.
+`autoExposure: false` + `exposure` (what pmndrs/pathtracer runs since #118) is the
+CPU-scalar path #91 asked for, and it already exists, so no new option or scalar was
+added.
+
+**Change.** "A fixed or app-supplied exposure ⇒ no metering", no new option. When
+`FLAG_AUTO_EXPOSURE` is off or `FLAG_EXTERNAL_EXPOSURE` is on, `UpscalerCore` dispatches
+the taps pipeline (never the every-texel pair), and its first statement is a uniform
+branch on those flags: lane 0 publishes the exposure texel and every lane returns
+before the metering loop and its barriers. The published texel matches the epilogue's
+`.r` (`select(C.exposure, external, FLAG_EXTERNAL_EXPOSURE)`), `.b` (host pre-exposure,
+1 when absent) and `.a` (the resolved reset: `FLAG_RESET` or the GPU signal, landmine
+#12) exactly. **`.g` (metered average luma) is now 0, meaning "not metered".** No shader
+reads it (accumulate, shading change, RCAS/blit and the debug view read `.r`/`.b`/`.a`);
+`docs/temporal-guides.md` documents the 0. No new pass and no new compile: the taps
+pipeline is mandatory already. Auto-exposure without an external texture runs the same
+metering as before.
+
+**Timing** (M5 Pro, worktree, other agents' jobs running, load average 120–160; one
+block per invocation, ABBA, `run-benchmark.mjs --smoke --blocks 1`; `exposure-fixed-v1` is
+`baseline` with `autoExposure: false`; worktree absolutes read ~3× slow, compare within a
+row). Exposure pass, mean of the two legs:
+
+| ratio (render) | metering form | metered | fixed / supplied | saved |
+| --- | --- | ---: | ---: | ---: |
+| 2 (960×540) | every texel (`baseline`) | 18.1 / 21.9 µs | 4.3 / 4.7 µs | 14–17 µs |
+| 3 (640×360) | every texel (`baseline`) | 14.3 / 13.7 µs | 4.2 / 4.9 µs | 9–10 µs |
+| 2 (960×540) | taps (`exposure-taps-v1`) | 14.2 µs | 4.7 µs | 9.5 µs |
+| 3 (640×360) | taps (`exposure-taps-v1`) | 12.4 µs | 4.5 µs | 7.9 µs |
+
+Every leg agrees on the sign. The saving is ~0.5–1 % of the compute sum (1450–2060 µs
+here), well inside that sum's ±200 µs noise, so the sums do not resolve it. What is
+left (~4.5 µs) is the dispatch itself. Speed comes first and the change has no quality
+effect, so it was taken.
+
+**Correctness.** The auto-exposure path is byte-identical, and so is the supplied path's
+output. Same bench run before and after the change (`run-benchmark.mjs --mode capture
+--ratios 1,2 --scenarios Q11,Q12`, `baseline` vs `exposure-taps-v1`, so both the taps and
+the every-texel forms are covered): all Q12 captures are byte-identical, and all 500 Q11
+captures are on a second after-run. The first after-run differed on 41 Q11 PNGs, but
+it also differed between `baseline` and `exposure-taps-v1` at ratio 1, which run the same
+shader there: capture noise under load (§16 saw the same on Q11). Q20 through
+`measure-history-overshoot.mjs` with fixed exposure (the provided branch) and with
+auto-exposure, 419 frames each, reads back identical per-frame output max, history max
+and exposure `.r` before and after. WGSL compiled clean on Metal (no `Log.entryAdded`
+errors).
+
+Regenerate:
+
+```bash
+node scripts/run-benchmark.mjs --smoke --ratios 2 --blocks 1 --variant baseline --comparison exposure-fixed-v1
+node scripts/run-benchmark.mjs --smoke --ratios 3 --blocks 1 --variant exposure-fixed-v1 --comparison baseline
+node scripts/run-benchmark.mjs --smoke --ratios 2 --blocks 1 --variant exposure-taps-v1 --comparison exposure-fixed-v1
+node scripts/run-benchmark.mjs --mode capture --smoke --ratios 1,2 --scenarios Q11,Q12 --reloads 1 \
+  --allow-differences --variant baseline --comparison exposure-taps-v1   # before and after the change
+node scripts/measure-history-overshoot.mjs --conditions 'fixed;{"autoExposure":true}' --variant production
+```
+
 ## Explicitly not planned (measured against)
 
 - Lanczos2/bicubic history filtering (+47% accumulate, no visible win).

@@ -140,7 +140,9 @@ const BASELINE_FINGERPRINTS: Record<string, string> = {
     // frozen serial form shares the head and epilogue, so it changes too
     // (was '30144ae9'); its metering loop is unchanged, and it now assembles
     // byte-identically to the reset branch's pre-parallel production shader.
-    luminancePyramid: '3722103a',
+    // 2026-11-27: publishes without metering when a fixed or app-supplied
+    // exposure overrides the metered one (issue #98; was '3722103a').
+    luminancePyramid: 'b2d0d970',
     luminancePyramidSerial: 'a1719dab',
     // Updated 2026-07-22: reactive merge-not-overwrite (guides spec M3) — the
     // generator max-merges an incoming mask instead of being suppressed by it.
@@ -502,8 +504,14 @@ describe('parallel exposure metering', () => {
     });
 
     it('reduces in workgroup memory before any lane returns', () => {
+        // The one earlier return is the provided-exposure branch (issue #98):
+        // its condition reads only uniform flags, so the barriers stay uniform.
+        const provided = 'if (!hasFlag(FLAG_AUTO_EXPOSURE) || hasFlag(FLAG_EXTERNAL_EXPOSURE)) {\n' +
+            '        if (lane == 0u) { publishProvidedExposure(); }\n        return;\n    }\n';
         const body = main(LUMINANCE_PYRAMID_SHADER);
-        expect(body.indexOf('return;')).toBeGreaterThan(body.lastIndexOf('workgroupBarrier();'));
+        expect(body).toContain(provided);
+        const metering = body.slice(body.indexOf(provided) + provided.length);
+        expect(metering.indexOf('return;')).toBeGreaterThan(metering.lastIndexOf('workgroupBarrier();'));
         expect(body).toContain('logSum = laneLogSums[0];');
     });
 
@@ -714,9 +722,14 @@ describe('reset (issue #102)', () => {
         const store = 'vec4f(exposure, avgLum, host, select(0.0, 1.0, reset))';
         for (const source of [LUMINANCE_PYRAMID_SHADER, LUMINANCE_PYRAMID_SERIAL_SHADER]) {
             expect(source).toContain('@group(0) @binding(7) var resetSignal : texture_2d<f32>;');
-            expect(source.match(/textureStore\(exposureOut/g)).toHaveLength(1);
             expect(source).toContain(store);
         }
+        expect(LUMINANCE_PYRAMID_SERIAL_SHADER.match(/textureStore\(exposureOut/g)).toHaveLength(1);
+        // Production's second store is the provided-exposure publish (issue #98).
+        expect(LUMINANCE_PYRAMID_SHADER.match(/textureStore\(exposureOut/g)).toHaveLength(2);
+        expect(LUMINANCE_PYRAMID_SHADER).toContain(
+            'vec4f(exposure, 0.0, host, select(0.0, 1.0, reset))',
+        );
         for (const bindings of [EXPOSURE_EVERY_TEXEL_BINDINGS, EXPOSURE_EVERY_QUAD_BINDINGS]) {
             expect(bindings).toContain('@group(1) @binding(7) var resetSignal : texture_2d<f32>;');
         }

@@ -61,6 +61,7 @@ const RESOLVER_FACTORIES = {
     'exposure-taps-no-deadband-v1': createExposureMeteringResolver,
     'exposure-every-quad-v1': createExposureMeteringResolver,
     'exposure-every-quad-no-deadband-v1': createExposureMeteringResolver,
+    'exposure-fixed-v1': createBaselineResolver,
     'source-filter-bundle-v1': createSourceBundleResolver,
     'source-structural-bundle-v1': createSourceBundleResolver,
     'source-spd-resolver-bundle-v1': createSourceBundleResolver,
@@ -110,7 +111,8 @@ function metadata(id: BenchmarkVariantId): BenchmarkVariantMetadata {
     const reconstructExperiment = id.startsWith('reconstruct-');
     const depthClipVariant = id.startsWith('depth-clip-');
     const exposureSerial = id === 'exposure-serial-v1';
-    const exposureMetering = id.startsWith('exposure-') && !exposureSerial;
+    const exposureFixed = id === 'exposure-fixed-v1';
+    const exposureMetering = id.startsWith('exposure-') && !exposureSerial && !exposureFixed;
     const shadingMemory = id.startsWith('shading-memory-') || id === 'shading-frame-pair-v1';
     const sourceResourceGraph = spdResolver
         ? [
@@ -187,6 +189,8 @@ function metadata(id: BenchmarkVariantId): BenchmarkVariantMetadata {
                     ? `Depth clip variant (#79): ${id.slice('depth-clip-'.length)}`
                   : exposureSerial
                     ? 'Single-invocation exposure metering (pre-parallel production)'
+                  : exposureFixed
+                    ? 'Fixed exposure: the exposure pass publishes without metering (#98)'
                   : exposureMetering
                     ? `Exposure metering (§17): ${id.slice('exposure-'.length, -'-v1'.length)}`
                   : id === 'shading-frame-pair-v1'
@@ -219,7 +223,7 @@ function metadata(id: BenchmarkVariantId): BenchmarkVariantMetadata {
             rcasDenoise,
             maxAccumulation: 24,
             exposure: 1,
-            autoExposure: true,
+            autoExposure: !exposureFixed,
             lockThinFeatures: true,
             detectShadingChanges: true,
         },

@@ -145,11 +145,32 @@ const EXPOSURE_LANES : u32 = 8u;
 // One partial log-sum per lane; the tree below folds them into slot 0.
 var<workgroup> laneLogSums : array<f32, 64>;
 
+// Provided exposure (issue #98): with auto-exposure off or an app-supplied
+// exposure, the epilogue would override the metered value, so nothing is
+// metered. Publishes the epilogue's .r, .b and .a exactly; .g, the metered
+// average luma that no shader reads, is 0 for "not metered".
+fn publishProvidedExposure() {
+    let hostRaw = textureLoad(hostPreExposure, vec2i(0), 0).r;
+    let host = select(1.0, hostRaw, hostRaw > 0.0);
+    let reset = hasFlag(FLAG_RESET) || textureLoad(resetSignal, vec2i(0), 0).r > 0.5;
+    let ext = textureLoad(externalExposure, vec2i(0), 0).r;
+    let exposure = select(C.exposure, ext, hasFlag(FLAG_EXTERNAL_EXPOSURE));
+    textureStore(exposureOut, vec2i(0), vec4f(exposure, 0.0, host, select(0.0, 1.0, reset)));
+}
+
 @compute @workgroup_size(8, 8)
 fn main(
     @builtin(global_invocation_id) gid : vec3u,
     @builtin(local_invocation_index) lane : u32,
 ) {
+    // The flags are uniform, so this return leaves the barriers below in
+    // uniform control flow. UpscalerCore dispatches this form, not the
+    // every-texel reduction, whenever the metering is unused.
+    if (!hasFlag(FLAG_AUTO_EXPOSURE) || hasFlag(FLAG_EXTERNAL_EXPOSURE)) {
+        if (lane == 0u) { publishProvidedExposure(); }
+        return;
+    }
+
     // Geometric mean of luminance (average in log space) resists a few bright
     // pixels dragging the whole exposure, matching FSR2's log-average.
     // The 64 lanes split the 32×32 grid: lane (x, y) takes rows y, y + 8, …

@@ -1005,6 +1005,9 @@ channel, but still feeds this local conditioning/history path. It is not a way t
 declare AMD-style host `preExposure`; using it as one will divide that factor back out
 during output and will not provide `DeltaPreExposure()` history correction.
 `DebugView.Exposure` visualizes clamped exposed luma, not the selected exposure scalar.
+When the exposure is fixed or external, nothing is metered (issue #98): the taps pass
+returns from a uniform branch after lane 0 publishes the supplied `.r`, the host `.b`
+and the reset `.a`, with `.g` = 0, and the every-texel reduction is not dispatched.
 
 The auto target is clamped to [0.02, 8]. The upper bound is also the temporal path's
 dark-scene highlight ceiling. History stores `x / (1 + x)` of the pre-exposed color
