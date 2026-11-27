@@ -44,7 +44,8 @@ import { assembleShader } from './wgsl';
  *      frame, b = host pre-exposure)
  * - 10: reactive mask, render size (r = reactivity; 1×1 dummy when absent)
  * - 11: previous frame's exposure, 1×1 (b = last frame's host pre-exposure,
- *       for FSR3-style DeltaPreExposure history correction)
+ *       for FSR3-style DeltaPreExposure history correction; r = last frame's
+ *       conditioning exposure, corrected for when fixed or app-supplied)
  * - 12: shading-change response, ceil(render/2) (r32float from
  *       shadingChange.ts; 1×1 zero dummy when the detector is off)
  */
@@ -273,18 +274,27 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
 
     var history = sampleHistoryCatmullRom(prevUV);
 
-    //* Host Pre-Exposure Delta (FSR3's DeltaPreExposure)
+    //* History Exposure Delta (FSR3's DeltaPreExposure)
     // If the app changed the pre-exposure baked into its render since last
     // frame, the reprojected history is in the old brightness domain and would
     // read as a full-screen shading change — ratio-correct it in linear space.
     // Without a preExposureTexture input both texels publish 1.0 and this is
-    // skipped, leaving the pass bit-identical. Conditioning exposure is
-    // deliberately not corrected here: it adapts smoothly by design.
-    let hostPrev = textureLoad(exposurePrevTex, vec2i(0), 0).b;
-    var hostRatio = 1.0;
-    if (hostPrev > 1.0e-4 && frameInfo.b > 1.0e-4) { hostRatio = frameInfo.b / hostPrev; }
-    if (abs(hostRatio - 1.0) > 1.0e-3) {
-        history = vec4f(tonemapInvertible(tonemapInvert(history.rgb) * hostRatio), history.a);
+    // skipped, leaving the pass bit-identical.
+    // A fixed or app-supplied CONDITIONING exposure is corrected the same way
+    // (issue #99): history was encoded under last frame's value (.r), and an
+    // app can step it in one frame, which decoded as a 15–160 % brightness pop
+    // that took 50+ frames to fade. Auto-exposure is deliberately left
+    // uncorrected: it tracks the scene's own brightness, so decoding old
+    // history at the new exposure moves it toward the new lighting, and
+    // correcting it measured 55 % more drift lag (bench/docs/NEXT-STEPS.md §23).
+    let framePrev = textureLoad(exposurePrevTex, vec2i(0), 0);
+    var historyRatio = 1.0;
+    if (framePrev.b > 1.0e-4 && frameInfo.b > 1.0e-4) { historyRatio = frameInfo.b / framePrev.b; }
+    if ((!hasFlag(FLAG_AUTO_EXPOSURE) || hasFlag(FLAG_EXTERNAL_EXPOSURE)) && framePrev.r > 1.0e-4) {
+        historyRatio = historyRatio * (exposure / framePrev.r);
+    }
+    if (abs(historyRatio - 1.0) > 1.0e-3) {
+        history = vec4f(tonemapInvertible(tonemapInvert(history.rgb) * historyRatio), history.a);
     }
 
     var sampleCount = history.a * C.maxAccumulation;

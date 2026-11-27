@@ -47,7 +47,7 @@ baseline variant — so pick `--variant`/`--comparison` deliberately too.)
 | **block / repetition** | One full A-B-B-A pattern. `--blocks 4` runs four of them. |
 | **warmup** | Frames rendered and thrown away before timing starts, so shader compilation and caches are not in the sample. |
 | **samples** | Timed frames per leg. More samples = tighter medians, longer runs. |
-| **scenario** | A scripted camera/scene animation, `Q0`–`Q20`. See the catalogue below. |
+| **scenario** | A scripted camera/scene animation, `Q0`–`Q21`. See the catalogue below. |
 | **noise floor** | How much the harness disagrees with *itself*. The bar your delta has to clear. |
 
 ---
@@ -176,11 +176,11 @@ work did not change, the rest of the frame got cheaper.
 
 ---
 
-## Scenarios (Q0–Q20, Q30)
+## Scenarios (Q0–Q21, Q30)
 
 Scripted camera and scene animations, defined in
 `bench/src/benchmark/scenarios.ts`. Performance runs use the default; capture
-runs select Q0–Q11 (the E00 manifest's set) with `--scenarios`. Q12–Q20 and Q30 are
+runs select Q0–Q11 (the E00 manifest's set) with `--scenarios`. Q12–Q21 and Q30 are
 capture-only through the `measure-*` scripts (`measure-convergence.mjs
 --scenario <id>` and the scripts named in their rows); `run-benchmark.mjs` drops
 them from `--scenarios` without an error.
@@ -208,7 +208,8 @@ them from `--scenarios` without an error.
 | Q18 | `fine-line-chart` | Still camera square-on to a resolution chart: line-pair bars of 6 → 0.75 render px period at ratio 2 (4 → 0.5 at ratio 3), so they cross the render Nyquist; a Siemens star; flat swatches (the control); a swatch crossed by 0.5 px hairlines. The chart is unmipmapped, so the bars alias differently on every jitter phase and render-space block means swing although nothing changed: the shading-change view must stay black until the light drops to a quarter at frame 300. ROIs per chart region. Measure with `measure-convergence.mjs --scenario Q18 --shading-frames 32 --views final,accumulation-age` (per-ROI firing and accumulation age) and `measure-drift-lag.mjs --scenario Q18 --frames 296:356:2` for the step, and `measure-shading-restart.mjs` for a step right after the detector is re-enabled (`NEXT-STEPS.md` §14). |
 | Q19 | `receding-disocclusion` | Issue #67: converge, then dolly back / forward, orbit left / right, slide, and the scene receding / approaching under a still camera, each followed by a 60-frame hold; then a fast dolly (0.3 u/frame, #67's headline case) back and forward; a frontal textured wall stands behind the props. A camera-invariant depth clip keeps receding surfaces' history. Measure with `scripts/measure-receding-disocclusion.mjs --variants baseline,reconstruct-cross-frame-v1` (per-segment disocclusion and accumulation age, plus frame-to-frame flicker at `--stride 1`; the interior crop excludes the border strip entering view). Still scenes never disocclude under the scatter, so this, not Q1/Q12, separates depth-clip forms (`depth-clip-*` identities, NEXT-STEPS §15). Flicker under motion, per segment: `scripts/measure-motion-stability.mjs` (see "Under motion" below). |
 | Q20 | `emitter-pan-overshoot` | Issue #118: a dim textured wall (mean luminance ~0.1) with small HDR hot spots (radiance 11 and 16, 1–8 render px); converge still, pan at 0.37 render px/frame, hold, pan at 1.63, hold. Auto-exposure lifts the frame, so the spots condition near 1 in the invertible tonemap. Measure with `scripts/measure-history-overshoot.mjs` (exact rgba16float output readback; hot pixels = output luma above 4 × the still max, plus history texels at tonemapInvert's 0.999 cap). Must read 0 hot pixels in every segment (NEXT-STEPS §21). |
-| Q30 | `dense-geometry-disocclusion` | Issue #102 finding 3: a procedural stand-in for the Bistro / Sponza captures we have no assets for — three rows of pillars, a railing with 0.3-unit balusters, two crossed lattices and ten clusters of 140 double-sided foliage cards, at depths from 1 to 30 units. Converge (0–59), pan sideways 0.04 u/frame (60–179: ~3.6 render px/frame on the railing at 960×540), hold, orbit 0.25°/frame about the target (240–359), hold. Seeded and static, so frames are deterministic. Measure with `scripts/measure-disocclusion-truth.mjs --scenarios Q30` (exact ground-truth precision / recall / interior false alarms of the disocclusion guide, NEXT-STEPS §24). Numbered Q30, not Q21: the ids after Q20 are taken by scenarios on other branches. |
+| Q21 | `deformer-motion` | Deformed geometry three's `velocity` gets wrong: a checker-textured `positionNode` vertex wave, a morph-target blob and a rigid control box on a textured room. Segments: `still-held` (0–119, deformation held mid-stroke, camera still), `deform` (120–239, deformation animates), `orbit-deform` (240–359, 0.4°/frame orbit, still animating), `hold` (360–419). `?velocity=three|motion-vectors` (`--velocity` on `measure-reference-quality.mjs` / `measure-motion-stability.mjs`) picks the scene MRT's motion source; ROIs `wave`/`blob`/`control` sit at the still-camera pose. Debug-view grids: `scripts/capture-velocity-views.mjs` (NEXT-STEPS §24). |
+| Q30 | `dense-geometry-disocclusion` | Issue #102 finding 3: a procedural stand-in for the Bistro / Sponza captures we have no assets for — three rows of pillars, a railing with 0.3-unit balusters, two crossed lattices and ten clusters of 140 double-sided foliage cards, at depths from 1 to 30 units. Converge (0–59), pan sideways 0.04 u/frame (60–179: ~3.6 render px/frame on the railing at 960×540), hold, orbit 0.25°/frame about the target (240–359), hold. Seeded and static, so frames are deterministic. Measure with `scripts/measure-disocclusion-truth.mjs --scenarios Q30` (exact ground-truth precision / recall / interior false alarms of the disocclusion guide, NEXT-STEPS §25). Numbered Q30, not Q21: the ids after Q20 are taken by scenarios on other branches. |
 
 ---
 

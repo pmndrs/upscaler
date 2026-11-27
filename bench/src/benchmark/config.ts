@@ -9,6 +9,8 @@ const VARIANTS = [
     'accumulate-still-relax0-v1',
     'accumulate-history-unclamped-v1',
     'accumulate-history-tap-clamp-v1',
+    'accumulate-conditioning-correction-v1',
+    'accumulate-uncorrected-conditioning-v1',
     'local-baseline-5d6a65e',
     'local-baseline-through-e00-harness',
     'rcas-fsr315-limiter',
@@ -28,6 +30,7 @@ const VARIANTS = [
     'exposure-taps-no-deadband-v1',
     'exposure-every-quad-v1',
     'exposure-every-quad-no-deadband-v1',
+    'exposure-fixed-v1',
     'source-filter-bundle-v1',
     'source-structural-bundle-v1',
     'source-spd-resolver-bundle-v1',
@@ -46,6 +49,7 @@ const SCENARIOS = [
     'Q18',
     'Q19',
     'Q20',
+    'Q21',
     'Q30',
 ] as const;
 
@@ -120,6 +124,7 @@ export function parseBenchmarkConfig(search = window.location.search): Benchmark
         warmupFrames,
         sampleFrames,
         authoritativeTiming: mode === 'performance',
+        velocitySource: enumParam(params, 'velocity', ['three', 'motion-vectors'] as const, 'three'),
     };
 }
 

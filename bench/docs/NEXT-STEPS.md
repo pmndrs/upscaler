@@ -2251,7 +2251,255 @@ node scripts/run-benchmark.mjs --smoke --ratios 2 --blocks 4 \
 # per-frame records: bench/results/raw/history-overshoot/<label>-2x/summary.json
 ```
 
-## 24. The disocclusion guide against exact ground truth — MEASURED (2026-11-28, issue #102)
+## 22. No metering when the exposure is supplied — DONE (2026-11-28, issue #98)
+
+**Question (from #91).** `dispatch({ exposureTexture })` overrides the conditioning
+exposure, and so does `autoExposure: false` (`settings.exposure`), but the metering
+reduction still ran every frame and its result was thrown away (only the published
+`.g`, which no shader reads, kept it). #91 proposed an `exposureMode: 'provided'` option
+plus CPU exposure / host pre-exposure scalars.
+
+**What ran before.** Both overrides ran the full metering: every render texel through
+`@pmndrs/downsampler` up to 2^19 texels (two dispatches, §17), the 1024 taps above.
+`autoExposure: false` + `exposure` (what pmndrs/pathtracer runs since #118) is the
+CPU-scalar path #91 asked for, and it already exists, so no new option or scalar was
+added.
+
+**Change.** "A fixed or app-supplied exposure ⇒ no metering", no new option. When
+`FLAG_AUTO_EXPOSURE` is off or `FLAG_EXTERNAL_EXPOSURE` is on, `UpscalerCore` dispatches
+the taps pipeline (never the every-texel pair), and its first statement is a uniform
+branch on those flags: lane 0 publishes the exposure texel and every lane returns
+before the metering loop and its barriers. The published texel matches the epilogue's
+`.r` (`select(C.exposure, external, FLAG_EXTERNAL_EXPOSURE)`), `.b` (host pre-exposure,
+1 when absent) and `.a` (the resolved reset: `FLAG_RESET` or the GPU signal, landmine
+#12) exactly. **`.g` (metered average luma) is now 0, meaning "not metered".** No shader
+reads it (accumulate, shading change, RCAS/blit and the debug view read `.r`/`.b`/`.a`);
+`docs/temporal-guides.md` documents the 0. No new pass and no new compile: the taps
+pipeline is mandatory already. Auto-exposure without an external texture runs the same
+metering as before.
+
+**Timing** (M5 Pro, worktree, other agents' jobs running, load average 120–160; one
+block per invocation, ABBA, `run-benchmark.mjs --smoke --blocks 1`; `exposure-fixed-v1` is
+`baseline` with `autoExposure: false`; worktree absolutes read ~3× slow, compare within a
+row). Exposure pass, mean of the two legs:
+
+| ratio (render) | metering form | metered | fixed / supplied | saved |
+| --- | --- | ---: | ---: | ---: |
+| 2 (960×540) | every texel (`baseline`) | 18.1 / 21.9 µs | 4.3 / 4.7 µs | 14–17 µs |
+| 3 (640×360) | every texel (`baseline`) | 14.3 / 13.7 µs | 4.2 / 4.9 µs | 9–10 µs |
+| 2 (960×540) | taps (`exposure-taps-v1`) | 14.2 µs | 4.7 µs | 9.5 µs |
+| 3 (640×360) | taps (`exposure-taps-v1`) | 12.4 µs | 4.5 µs | 7.9 µs |
+
+Every leg agrees on the sign. The saving is ~0.5–1 % of the compute sum (1450–2060 µs
+here), well inside that sum's ±200 µs noise, so the sums do not resolve it. What is
+left (~4.5 µs) is the dispatch itself. Speed comes first and the change has no quality
+effect, so it was taken.
+
+**Correctness.** The auto-exposure path is byte-identical, and so is the supplied path's
+output. Same bench run before and after the change (`run-benchmark.mjs --mode capture
+--ratios 1,2 --scenarios Q11,Q12`, `baseline` vs `exposure-taps-v1`, so both the taps and
+the every-texel forms are covered): all Q12 captures are byte-identical, and all 500 Q11
+captures are on a second after-run. The first after-run differed on 41 Q11 PNGs, but
+it also differed between `baseline` and `exposure-taps-v1` at ratio 1, which run the same
+shader there: capture noise under load (§16 saw the same on Q11). Q20 through
+`measure-history-overshoot.mjs` with fixed exposure (the provided branch) and with
+auto-exposure, 419 frames each, reads back identical per-frame output max, history max
+and exposure `.r` before and after. WGSL compiled clean on Metal (no `Log.entryAdded`
+errors).
+
+Regenerate:
+
+```bash
+node scripts/run-benchmark.mjs --smoke --ratios 2 --blocks 1 --variant baseline --comparison exposure-fixed-v1
+node scripts/run-benchmark.mjs --smoke --ratios 3 --blocks 1 --variant exposure-fixed-v1 --comparison baseline
+node scripts/run-benchmark.mjs --smoke --ratios 2 --blocks 1 --variant exposure-taps-v1 --comparison exposure-fixed-v1
+node scripts/run-benchmark.mjs --mode capture --smoke --ratios 1,2 --scenarios Q11,Q12 --reloads 1 \
+  --allow-differences --variant baseline --comparison exposure-taps-v1   # before and after the change
+node scripts/measure-history-overshoot.mjs --conditions 'fixed;{"autoExposure":true}' --variant production
+```
+
+## 23. Conditioning-exposure history correction — DONE for fixed/supplied exposure, REJECTED under auto-exposure (2026-11-28, issue #99)
+
+**Question (from #91).** History stores `x/(1+x)` of the colour pre-exposed by the
+conditioning exposure. When that exposure changes between frames, last frame's history
+decodes at the new value, off by `E_prev / E_cur`. Host pre-exposure was already
+corrected (§2); #91 proposed `correctConditioningExposure` for the conditioning value.
+
+**Where the previous value comes from.** The exposure texel is ping-ponged, and
+accumulate already binds last frame's (binding 11) for the host delta's `.b`. Its `.r`
+is last frame's conditioning exposure, so the correction is one more multiply on a
+texel already fetched: no new binding, no UBO change. It folds into the host ratio, so
+history is decoded and re-encoded once for both. While the dead-band holds the stored
+exposure, the ratio is exactly 1 and the rescale is skipped.
+
+**Forced step** (new: `scripts/measure-exposure-step.mjs`). Fixed exposure, still
+camera. Settle at `E0`, step to `E1`, and read the rgba16float output back every frame
+against a run at `E1` from frame 0 (same frame, same jitter phase). Exposure is divided
+out before display, so an ideal accumulator shows nothing. *Floor* = the converged
+`E0` frame against the `E1` reference, i.e. what the two conditioning values differ by
+anyway. Ratio 2, 1280×720, Metal, worktree.
+
+| scene, step | uncorrected: peak bias / mean \|err\| over the window / pixels off > 10 % / settles (bias < 0.5 %) | corrected | floor |
+| --- | --- | --- | --- |
+| Q12, 1 → 4 | −15.5 % / 8.6 % / 18.0 % / not within 48 frames | +0.26 % / 0.31 % / 1.4 % / frame 1 | 0.65 % |
+| Q12, 4 → 1 | +37.9 % / 11.0 % / 24.3 % / not within 48 | −0.51 % / 0.48 % / 1.3 % / frame 2 | 0.65 % |
+| Q12, 1 → 1.1 | −6.5 % / 3.6 % / 0.6 % / not within 48 | −0.06 % / 0.15 % / 0 % / frame 1 | 0.16 % |
+| Q20 (HDR hot spots), 1 → 8 | −49 % / 26 % / 90 % / not within 28 | +4.9 % / 2.5 % / 0.9 % | 7.0 % |
+| Q20, 8 → 1 | +157 % / 52 % / 95 %, **15 hot pixels** / not within 28 | −5.0 % / 3.8 % / 0.9 %, 0 hot | 6.6 % |
+
+Uncorrected, an app that steps its exposure gets a one-frame pop (up to +157 %) that
+then fades for 50+ frames. Corrected, the step stays at the conditioning floor, and
+re-encoding history next to Q20's 11–16 radiance hot spots creates no hot pixels (the
+#118 failure mode).
+
+**Under auto-exposure the correction loses** (`accumulate-conditioning-correction-v1`,
+the correction in every mode, against `production`, auto-exposure on):
+
+| measurement | uncorrected | corrected | AE off (reference) |
+| --- | --- | --- | --- |
+| Q15 drift lag, full-frame meanAbs / ghost fraction (`measure-drift-lag.mjs`) | 3.54 / 0.271 | 5.50 / 0.310 | 5.26 / 0.311 |
+| Q9 (exposure transition), frames 40–239 | 3.85 / 0.238 | 4.22 / 0.232 | – |
+| Q19 warp error, motion / holds (`--judge display --warp error`) | 0.00541 / 0.00020 | 0.00542 / 0.00020 | – |
+| Q1 / Q12 still convergence | 0.1099 / 0.0167 | identical | – |
+| Q20 overshoot, auto and fixed | 0 hot | 0 hot | – |
+
+Auto-exposure follows the scene's own brightness. Decoding old history at the new
+exposure moves it toward the new lighting, which is the "masks 30–45 % of the lag"
+effect §8 recorded. The correction removes that, and Q15 lands where auto-exposure off
+does (+55 %). Auto-exposure eases at `ADAPT_SPEED`, so its per-frame change is small
+and drifts rather than pops. The correction buys no flicker improvement there
+(Q19, Q1 and Q12 are unchanged) and costs lag.
+
+**Decision: correct a fixed or app-supplied exposure, never auto-exposure.** The gate is
+`!FLAG_AUTO_EXPOSURE || FLAG_EXTERNAL_EXPOSURE`, the same condition under which §22
+skips metering. There is no option: the auto-exposure path is byte-identical
+(`production` vs `accumulate-uncorrected-conditioning-v1` captures of Q9, Q11 and Q15
+at ratio 2: 379 of 380 PNGs byte-identical; the one exception, Q9 f68, captured again
+with two reloads per variant, read identical in all four). A constant fixed exposure is identical too, since the
+ratio is exactly 1 (Q12 with auto-exposure off: 0.0158 both, per pair). Only a changing
+fixed or supplied exposure changes output, and that is the step the tables above fix.
+The switch from auto to fixed is corrected; from fixed to auto, auto eases from the
+fixed value uncorrected, as before.
+
+**Not corrected:** the locked luma (locks `.g`, conditioned space). A step still breaks
+locks through `lockShading`, as it did before and as a host step does. The shading-change
+detector needs nothing: it scales both frames by the current exposure. Not GPU-verified
+through `exposureTexture` (the bench drives `settings.exposure`); the flag logic is the
+same and `shaders.test.ts` pins it. Cost not separately resolved: the change adds one
+multiply and a uniform branch to a texel already loaded, below this loaded machine's
+±100 µs accumulate noise.
+
+Regenerate:
+
+```bash
+node scripts/measure-exposure-step.mjs --variant production --label shipped
+node scripts/measure-exposure-step.mjs --variant accumulate-uncorrected-conditioning-v1 --label off
+node scripts/measure-exposure-step.mjs --scenario Q20 --settle 90 --frames 28 --steps '1>8;8>1' --variant production
+node scripts/measure-drift-lag.mjs --scenario Q15 --ratio 2 --variant accumulate-conditioning-correction-v1   # and production
+node scripts/measure-drift-lag.mjs --scenario Q9 --frames 40:239:4 --ratio 2 --variant accumulate-conditioning-correction-v1
+node scripts/measure-motion-stability.mjs --scenario Q19 --ratio 2 --judge display --warp error \
+  --variant production --comparison accumulate-conditioning-correction-v1
+node scripts/measure-history-overshoot.mjs --variant accumulate-conditioning-correction-v1
+node scripts/run-benchmark.mjs --mode capture --smoke --ratios 2 --scenarios Q9,Q11,Q15 --reloads 1 \
+  --allow-differences --variant production --comparison accumulate-uncorrected-conditioning-v1
+
+## 24. Deformed geometry: caller-supplied velocity + `@pmndrs/motion-vectors` — DONE (2026-11-28)
+
+**Question.** three's `velocity` reports deformation (`positionNode`, morph targets,
+`displacementMap`) as motion; `@pmndrs/motion-vectors`' own lab measures 3.2 px
+(static displacement), 51.9 px (moving `positionNode`) and 11.6 px (held morph)
+of error where its `MotionVectors` node stays under 0.01 px. Does that reach the
+upscaler's output, and is the node worth recommending?
+
+**Library change.** `UpscalePass` (constructor) and `upscaleScene()` take
+`velocityNode`: a node, or a producer `{ velocity, projectionMatrix, beginFrame? }`
+(the shape of `MotionVectors.for(renderer)`, matched structurally — the library
+never imports the package). The MRT output stays `velocity`; the surfaces set the
+producer's `projectionMatrix` to the unjittered projection (`null` on a view-offset
+conflict, like three's node via `_setJitterActive`) and call `beginFrame()` once per
+upscaler frame. `upscale()` takes it too, for the projection only. Default (three's
+`velocity`) unchanged. Rejected: asking the caller to wire `beginFrame()` (the
+surfaces own the render, so they know the frame); accepting `motion.velocity` and
+guessing its owner (a bare node has no projection to set).
+
+**Scenario.** Q21 `deformer-motion` (BenchScene `deformScene`): checker-textured
+`positionNode` wave, morph-target blob, rigid control box. The bench knob is
+`?velocity=three|motion-vectors` (`BenchPipeline.useMotionVectors`; the module is
+imported only on request, so default runs never construct the node).
+
+**Quality vs a 64-spp supersampled reference** (temporal, ratio 2, 1280×720, 16
+frames per window; ROIs at the still-camera pose, so in `orbit-deform`/`hold` they
+cover whatever sits there after the orbit):
+
+| segment | ROI | PSNR three | PSNR MV | SSIM three | SSIM MV | tErr three | tErr MV |
+|---|---|---|---|---|---|---|---|
+| still-held | full | 24.96 | 26.13 | 0.808 | 0.856 | 0.679 | 0.162 |
+| still-held | wave | 21.02 | 26.41 | 0.458 | 0.830 | 3.882 | 0.142 |
+| still-held | blob | 21.25 | 27.06 | 0.580 | 0.878 | 4.229 | 0.146 |
+| still-held | control | 28.28 | 28.28 | 0.869 | 0.869 | 0.154 | 0.154 |
+| deform | full | 24.95 | 25.93 | 0.803 | 0.845 | 0.762 | 0.362 |
+| deform | wave | 21.08 | 25.96 | 0.458 | 0.810 | 3.989 | 0.727 |
+| deform | blob | 21.43 | 24.86 | 0.565 | 0.790 | 3.777 | 1.277 |
+| deform | control | 25.98 | 25.98 | 0.728 | 0.728 | 3.396 | 3.396 |
+| orbit-deform | full | 23.75 | 24.34 | 0.740 | 0.772 | 10.272 | 9.923 |
+| orbit-deform | wave | 21.81 | 24.87 | 0.504 | 0.724 | 10.821 | 8.473 |
+| orbit-deform | blob | 20.35 | 23.76 | 0.522 | 0.748 | 11.030 | 8.141 |
+| orbit-deform | control | 24.05 | 24.06 | 0.722 | 0.723 | 7.238 | 7.232 |
+| hold | full | 25.49 | 26.18 | 0.831 | 0.855 | 0.499 | 0.131 |
+| hold | wave | 24.06 | 27.62 | 0.711 | 0.854 | 2.426 | 0.127 |
+| hold | blob | 21.74 | 25.85 | 0.604 | 0.813 | 3.081 | 0.162 |
+| hold | control | 25.14 | 25.14 | 0.794 | 0.794 | 0.160 | 0.159 |
+
+tErr = mean |Δoutput − Δreference| per frame on the 0–255 display scale; on a held
+window the reference is still, so it is pure flicker. With three's velocity the
+motionless deformers **boil**: 3.9–4.2 /255 per frame against 0.14 (≈ 27×), and
+PSNR loses 5.4 dB (wave) / 5.8 dB (blob). The rigid control box is identical in
+every window — the node changes nothing where three is already right. Whole-frame
+PSNR gains are 0.6–1.2 dB because the deformers cover ~15 % of the frame.
+
+**Debug views** (`scripts/capture-velocity-views.mjs`, frames 110/180/300/410):
+three's Motion Vectors view paints the wave and the blob with motion on the held
+frames (110, 410) where the node's view is flat neutral everywhere; under the orbit
+(300) three's view shows the deformers as patches inconsistent with the smooth
+camera gradient around them. Disocclusion: three leaves partial outlines and specks
+on the held deformers and the accumulation-age view shows them never fully maturing
+(grey streaks); with the node both are clean (black / white) on held frames, and
+under deformation only the moving silhouettes reset. The final frames show the
+smear directly: the wave's checker turns into streaks and the blob's grid smears
+with three's velocity on a still camera.
+
+**Flicker meter (`measure-motion-stability.mjs --judge display --warp error`).** Not
+an A/B on deformers: the probe judges with the node, and installing the node on a
+renderer patches every material's position stage, which three's `velocity` in the
+same MRT then reads too — the "three" and "motion-vectors" conditions differ by at
+most 3.9e-6 warp error per frame (segment means: still-held 0.00013, deform 0.00051,
+orbit-deform 0.00750, hold 0.00016 for both). The reference meter's tErr above is the
+clean flicker comparison. (Likely mechanism; not isolated further.)
+
+**Cost.** Upscaler GPU time unchanged: Q21 ratio 2, 400 timed frames, median
+compute sum 320.8 / 320.7 µs (three's velocity) vs 321.7 / 320.7 µs (node), ABAB
+in one worktree session — within noise. The scene render isn't timed by the bench;
+the package reports +7–15 µs per frame for its node (their number, not ours).
+
+**Verdict.** Recommend `MotionVectors` whenever a scene has `positionNode`, morph or
+displacement deformation; three's velocity remains fine for rigid/camera motion.
+Transparents and particles still need the reactive mask. Docs:
+docs/inputs-and-contracts.md → "When three's velocity is wrong".
+
+**GPU verification of the option** (temporary harness, not committed): `UpscalePass`
+and `upscaleScene()` with `velocityNode: MotionVectors.for(renderer)` on a held
+`positionNode` wave render clean, the Motion Vectors view reads exactly the
+background's neutral value on the wave (three's: offset), `motion.frame` advances
+once per rendered frame on both surfaces, no WebGPU/WGSL errors.
+
+```bash
+node scripts/measure-reference-quality.mjs --scenario Q21 --ratio 2 --modes temporal --velocity three --label vel-three
+node scripts/measure-reference-quality.mjs --scenario Q21 --ratio 2 --modes temporal --velocity motion-vectors --label vel-motion-vectors
+# bench/results/raw/reference-quality/vel-<source>-Q21-2x/summary.json (windows → summary → rois)
+node scripts/capture-velocity-views.mjs --scenario Q21
+# bench/results/raw/velocity-views/Q21-2x/grid-f<frame>.png (rows: three, motion-vectors)
+node scripts/measure-motion-stability.mjs --scenario Q21 --judge display --warp error --velocity three --label vel-three
+## 25. The disocclusion guide against exact ground truth — MEASURED (2026-11-28, issue #102)
 
 **Question.** #102 (pmndrs/denoiser, measured on 0.2.0, before #67) scored the
 `disocclusion` guide against exact ground truth. The mask missed 14–21 % of the
@@ -2453,6 +2701,5 @@ node scripts/measure-disocclusion-truth.mjs --validate --error Q3,Q19,Q30
 - ~~Atomic depth scatter as a wholesale replacement for the fused reconstruct pass.~~
   Adopted 2026-10-05 (§15): the fused form was not camera-invariant (issue #67).
 - T&C as a distinct softer channel — revisit only on user demand with real content.
-- Conditioning-exposure history correction (beyond host pre-exposure): eased
-  adaptation keeps the per-frame mismatch under the shading detector's threshold;
-  correcting it changes output for every auto-exposure user. Revisit with evidence.
+- Conditioning-exposure history correction under **auto-exposure** (§23): measured
+  +55 % Q15 drift lag, +10 % Q9, no flicker gain. Fixed/supplied exposure is corrected.

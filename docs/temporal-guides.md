@@ -59,7 +59,7 @@ frame start ── last frame's products are readable (dilatedDepth still holds 
 | `disocclusion` | render | rgba8unorm, `.r` | Graded `0` stable → `1` fresh history; `1` everywhere on a reset frame ([reading it](#reading-disocclusion)) | after `dispatchGuides` |
 | `reactive` | render | rgba8unorm, `.r` | Merged reactive mask target (see below) | late; `null` on `guides` |
 | `shadingChange` | ⌈render / 2⌉ | r32float, nearest only | `0..1` shading-change response per 2×2 block | late; `null` on `guides` |
-| `exposure` | 1×1 | rgba16float | `r` conditioning exposure, `g` metered average luma of the beauty input, `b` host pre-exposure, `a` 1 on a reset frame (`reset` or `resetTexture`), else 0 | late; `null` on `guides` |
+| `exposure` | 1×1 | rgba16float | `r` conditioning exposure, `g` metered average luma of the beauty input (0 when nothing is metered: `autoExposure: false` or an `exposureTexture`), `b` host pre-exposure, `a` 1 on a reset frame (`reset` or `resetTexture`), else 0 | late; `null` on `guides` |
 | `lockStatus` | **display** | rgba16float | `r` lock lifetime, `g` locked luma (conditioned tonemap space), `b` shading-change age, `a` resolved caller alpha | late, N−1 prior; `null` on `guides` |
 | `history` | **display** | rgba16float | `rgb` accumulated color in conditioned tonemap space (not display-ready), `a` accumulation age in frames | late, N−1 prior; `null` on `guides` |
 
@@ -131,7 +131,7 @@ mostly replaced by false flags next to it. A consumer that needs the exact revea
 strip, for example a denoiser that must not keep history from another surface, should
 run its own per-tap test on undilated depth. Issue
 [#102](https://github.com/pmndrs/upscaler/issues/102) and `bench/docs/NEXT-STEPS.md`
-§24 have the measurements.
+§25 have the measurements.
 
 **The tolerance scales with the render viewport diagonal.** The tolerance is
 `max(1.37e-5 · |renderSize / 2| · depth, relief)`. `|renderSize / 2|` is half the

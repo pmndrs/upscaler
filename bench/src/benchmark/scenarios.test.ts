@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { parseBenchmarkConfig } from './config';
-import { BENCHMARK_SCENARIOS, getBenchmarkScenario, resolveCaptureFrames } from './scenarios';
+import { BENCHMARK_SCENARIOS, Q21_SEGMENTS, getBenchmarkScenario, resolveCaptureFrames } from './scenarios';
 
 const capture = (scenario: string) =>
     parseBenchmarkConfig(`?benchMode=capture&scenario=${scenario}&width=1280&height=720`);
@@ -121,6 +121,36 @@ describe('Q20 emitter-pan-overshoot', () => {
         expect(at(419)).toBe(at(360));
         // The camera looks straight at the wall: the target pans with it.
         expect(q20.frame(200).cameraTarget[0]).toBe(at(200));
+    });
+});
+
+describe('Q21 deformer-motion', () => {
+    const q21 = getBenchmarkScenario('Q21');
+    const segment = (name: string) => Q21_SEGMENTS.find((s) => s.name === name)!;
+
+    it('holds the deformation still while converging, animates it, orbits, then holds', () => {
+        const at = (frame: number) => q21.frame(frame);
+        expect(at(0).scene).toBe('deformers');
+        // still-held: a non-zero deformation, frozen, under a still camera.
+        expect(at(0).deformTime).toBeGreaterThan(0);
+        expect(at(segment('still-held').end).deformTime).toBe(at(0).deformTime);
+        expect(at(segment('still-held').end).cameraPosition).toEqual(at(0).cameraPosition);
+        // deform: the clock runs, the camera does not.
+        expect(at(150).deformTime).toBeGreaterThan(at(149).deformTime!);
+        expect(at(segment('deform').end).cameraPosition).toEqual(at(0).cameraPosition);
+        // orbit-deform: both move.
+        expect(at(300).deformTime).toBeGreaterThan(at(299).deformTime!);
+        expect(at(300).cameraPosition[0]).not.toBe(at(299).cameraPosition[0]);
+        // hold: everything frozen.
+        const hold = segment('hold');
+        expect(at(hold.end).deformTime).toBe(at(hold.start).deformTime);
+        expect(at(hold.end).cameraPosition).toEqual(at(hold.start).cameraPosition);
+    });
+
+    it('segments tile the scenario', () => {
+        expect(Q21_SEGMENTS[0].start).toBe(0);
+        expect(Q21_SEGMENTS.at(-1)!.end).toBe(q21.endFrame);
+        for (let i = 1; i < Q21_SEGMENTS.length; i++) expect(Q21_SEGMENTS[i].start).toBe(Q21_SEGMENTS[i - 1].end + 1);
     });
 });
 

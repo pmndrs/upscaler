@@ -55,6 +55,8 @@ class BenchmarkResolverAdapter implements BenchmarkResolver {
 
         if (typeof metadata.settings.rcasDenoise === 'boolean')
             this._upscaler.settings.rcasDenoise = metadata.settings.rcasDenoise;
+        // Only `exposure-fixed-v1` turns it off (the capture API sets it per capture).
+        if (metadata.settings.autoExposure === false) this._upscaler.settings.autoExposure = false;
     }
 
     prepare(): Promise<void> { return this._upscaler.prepare(); }

@@ -9,6 +9,8 @@ declare type BenchmarkVariantId =
     | 'accumulate-still-relax0-v1'
     | 'accumulate-history-unclamped-v1'
     | 'accumulate-history-tap-clamp-v1'
+    | 'accumulate-conditioning-correction-v1'
+    | 'accumulate-uncorrected-conditioning-v1'
     | 'local-baseline-5d6a65e'
     | 'local-baseline-through-e00-harness'
     | 'rcas-fsr315-limiter'
@@ -28,6 +30,7 @@ declare type BenchmarkVariantId =
     | 'exposure-taps-no-deadband-v1'
     | 'exposure-every-quad-v1'
     | 'exposure-every-quad-no-deadband-v1'
+    | 'exposure-fixed-v1'
     | 'source-filter-bundle-v1'
     | 'source-structural-bundle-v1'
     | 'source-spd-resolver-bundle-v1'
@@ -60,6 +63,7 @@ declare type BenchmarkScenarioId =
     | 'Q18'
     | 'Q19'
     | 'Q20'
+    | 'Q21'
     | 'Q30';
 declare type BenchmarkDebugView =
     | 'final'
@@ -90,6 +94,11 @@ declare interface BenchmarkRunConfig {
     warmupFrames: number;
     sampleFrames: number;
     authoritativeTiming: boolean;
+    /**
+     * What the scene MRT writes as motion: three's `velocity` (default) or
+     * `@pmndrs/motion-vectors`' `MotionVectors` node (`?velocity=motion-vectors`).
+     */
+    velocitySource: 'three' | 'motion-vectors';
 }
 
 declare interface BenchmarkPipelineMetadata {
@@ -252,7 +261,9 @@ declare interface BenchmarkFrameState {
     /** Q19: show the frontal backdrop wall behind the props. */
     backdrop?: boolean;
     /** Scene rendered as the upscaler input; defaults to the main torture scene. */
-    scene?: 'main' | 'cornell' | 'sparse-wires' | 'emitters' | 'hot-spots' | 'chart' | 'dense';
+    scene?: 'main' | 'cornell' | 'sparse-wires' | 'emitters' | 'hot-spots' | 'chart' | 'deformers' | 'dense';
+    /** Q21: the deformers' clock in seconds (wave phase, morph weight, control box); held = still. */
+    deformTime?: number;
     /**
      * Q13: show the merged-reactive panels, render the opaque-only color for
      * the auto-generator, and render the explicit coverage alongside it.

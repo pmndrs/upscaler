@@ -15,8 +15,9 @@ export const isHold = (segment) => /^(still|hold)/.test(segment.name);
  * The scenarios the meter drives, as plans: segments, the first measured frame
  * (after the history has had time to converge) and the last simulated frame.
  * Q19's segments come from the bench registry itself, so they cannot drift.
- * @param {string} id - Scenario id (Q19, Q4 or Q3)
- * @param {{ Q19_SEGMENTS: readonly { name: string, start: number, end: number }[] }} registry - bench/src/benchmark/scenarios.ts
+ * @param {string} id - Scenario id (Q19, Q21, Q4 or Q3)
+ * @param {{ Q19_SEGMENTS: readonly { name: string, start: number, end: number }[],
+ *   Q21_SEGMENTS: readonly { name: string, start: number, end: number }[] }} registry - bench/src/benchmark/scenarios.ts
  * @returns {{ id: string, start: number, end: number, segments: { name: string, start: number, end: number }[] }} The plan
  * @throws {Error} On a scenario the meter has no plan for
  */
@@ -35,9 +36,11 @@ export function scenarioPlan(id, registry) {
                 { name: 'hold', start: 360, end: 479 },
             ],
         };
+    // Q21 (deformer-motion): the segments come from the registry, as Q19's.
+    if (id === 'Q21') return { id, start: 24, end: 419, segments: registry.Q21_SEGMENTS.map((s) => ({ ...s })) };
     // Q3 (object-motion-disocclusion): animated objects under a still camera.
     if (id === 'Q3') return { id, start: 24, end: 239, segments: [{ name: 'object-motion', start: 0, end: 239 }] };
-    throw new Error(`No motion-stability plan for scenario ${id} (Q19, Q4 or Q3).`);
+    throw new Error(`No motion-stability plan for scenario ${id} (Q19, Q21, Q4 or Q3).`);
 }
 
 /**

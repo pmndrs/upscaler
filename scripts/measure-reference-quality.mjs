@@ -99,6 +99,8 @@ const DEFAULT_WINDOWS = {
     // Mirrors Q19_SEGMENTS in bench/src/benchmark/scenarios.ts: the converged
     // still as a control, then the middle of each kind of motion.
     Q19: 'still=96:111,dolly-back=150:165,orbit-left=390:405,slide=630:645,scene-recede=750:765,dolly-back-fast=962:977',
+    // Mirrors Q21_SEGMENTS: the middle of each deformer segment.
+    Q21: 'still-held=96:111,deform=172:187,orbit-deform=292:307,hold=396:411',
 };
 /** Effect graphs (Q6–Q8, Q14) render through a post graph the reference would skip; Q10 resizes; Q11 bakes host exposure into the MRT. */
 const UNSUPPORTED = new Set(['Q6', 'Q7', 'Q8', 'Q10', 'Q11', 'Q14']);
@@ -123,6 +125,8 @@ const USAGE = `Usage: node scripts/measure-reference-quality.mjs [options]
   --variant <id>         bench variant (default production: production RCAS on every
                          path; 'baseline' runs the frozen legacy RCAS on temporal)
   --settings <json>      capture-setting overrides, e.g. '{"autoExposure":false}'
+  --velocity <source>    what the scene MRT writes as motion: three (default, three's
+                         velocity) or motion-vectors (@pmndrs/motion-vectors' node)
   --label <name>         output folder prefix (default: the variant id)
   --export-png           write every measured frame (reference + each mode) as an
                          8-bit sRGB PNG sequence for offline perceptual metrics
@@ -147,7 +151,7 @@ const cli = parseCliOrExit(
     process.argv.slice(2),
     [
         'scenario', 'ratio', 'modes', 'frames', 'samples', 'scale', 'floor-samples', 'width', 'height', 'variant',
-        'settings', 'label', 'export-png', 'keep-raw', 'save-diagnostics', 'reference-offset', 'url', 'port', 'chrome', 'power-preference',
+        'settings', 'velocity', 'label', 'export-png', 'keep-raw', 'save-diagnostics', 'reference-offset', 'url', 'port', 'chrome', 'power-preference',
         'expected-vendor', 'without-timestamps',
     ],
     USAGE,
@@ -165,6 +169,7 @@ const height = Number(cli.height ?? 720);
 // temporal path for history comparability, so it would not score what ships.
 const variant = typeof cli.variant === 'string' ? cli.variant : 'production';
 const settings = typeof cli.settings === 'string' ? JSON.parse(cli.settings) : {};
+const velocitySource = String(cli.velocity ?? 'three');
 const label = String(cli.label ?? variant);
 const exportPng = cli['export-png'] === true;
 const keepRaw = cli['keep-raw'] === true;
@@ -179,6 +184,7 @@ function fail(message) {
 }
 if (UNSUPPORTED.has(scenario)) fail(`Scenario ${scenario} is not supported by the reference capture.`);
 for (const mode of modes) if (!MODES.includes(mode)) fail(`Unknown mode ${mode}.`);
+if (!['three', 'motion-vectors'].includes(velocitySource)) fail(`Unknown --velocity ${velocitySource}.`);
 if (!Number.isInteger(scale) || scale < 1) fail('--scale must be a positive integer.');
 if (!Number.isInteger(samples) || samples < 1 || samples % (scale * scale) !== 0)
     fail(`--samples must be a positive multiple of scale² (${scale * scale}).`);
@@ -663,6 +669,7 @@ async function main() {
         url.searchParams.set('width', String(width));
         url.searchParams.set('height', String(height));
         url.searchParams.set('variant', variant);
+        if (velocitySource !== 'three') url.searchParams.set('velocity', velocitySource);
         await client.call('Page.addScriptToEvaluateOnNewDocument', { source: auditSource });
         await client.call('Page.navigate', { url: url.href });
         for (let attempt = 0; ; attempt++) {
@@ -850,6 +857,7 @@ async function main() {
             gpuAudit: await evaluate(client, 'window.__gpuAudit'),
             scenario,
             variant,
+            velocity: velocitySource,
             ratio,
             settings,
             display: [displayWidth, displayHeight],
