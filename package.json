@@ -99,7 +99,6 @@
         "@pmndrs/motion-vectors": "0.1.0",
         "@pmndrs/upscaler-babylon": "workspace:*",
         "@pmndrs/upscaler-core": "workspace:*",
-        "@pmndrs/upscaler-motion": "workspace:*",
         "@pmndrs/upscaler-pixi": "workspace:*",
         "@pmndrs/upscaler-three": "workspace:*",
         "@types/three": "^0.187.0",

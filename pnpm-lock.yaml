@@ -30,9 +30,6 @@ importers:
       '@pmndrs/upscaler-core':
         specifier: workspace:*
         version: link:packages/core
-      '@pmndrs/upscaler-motion':
-        specifier: workspace:*
-        version: link:packages/motion
       '@pmndrs/upscaler-pixi':
         specifier: workspace:*
         version: link:packages/pixi
@@ -103,8 +100,6 @@ importers:
       '@pmndrs/downsampler':
         specifier: 0.1.0
         version: 0.1.0(three@0.187.0)
-
-  packages/motion: {}
 
   packages/pixi:
     dependencies:

@@ -3,6 +3,8 @@
     <head>
         <meta charset="UTF-8" />
         <title>Upscaler motion probe</title>
+        <!-- No favicon request: its 404 would read as an error in the meters' browser logs. -->
+        <link rel="icon" href="data:," />
         <style>
             html,
             body {
@@ -12,7 +14,7 @@
         </style>
     </head>
     <body>
-        <!-- Driven by scripts/measure-motion-upscaler.mjs (EXPERIMENTAL). -->
+        <!-- Driven by scripts/measure-motion-upscaler.mjs and measure-motion-stability.mjs. -->
         <script type="module" src="/src/probes/motionUpscaler.ts"></script>
     </body>
 </html>

@@ -142,8 +142,10 @@ node scripts/verify-split-encoder.mjs
 # accumulation-age views, per variant, summarized per segment.
 node scripts/measure-receding-disocclusion.mjs --variants baseline,reconstruct-cross-frame-v1
 
-# Upscaler motion probe (EXPERIMENTAL): warping error per upscale path and cut
-# resets on Q19/Q10. The motion lab itself moved to pmndrs/motion-vectors.
+# Upscaler motion probe (EXPERIMENTAL): the bench's consumer of @pmndrs/motion-vectors
+# (npm devDependency): warping error per upscale path and velocity source (three,
+# the package's node, camera motion from depth), the GPU cut detector, and cut
+# resets on Q19/Q10. The motion lab itself lives in pmndrs/motion-vectors.
 node scripts/measure-motion-upscaler.mjs
 
 # Reset correctness + the GPU reset signal (issue #102): Q10's cut through four
@@ -156,6 +158,13 @@ node scripts/measure-reset-signal.mjs --modes none,scripted,gpu,zero,gpu@split
 # metering until --release (a slow DXC compile) and diffs vs always-ready and vs
 # the old restart, per frame. --toggle a,b re-enables detectShadingChanges instead.
 node scripts/measure-late-ready.mjs --scenario Q10 --hold shadingChange,everyTexel --release 40
+
+# Flicker UNDER MOTION (reference-free): WarpingError on the output, judged through
+# the package's MotionVectors node, per Q19/Q4/Q3 segment. The still-scene meters'
+# motion counterpart; --comparison A/Bs two bench variants in one run (~1 min).
+# It reads SHARPER as WORSE (bilinear warp; the 2×2 reference reads above native):
+# A/B with --judge display --warp error (error vs the reference is warped; NEXT-STEPS §20).
+node scripts/measure-motion-stability.mjs --modes native,bilinear,spatial,temporal --heat
 
 # Sub-pixel emitter retention (issue #51): Q17 per-emitter output energy vs the
 # input's own coverage, flicker, lock/disocclusion/shading activity and a
@@ -216,8 +225,6 @@ packages/
     src/internal/babylonWebGPU.ts — the two private Babylon fields (engine._device, _hardwareTexture.underlyingResource)
     src/internal/conventions.ts — flipped-RTT jitter sign + motionScale [-1,-1] + FrameCamera (docs/babylon.md)
     src/internal/textureAllocator.ts — wrapWebGPUTexture + updateWrappedWebGPUTexture (the wrap alone has no sampling view)
-  motion/              — @pmndrs/upscaler-motion (private, FROZEN copy of pmndrs/motion-vectors src/, not bundled):
-                         only for bench/motion-upscaler.html. Don't edit here; replaced by the npm package at 0.x.
   pixi/                — @pmndrs/upscaler-pixi (private, EXPERIMENTAL): pixi.js v8 WebGPURenderer adapter, spatial path verified
     src/Upscaler.ts    — wraps UpscalerCore: getGpuSource() lookup; dispatch() between renders, encode() inside one
                          (finishRenderPass + pixi's frame encoder); the temporal path needs app-supplied depth/motion/FrameCamera

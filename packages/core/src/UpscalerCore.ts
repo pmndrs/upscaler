@@ -145,6 +145,9 @@ export type UpscalerCoreInternalOptions<THandle = GPUTexture> = UpscalerCoreOpti
     // (EveryTexelExposure, NEXT-STEPS §17) — each texel, or ('every-quad') each
     // 2×2 quad's box average; '-no-deadband' also drops the 1/16-stop dead-band.
     _exposureMetering?: ExposureMetering;
+    // Bench-only: an accumulate shader with production's bindings — the
+    // motion-gap candidates in bench/src/candidates/shaders/accumulateVariants.ts.
+    _accumulateShader?: string;
     // Bench-only: a single-pass cross-frame reconstruct (the frozen pre-#67
     // form, or its camera-compensated variant — shaders/reconstructVariants.ts)
     // in place of the production scatter + depth clip pair.
@@ -232,6 +235,7 @@ export class UpscalerCore<THandle = GPUTexture> {
     private readonly _depthClipShader: string | null;
     private readonly _exposureShader: string | null;
     private readonly _exposureMetering: ExposureMetering | null;
+    private readonly _accumulateShader: string | null;
     private readonly _crossFrameReconstruct: { shader: string; cameraCompensated: boolean } | null;
     // One constants buffer per frame stage. `queue.writeBuffer` lands before
     // anything encoded this frame executes, so a single shared buffer would
@@ -402,6 +406,7 @@ export class UpscalerCore<THandle = GPUTexture> {
         this._depthClipShader = options._depthClipShader ?? null;
         this._exposureShader = options._exposureShader ?? null;
         this._exposureMetering = options._exposureMetering ?? null;
+        this._accumulateShader = options._accumulateShader ?? null;
         this._crossFrameReconstruct = options._crossFrameReconstruct ?? null;
         this._reprojectData = options._reprojectData ?? null;
         this._holdOptionalPass = options._holdOptionalPass ?? null;
@@ -549,7 +554,7 @@ export class UpscalerCore<THandle = GPUTexture> {
             spatialRcas: ['rcas', this._spatialRcasShader ?? this._rcasShader],
             reconstruct: ['reconstruct', this._crossFrameReconstruct?.shader ?? RECONSTRUCT_SHADER],
             depthClip: ['depth-clip', this._depthClipShader ?? DEPTH_CLIP_SHADER],
-            accumulate: ['accumulate', ACCUMULATE_SHADER],
+            accumulate: ['accumulate', this._accumulateShader ?? ACCUMULATE_SHADER],
             exposure: ['exposure', this._exposureShader ?? LUMINANCE_PYRAMID_SHADER],
             generateReactive: ['gen-reactive', GENERATE_REACTIVE_SHADER],
             shadingChange: ['shading-change', this._shadingChangeShader ?? SHADING_CHANGE_SHADER],

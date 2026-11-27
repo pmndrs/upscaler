@@ -1,6 +1,7 @@
 import {
     createBaselineResolver,
     createProductionRcasResolver,
+    createAccumulateVariantResolver,
     createRcasExperimentResolver,
     createRcasNumericParityResolver,
     createDepthClipVariantResolver,
@@ -34,6 +35,11 @@ let activeResolverCount = 0;
 const RESOLVER_FACTORIES = {
     baseline: createBaselineResolver,
     production: createProductionRcasResolver,
+    'accumulate-motion-cap2-v1': createAccumulateVariantResolver,
+    'accumulate-motion-cap4-v1': createAccumulateVariantResolver,
+    'accumulate-motion-cap2-early-v1': createAccumulateVariantResolver,
+    'accumulate-bilinear-history-v1': createAccumulateVariantResolver,
+    'accumulate-still-relax0-v1': createAccumulateVariantResolver,
     'local-baseline-5d6a65e': createBaselineResolver,
     'local-baseline-through-e00-harness': createBaselineResolver,
     'rcas-fsr315-limiter': createRcasNumericParityResolver,
@@ -187,6 +193,12 @@ function metadata(id: BenchmarkVariantId): BenchmarkVariantMetadata {
                     ? `Shading change with block memory (${id.slice('shading-memory-'.length)})`
                   : id === 'production'
                     ? 'Production pipeline (production RCAS on every path)'
+                  : id === 'accumulate-bilinear-history-v1'
+                    ? 'Accumulate with bilinear history fetch (motion-gap diagnostic)'
+                  : id === 'accumulate-still-relax0-v1'
+                    ? 'Accumulate without the still-scene relax (motion-onset diagnostic)'
+                  : id.startsWith('accumulate-motion-cap')
+                    ? `Motion-adaptive accumulation cap (${id.slice('accumulate-motion-'.length)})`
                 : rcasDenoise
             ? 'FSR 3.1.5 RCAS limiter + denoise'
             : rcasLimiterParity
@@ -215,7 +227,8 @@ function metadata(id: BenchmarkVariantId): BenchmarkVariantMetadata {
                 depthClipVariant ||
                 exposureSerial ||
                 exposureMetering ||
-                id === 'production'
+                id === 'production' ||
+                id.startsWith('accumulate-')
                 ? id
                 : rcasNumericParity
                 ? rcasDenoise
