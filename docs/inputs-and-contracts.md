@@ -81,6 +81,59 @@ must be exactly what that node produces, rendered into a named MRT attachment:
   previous model matrices. A material that bypasses the node produces per-object
   flashing in `DebugView.MotionVectors`.
 
+### When three's `velocity` is wrong: deformed geometry
+
+three's `velocity` is exact for camera and rigid object motion, but it reports
+**deformation** wrongly: a `positionNode` displacement, a morph target or an animated
+`displacementMap` reads as motion even while it stands still, and moving deformation
+reads the wrong motion. The upscaler then fetches history from the wrong place, which
+smears and boils the deformed surface — on a still camera too. Measured on bench Q21
+(a `positionNode` wave and a morph-target blob, ratio 2; bench/docs/NEXT-STEPS.md
+§22): on the **held**, motionless deformers three's velocity cost 5.4 dB (wave) and
+5.8 dB (blob) PSNR against a supersampled reference and made them flicker (temporal
+error 3.9–4.2 /255 per frame against 0.14 with exact motion); rigid objects were
+unaffected (identical PSNR).
+
+`UpscalePass` and `upscaleScene()` take a `velocityNode` option for another motion
+source. `@pmndrs/motion-vectors`' `MotionVectors` is the drop-in for three: it uses
+the same convention (`.xy` NDC `current − previous`; its `.zw` are a flag and the
+previous depth, which the upscaler ignores) and is exact on those deformers:
+
+```ts
+import { MotionVectors } from '@pmndrs/motion-vectors/three';
+
+const motion = MotionVectors.for(renderer);
+const pass = new UpscalePass(renderer, { velocityNode: motion });
+// or: post.outputNode = upscaleScene(scene, camera, { velocityNode: motion });
+```
+
+- Pass the **instance**, not `motion.velocity`: the upscaler sets its
+  `projectionMatrix` to `upscaler.unjitteredProjectionMatrix` (jitter-free motion)
+  and calls its `beginFrame()` once per upscaler frame, before the scene renders, so
+  "previous" means the upscaler's previous frame however many renders the app makes
+  per tick. Don't also call `beginFrame()` yourself. With `upscaleScene(..., {
+  jitter: false })` the node installs no frame hook: call `beginFrame()` yourself if
+  you render more than once per animation tick.
+- The option accepts any object with a `velocity` node and a `projectionMatrix`
+  property (optional `beginFrame()`), or a node: one with `setProjectionMatrix()`
+  (three's `VelocityNode`) gets the unjittered projection, any other node must be made
+  jitter-free by you. The MRT output stays named `velocity` (three only tracks
+  skinned/instanced previous positions for that name).
+- When another node owns the camera's view offset (`traa()`/`taau()` in the same
+  graph), the upscaler runs unjittered and resets the source's projection to `null`.
+- `upscale(color, depth, velocity, camera, { velocityNode })` takes the velocity
+  texture as an argument; there the option only names who gets the unjittered
+  projection (default three's `velocity`). The raw `Upscaler` accepts any velocity
+  texture; set `motion.projectionMatrix = upscaler.unjitteredProjectionMatrix` and
+  call `motion.beginFrame()` yourself.
+- Cost: not measured here for the scene render; the package reports +7–15 µs per
+  frame. The upscaler's own GPU time is unchanged (Q21: 320.8 / 320.7 µs median with
+  three's velocity vs 321.7 / 320.7 µs with the node, two interleaved runs each).
+- It doesn't help **transparents and particles**: they write no reliable motion or
+  depth under any source. Keep using the [reactive mask](#reactive-masks) for them.
+- Without deformers (rigid meshes, camera motion) three's `velocity` is fine: Q21's
+  rigid control box scored identically with either source.
+
 ## Depth
 
 - **A real depth texture**, bound as `texture_depth_2d`: the render target's

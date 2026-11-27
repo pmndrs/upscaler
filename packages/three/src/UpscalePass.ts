@@ -1,7 +1,8 @@
 import * as THREE from 'three/webgpu';
-import { mix, mrt, output, texture, uniform, velocity } from 'three/tsl';
+import { mix, mrt, output, texture, uniform } from 'three/tsl';
 
 import { Upscaler } from './Upscaler';
+import { resolveVelocitySource, type ResolvedVelocitySource, type VelocityNodeSource } from './velocitySource';
 import { getQualityModeRatio } from '@pmndrs/upscaler-core/math/resolution';
 import { DebugView, QualityMode, type RuntimeSettings, type UpscalePath } from './types';
 
@@ -40,11 +41,37 @@ export interface UpscalePassConfig {
     ratio?: number;
 }
 
+/** Options for the {@link UpscalePass} constructor. */
+export interface UpscalePassOptions {
+    /**
+     * Set false when several passes share one renderer and only one should own
+     * the velocity source's projection (default true).
+     */
+    shareVelocityMatrix?: boolean;
+    /**
+     * Collect per-pass GPU times into `upscaler.gpuTimings` — see
+     * {@link Upscaler.gpuTiming} (default false).
+     */
+    gpuTiming?: boolean;
+    /**
+     * What the scene's MRT writes as motion (the output stays named
+     * `velocity`). Default: three's `velocity`, which reports deformation —
+     * `positionNode`, morph targets, `displacementMap` — wrongly. Pass
+     * `MotionVectors.for(renderer)` from `@pmndrs/motion-vectors/three` for
+     * exact motion on deformed meshes: the pass sets its `projectionMatrix` to
+     * the upscaler's unjittered projection and calls its `beginFrame()` once per
+     * {@link UpscalePass.draw}. See {@link VelocityNodeSource} and
+     * docs/inputs-and-contracts.md → Motion vectors.
+     */
+    velocityNode?: VelocityNodeSource;
+}
+
 /**
  * High-level drop-in driver: turns "a scene + camera" into an upscaled texture,
  * wrapping every non-obvious integration detail {@link Upscaler} needs.
  *
- * - jitter-free velocity (`velocity.setProjectionMatrix(unjitteredProjectionMatrix)`)
+ * - jitter-free velocity (`velocity.setProjectionMatrix(unjitteredProjectionMatrix)`,
+ *   or the same for a caller-supplied `velocityNode`)
  * - MRT output count matched to the render-target attachment count (a `count: 2`
  *   target rendered without a velocity output yields black)
  * - render resolution taken from the upscaler, float depth + half-float color
@@ -62,7 +89,8 @@ export class UpscalePass {
     readonly upscaler: Upscaler;
 
     private readonly _renderer: THREE.WebGPURenderer;
-    private readonly _mrtFull = mrt({ output, velocity });
+    private readonly _velocity: ResolvedVelocitySource;
+    private readonly _mrtFull: ReturnType<typeof mrt>;
     private readonly _mrtColorOnly = mrt({ output });
     private readonly _quad: THREE.QuadMesh;
     private readonly _quadMaterial: THREE.NodeMaterial;
@@ -76,25 +104,21 @@ export class UpscalePass {
 
     /**
      * @param renderer - An initialized `WebGPURenderer`
-     * @param options.shareVelocityMatrix - Set false when several passes share
-     *   one renderer and only one should own the global `velocity` node
-     *   projection (default true).
-     * @param options.gpuTiming - Collect per-pass GPU times into
-     *   `upscaler.gpuTimings` — see {@link Upscaler.gpuTiming} (default false).
+     * @param options - Velocity source, projection sharing and GPU timing (see {@link UpscalePassOptions})
+     * @throws {TypeError} When `options.velocityNode` is neither a node nor a producer
      */
-    constructor(
-        renderer: THREE.WebGPURenderer,
-        options: { shareVelocityMatrix?: boolean; gpuTiming?: boolean } = {},
-    ) {
+    constructor(renderer: THREE.WebGPURenderer, options: UpscalePassOptions = {}) {
         this._renderer = renderer;
+        this._velocity = resolveVelocitySource(options.velocityNode);
+        // MRT routes by name: whatever the source, its output is `velocity`.
+        this._mrtFull = mrt({ output, velocity: this._velocity.node });
         this.upscaler = new Upscaler({ renderer, gpuTiming: options.gpuTiming });
 
-
-        // Motion vectors must be jitter-free — hand the velocity node the
+        // Motion vectors must be jitter-free — hand the velocity source the
         // upscaler's unjittered projection (a stable instance, refreshed each
         // frame). Only one pass should own this per renderer.
         if (options.shareVelocityMatrix !== false) {
-            velocity.setProjectionMatrix(this.upscaler.unjitteredProjectionMatrix);
+            this._velocity.setProjection(this.upscaler.unjitteredProjectionMatrix);
         }
 
         this._quadMaterial = new THREE.NodeMaterial();
@@ -186,6 +210,8 @@ export class UpscalePass {
 
         this._readyUniform.value = this.upscaler.isReady ? 1 : 0;
         if (this.upscaler.isReady) this.upscaler.beginFrame(camera);
+        // One producer frame per draw: its previous frame is this pass's.
+        if (temporal) this._velocity.beginFrame();
         this._renderer.setMRT(temporal ? this._mrtFull : this._mrtColorOnly);
         this._renderer.setRenderTarget(rt);
         this._renderer.render(scene, camera);
