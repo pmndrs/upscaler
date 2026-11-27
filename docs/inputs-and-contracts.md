@@ -143,6 +143,16 @@ and `endFrame(camera)` removes it.
   across reads. In a TSL graph, `upscale()`/`upscaleScene()` nodes expose the same
   offset as a `vec2` uniform, `node.jitterNode`, refreshed when the render pipeline
   frame begins.
+- **Held frames don't consume a phase.** An on-demand app sometimes renders the
+  pipeline again only to redraw overlays composited after the upscaler, holding the
+  upscale node (no `updateBefore`, so no dispatch) while its jitter hooks still fire.
+  A frame that begins and never dispatches is rolled back by the next `beginFrame()`:
+  the next real frame gets the phase the held one would have had, and
+  `jitterPrevious` stays the phase the history was rendered with. Nothing to call;
+  the camera's view offset is restored after a held render as after any other. Hold
+  a linked `temporalGuides()` node too, or its `dispatchGuides()` counts as the
+  frame's dispatch and leaves a split frame in flight. Details:
+  [engine contract → Held frames](engine-contract.md#held-frames).
 - **The input must be re-rendered under the jitter every frame.** Jitter buys
   reconstruction only if the color you dispatch was rendered with this frame's
   offset. If it wasn't (a buffer filled outside the jitter window, a pre-rendered

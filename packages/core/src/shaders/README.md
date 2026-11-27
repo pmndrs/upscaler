@@ -499,7 +499,16 @@ visual captures on `examples/04-aliasing-torture`, and measure equivalent worklo
 #### History reconstruction (`accumulate.ts`)
 
 - **Current status:** Custom replacement.
-- **Local implementation:** Uses five-fetch Catmull-Rom history sampling.
+- **Local implementation:** Uses five-fetch Catmull-Rom history sampling, its colour
+  bounded by the 2×2 history texels around the sample (four `textureLoad`s; issue
+  #118). Without the bound the negative lobes overshot an HDR highlight that
+  pre-exposure had lifted near 1 in tonemap space, and `tonemapInvert`'s 0.999 cap
+  turned that into ~1000 / exposure: isolated hot pixels while the camera moved. The
+  variance clip cannot catch it (on a skewed 3×3, mean + σ lies above the brightest
+  tap). The age (`.a`) keeps its unclamped resample. Bounding by the five bilinear
+  taps instead is free but blurrier (−0.06 to −0.31 dB under Q4 motion); evidence
+  and the repro (Q20, `scripts/measure-history-overshoot.mjs`):
+  `bench/docs/NEXT-STEPS.md` §21.
 - **FSR 3.1.5 behavior:** Uses custom bicubic Lanczos reconstruction.
 - **Why it differs / evidence confidence — Likely:** Five fetches plausibly reduce texture
   sampling work, but no local measurement demonstrates a performance advantage or

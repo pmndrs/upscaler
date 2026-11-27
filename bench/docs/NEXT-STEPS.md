@@ -2150,6 +2150,107 @@ node scripts/measure-motion-stability.mjs --scenario Q19 --ratio 2 --judge displ
 # per-frame records: bench/results/raw/motion-stability/<label>-Q19-2x/<condition>.frames.json
 ```
 
+## 21. Hot pixels under motion with auto-exposure — DONE (2026-11-27, issue #118): history de-ring
+
+**Report.** pmndrs/pathtracer (dim interior, mean luminance ~0.12, denoised
+highlights 11–16): with `autoExposure` on, isolated output pixels at 134–145 while
+the camera moved (~17/frame), none in the input, gone when still; `autoExposure`
+off removed them, `maxAccumulation` 4 nearly did.
+
+**Mechanism (confirmed).** `sampleHistoryCatmullRom` clamped only from below. Its
+negative lobes overshoot next to a bright texel by up to ~7 %. History stores
+`x/(1+max)` of the pre-exposed colour, so a lifted highlight sits near 1, and an
+overshoot past 0.999 hits `tonemapInvert`'s cap: `c/(1−0.999)` ≈ 1000·c, divided by
+the exposure. The reported 134–145 is that cap (≈1.07–1.16 × 1000 / 8). The variance
+clip does not stop it: on a skewed 3×3 (a few bright taps among dark ones) mean + σ
+lies above the brightest tap (two-valued, bright share p > 0.5: p + √(p(1−p)) > 1),
+so the box reaches past 1 too. Clipped history is stored back, so the value
+re-enters every frame it stays in the box; a short history (`maxAccumulation` 4)
+outweighs it with the current frame. Pre-exposure only sets the scale: fixed
+exposure 1 shows the same mechanism, weaker (history 0.995 → 135–217).
+
+**Repro (new): Q20 + `scripts/measure-history-overshoot.mjs`.** Q20 is a dim
+textured wall with HDR hot spots (11 and 16, 1–8 render px) under a slow (0.37
+px/frame) then a fast (1.63) lateral pan. The meter reads the rgba16float output,
+the input and the history back every frame. Hot = output luma > 4 × still max.
+Ratio 2, 1280×720, Metal, worktree. Auto-exposure settles at 1.93.
+
+| Q20, auto-exposure | hot px/frame (frames with any) | output max | history max | history texels ≥ 0.999 |
+| --- | --- | --- | --- | --- |
+| pre-fix (`accumulate-history-unclamped-v1`), pan-slow | 4.48 (94/120) | 489 | 1.020 | 2.55/frame |
+| pre-fix, hold-1 | 0.33 (5/60) | 477 | 1.005 | 0.30 |
+| pre-fix, pan-fast | 3.62 (49/60) | 489 | 1.021 | 1.63 |
+| production (2×2-texel bound), every segment | 0 | 21.2 (still 29.5) | 0.968 | 0 |
+| `accumulate-history-tap-clamp-v1`, every segment | 0 | 19.4 | 0.968 | 0 |
+
+Input max is 14.6 throughout; the still output max (29.5) is RCAS's lobe ceiling,
+unchanged by the fix. After the fix the history never exceeds the input's own
+conditioned peak (16 × 1.93 → 0.969).
+
+**Fix.** Bound the resampled colour by the 2×2 history texels the sample sits
+between (the Catmull-Rom interpolation interval): four `textureLoad`s on the cache
+lines the bilinear taps just read. `.a` (accumulation age) keeps its unclamped
+resample: it is never tonemapped, nothing decodes it steeply, and its exact
+reprojection is the measured still-convergence path. Locks and alpha reproject
+with one bilinear fetch (convex, cannot overshoot), so they needed nothing.
+
+**Why not the zero-fetch form (bound by the five bilinear taps).** It fixes the
+overshoot equally, but the taps are blurrier than the texels (an isolated peak at
+f = 0.5 is capped at 0.5 against Catmull-Rom's 0.56), and that blur shows:
+
+| Q4 motion, ratio 2, PSNR dB / SSIM (64 spp reference) | orbit | translate | orbit-2 | hold |
+| --- | --- | --- | --- | --- |
+| pre-fix | 26.21 / 0.8843 | 24.25 / 0.8273 | 24.82 / 0.8464 | 27.70 / 0.9228 |
+| 2×2-texel bound (production) | 26.20 / 0.8840 | 24.25 / 0.8258 | 24.82 / 0.8451 | 27.68 / 0.9225 |
+| tap bound | 25.90 / 0.8742 | 24.17 / 0.8186 | 24.61 / 0.8316 | 27.64 / 0.9215 |
+
+Q19 warp error (`--judge display --warp error`, sharpness-neutral, lower = steadier):
+under motion pre-fix 0.00542, texel bound 0.00541, tap bound 0.00549 (+1.3 %);
+holds 0.00020 / 0.00020 / 0.00021. (The default output warp reads the tap bound
+8.6 % *steadier* than pre-fix, 0.00159 vs 0.00174 — that is the blur, which is why
+§20 says to gate on `--warp error`.) The texel bound has no measurable quality or
+stability cost against pre-fix; the tap bound costs 0.06–0.31 dB and 1.3 % flicker.
+
+**Still scenes** (`measure-convergence`, ratio 2): Q1 0.1100 → 0.1099 (min 0.1059,
+max 0.1148 both), Q12 0.0167 → 0.0167 (identical per pair). A converged still
+resample sits on a texel, where Catmull-Rom is exact and the bound is inactive.
+
+**Cost: +17 µs on a 460 µs accumulate pass (+3.7 %; +2.5 % of the 671 µs compute
+sum).** Re-measured once the other agents had left the GPU: `run-benchmark --smoke`,
+ratio 2, five single-block ABBA runs with the leg order swapped between runs, still
+from a worktree (absolutes read several times the repo checkout's; only the A/B is
+valid). Accumulate medians: production 476.8–477.5 µs, `accumulate-history-unclamped-v1`
+460.1–460.6 µs, so the spread within a variant is under 1 µs and every run agrees on
+the sign. An earlier attempt under load read 730–840 µs with a 60–300 µs A/A floor and
+resolved nothing; Metal also refused timer query sets there ("Cannot allocate sample
+buffer").
+
+A cheaper form was tried and rejected: bound from above only, and load the 2×2 texels
+only where the result exceeds the brightest of the five taps (so the loads would be
+skipped wherever Catmull-Rom does not overshoot, which is every pixel of a still
+frame). It removes Q20's hot pixels as well (0 in every segment), but reads **+14.4 µs
+(474.1–474.8 µs)**: 2.5 µs saved for a branch and a one-sided bound, so most of the
+cost is not the four loads. `accumulate-history-tap-clamp-v1` remains the zero-fetch
+fallback, at the quality cost above; it was not re-timed on the quiet GPU (the loaded
+run put it ~8 µs under the texel bound, below that run's noise). Note that bench
+identity re-fetches its five taps for the bound (same coordinates as the sum, so the
+compiler can share them); time it, don't assume.
+
+Regenerate (each ~1–5 min; the dev server must answer on `--url` or is started):
+
+```bash
+node scripts/measure-history-overshoot.mjs --variant production --label fixed
+node scripts/measure-history-overshoot.mjs --variant accumulate-history-unclamped-v1 --label prefix
+node scripts/measure-reference-quality.mjs --scenario Q4 --ratio 2 --modes temporal \
+  --variant accumulate-history-tap-clamp-v1          # and production, accumulate-history-unclamped-v1
+node scripts/measure-motion-stability.mjs --scenario Q19 --ratio 2 --judge display --warp error \
+  --variant production --comparison accumulate-history-unclamped-v1   # and ...-tap-clamp-v1
+node scripts/measure-convergence.mjs --scenario Q1 --ratio 2 --variant production   # Q12 too
+node scripts/run-benchmark.mjs --smoke --ratios 2 --blocks 4 \
+  --variant production --comparison accumulate-history-unclamped-v1
+# per-frame records: bench/results/raw/history-overshoot/<label>-2x/summary.json
+```
+
 ## Explicitly not planned (measured against)
 
 - Lanczos2/bicubic history filtering (+47% accumulate, no visible win).

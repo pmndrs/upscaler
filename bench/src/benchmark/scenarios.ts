@@ -264,6 +264,33 @@ function q19(frame: number): BenchmarkFrameState {
     return { ...state(frame, cameraPosition, cameraTarget), sceneOffset, backdrop: true };
 }
 
+/**
+ * Q20 (issue #118): a dim textured wall with small HDR hot spots (BenchScene
+ * 'hot-spots'; auto-exposure lifts the dim frame, so the spots condition near
+ * 1 in the invertible tonemap) under a lateral camera pan. Converge still, pan
+ * slowly (sub-pixel, so every history fetch is an off-centre resample), hold,
+ * pan fast, hold. Segment bounds are exported for
+ * scripts/measure-history-overshoot.mjs.
+ */
+export const Q20_SEGMENTS = [
+    { name: 'still', start: 0, end: 119 },
+    { name: 'pan-slow', start: 120, end: 239 },
+    { name: 'hold-1', start: 240, end: 299 },
+    { name: 'pan-fast', start: 300, end: 359 },
+    { name: 'hold-2', start: 360, end: 419 },
+] as const;
+/** Q20 pan speeds in render px/frame at ratio 2 (non-integer: the sub-pixel offset walks). */
+const Q20_SLOW_PX = 0.37;
+const Q20_FAST_PX = 1.63;
+
+function q20(frame: number): BenchmarkFrameState {
+    const ramp = (start: number, length: number) => Math.min(Math.max(frame - start + 1, 0), length);
+    // One render pixel at the wall (ratio 2, 720 display rows, fov 50).
+    const renderPixel = (2 * EMITTER_DISTANCE * Math.tan((25 * Math.PI) / 180)) / 360;
+    const x = renderPixel * (Q20_SLOW_PX * ramp(120, 120) + Q20_FAST_PX * ramp(300, 60));
+    return { ...state(frame, [x, 0, EMITTER_DISTANCE], [x, 0, 0]), scene: 'hot-spots' };
+}
+
 const SCENARIOS: Record<BenchmarkScenarioId, BenchmarkScenarioDefinition> = {
     Q0: {
         id: 'Q0',
@@ -622,6 +649,18 @@ const SCENARIOS: Record<BenchmarkScenarioId, BenchmarkScenarioDefinition> = {
         subruns: [],
         unsupported: null,
         frame: q19,
+    },
+    Q20: {
+        id: 'Q20',
+        name: 'emitter-pan-overshoot',
+        // Capture-only: measure with scripts/measure-history-overshoot.mjs (issue #118).
+        endFrame: 419,
+        captures: ['0', '119', '121', '180', '239', '299', '330', '359', '419'],
+        debugViews: ['final', 'motion-vectors', 'disocclusion', 'accumulation-age', 'exposure'],
+        rois: { full: [0, 0, 1, 1] },
+        subruns: [],
+        unsupported: null,
+        frame: q20,
     },
 };
 

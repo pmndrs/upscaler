@@ -226,6 +226,7 @@ class BrowserBenchmarkApi implements UpscalerBenchmarkApi {
         if (frame.scene === 'cornell') return this._context.bench.cornellScene;
         if (frame.scene === 'sparse-wires') return this._context.bench.sparseWireScene;
         if (frame.scene === 'emitters') return this._context.bench.emitterScene;
+        if (frame.scene === 'hot-spots') return this._context.bench.hotSpotScene;
         if (frame.scene === 'chart') return this._context.bench.chartScene;
         return this._context.bench.scene;
     }

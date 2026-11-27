@@ -79,8 +79,47 @@ export const ACCUMULATE_NO_STILL_RELAX_SHADER = replaceOnce(
     'const STILL_CLAMP_RELAX : f32 = 0.0;',
 );
 
+/** Production's de-ring block (issue #118), from its header to its return. */
+function replaceHistoryDeRing(replacement: string): string {
+    const start = ACCUMULATE_SHADER.indexOf('    //* De-ring (issue #118)');
+    const endAnchor = 'return vec4f(clamp(result.rgb, texelLo, texelHi), max(result.a, 0.0));';
+    const end = ACCUMULATE_SHADER.indexOf(endAnchor);
+    if (start < 0 || end < start)
+        throw new Error('accumulateVariants: the history de-ring block is not where expected');
+    return ACCUMULATE_SHADER.slice(0, start) + replacement + ACCUMULATE_SHADER.slice(end + endAnchor.length);
+}
+
+/**
+ * Frozen pre-#118 history resample: the Catmull-Rom result clamped from below
+ * only, so its negative lobes overshoot the brightest history texel — next to
+ * an HDR highlight under pre-exposure, into ~1000 / exposure. The A/B
+ * reference for the de-ring (bench/docs/NEXT-STEPS.md §21).
+ */
+export const ACCUMULATE_UNCLAMPED_HISTORY_SHADER = replaceHistoryDeRing(
+    '    return max(result, vec4f(0.0));',
+);
+
+/**
+ * Rejected #118 form: the result bounded by the five bilinear taps already
+ * fetched (zero extra loads). Fixes the overshoot like production's 2x2-texel
+ * bound, but the taps are blurrier than the texels: −0.06 to −0.31 dB on Q4's
+ * motion windows and +1.3 % Q19 warp error under motion (NEXT-STEPS §21).
+ */
+export const ACCUMULATE_TAP_CLAMP_HISTORY_SHADER = replaceHistoryDeRing(
+    /* wgsl */ `    let tapW = textureSampleLevel(historyIn, linearSampler, vec2f(texPos0.x, texPos12.y), 0.0).rgb;
+    let tapN = textureSampleLevel(historyIn, linearSampler, vec2f(texPos12.x, texPos0.y), 0.0).rgb;
+    let tapC = textureSampleLevel(historyIn, linearSampler, texPos12, 0.0).rgb;
+    let tapE = textureSampleLevel(historyIn, linearSampler, vec2f(texPos3.x, texPos12.y), 0.0).rgb;
+    let tapS = textureSampleLevel(historyIn, linearSampler, vec2f(texPos12.x, texPos3.y), 0.0).rgb;
+    let tapLo = min(min(min(tapW, tapN), min(tapC, tapE)), tapS);
+    let tapHi = max(max(max(tapW, tapN), max(tapC, tapE)), tapS);
+    return vec4f(clamp(result.rgb, tapLo, tapHi), max(result.a, 0.0));`,
+);
+
 /** The registered candidates, by bench identity. */
 export const ACCUMULATE_VARIANTS = {
+    'accumulate-history-unclamped-v1': ACCUMULATE_UNCLAMPED_HISTORY_SHADER,
+    'accumulate-history-tap-clamp-v1': ACCUMULATE_TAP_CLAMP_HISTORY_SHADER,
     'accumulate-motion-cap2-v1': buildMotionCapAccumulateShader({ cap: 2, lo: 0.5, hi: 1.5 }),
     'accumulate-motion-cap4-v1': buildMotionCapAccumulateShader({ cap: 4, lo: 0.5, hi: 1.5 }),
     // Ramp on the still-scene relax's own fade (STILL_MOTION_LO/HI), so the

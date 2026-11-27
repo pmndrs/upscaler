@@ -36,6 +36,19 @@ describe('JitterSequence', () => {
         expect(jitter.phaseIndex).toBe(0);
     });
 
+    it('retreat undoes advance, wrapping at the cycle start', () => {
+        const jitter = new JitterSequence(2.0);
+        jitter.retreat();
+        expect(jitter.phaseIndex).toBe(jitter.phaseCount - 1);
+        jitter.advance();
+        jitter.advance();
+        const previous = jitter.previous;
+        jitter.advance();
+        jitter.retreat();
+        expect(jitter.phaseIndex).toBe(1);
+        expect(jitter.previous).toEqual(previous);
+    });
+
     it('tracks the previous offset across advances', () => {
         const jitter = new JitterSequence(1.5);
         const before = jitter.current;

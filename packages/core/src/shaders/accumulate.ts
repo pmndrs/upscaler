@@ -148,7 +148,28 @@ fn sampleHistoryCatmullRom(uv : vec2f) -> vec4f {
     // Corner taps are dropped, so renormalize by the weight actually used.
     let wSum = w0.x * w12.y + w12.x * w0.y + w12.x * w12.y + w3.x * w12.y + w12.x * w3.y;
     result = result / wSum;
-    return max(result, vec4f(0.0));
+
+    //* De-ring (issue #118)
+    // The negative lobes overshoot next to a bright texel. Near 1 in tonemap
+    // space (an HDR highlight lifted by pre-exposure) a few percent over hits
+    // tonemapInvert's 0.999 cap and decodes to ~1000 / exposure. The variance
+    // clip does not catch it: on a skewed 3x3 (a few bright taps) mean + sigma
+    // lies above the brightest tap, so the box itself reaches past 1. Bound the
+    // colour by the 2x2 texels the sample sits between (the Catmull-Rom
+    // interpolation interval). The five bilinear taps would bound it for free,
+    // but they are blurrier than the texels and cost 0.1–0.3 dB in motion plus
+    // +1.3 % warp error (bench/docs/NEXT-STEPS.md §21); these four loads hit
+    // the cache lines the taps just read. The age (.a) keeps its unclamped
+    // resample: it is never tonemapped, and its exact reprojection is measured.
+    let texel = vec2i(texPos1 - 0.5);
+    let texelMax = vec2i(C.displaySize) - 1;
+    let t00 = textureLoad(historyIn, clamp(texel, vec2i(0), texelMax), 0).rgb;
+    let t10 = textureLoad(historyIn, clamp(texel + vec2i(1, 0), vec2i(0), texelMax), 0).rgb;
+    let t01 = textureLoad(historyIn, clamp(texel + vec2i(0, 1), vec2i(0), texelMax), 0).rgb;
+    let t11 = textureLoad(historyIn, clamp(texel + vec2i(1, 1), vec2i(0), texelMax), 0).rgb;
+    let texelLo = min(min(t00, t10), min(t01, t11));
+    let texelHi = max(max(t00, t10), max(t01, t11));
+    return vec4f(clamp(result.rgb, texelLo, texelHi), max(result.a, 0.0));
 }
 
 // Clips a color toward the AABB center (Playdead's variance clipping) —

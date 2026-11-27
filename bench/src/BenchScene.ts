@@ -19,6 +19,8 @@ export interface BenchScene {
     sparseWireScene: THREE.Scene;
     /** Q17: isolated sub-pixel emitters over black and a textured backdrop (issue #51). */
     emitterScene: THREE.Scene;
+    /** Q20: a dim textured wall with small HDR hot spots (issue #118). */
+    hotSpotScene: THREE.Scene;
     /** Q18: line-pair bars across the render Nyquist, a Siemens star and flat swatches. */
     chartScene: THREE.Scene;
     reactiveScene: THREE.Scene;
@@ -45,6 +47,8 @@ const EMITTER_SPACING = 12;
 const EMITTER_MARGIN = 20;
 /** Q17 block centres, render px above/below the axis (floating top, decal bottom). */
 const EMITTER_BLOCK_Y = 90;
+/** Q20 hot-spot radiances: the issue #118 report's brightest denoised pixels (11–16). */
+const HOT_SPOT_RADIANCE = [16, 11] as const;
 
 /** Q18 chart texels per render pixel at ratio 2 (1280×720, fov 50). */
 const CHART_TEXELS_PER_PX = 4;
@@ -502,6 +506,53 @@ export function createBenchScene(): BenchScene {
     backdrop(backdropTexture, halfWidth / 2 + 2 * renderPixel, -halfHeight / 2, decalOffset);
     backdrop(null, -halfWidth / 2 - 2 * renderPixel, -halfHeight / 2, decalOffset);
 
+    //* Dim Wall With HDR Hot Spots (Q20) ===================================
+    // Issue #118's repro: a dim interior (mean luminance ~0.1) with a few
+    // small HDR patches (radiance 11 and 16, 1–8 render px) like lamps and
+    // sun patches. Auto-exposure lifts the dim frame, so the patches condition
+    // close to 1 in the invertible tonemap, where its inverse is steep. The
+    // wall is wider than the view so Q20's pan never runs off it.
+    const hotSpotScene = new THREE.Scene();
+    hotSpotScene.background = new THREE.Color(0x000000);
+    const hotWallTexture = backdropTexture.clone();
+    hotWallTexture.wrapS = THREE.RepeatWrapping;
+    hotWallTexture.wrapT = THREE.RepeatWrapping;
+    const hotWallSize = [1400 * renderPixel, 420 * renderPixel] as const;
+    hotWallTexture.repeat.set(
+        hotWallSize[0] / (backdropSize * 3 * renderPixel),
+        hotWallSize[1] / (backdropSize * 3 * renderPixel),
+    );
+    const hotWall = new THREE.Mesh(
+        new THREE.PlaneGeometry(hotWallSize[0], hotWallSize[1]),
+        // The texture's 70–110 sRGB noise decodes to ~0.06–0.16 linear.
+        new THREE.MeshBasicMaterial({ map: hotWallTexture }),
+    );
+    hotWall.position.set(300 * renderPixel, 0, decalOffset);
+    hotSpotScene.add(hotWall);
+    const hotSpotSizes = [1, 2, 3, 5, 8] as const;
+    const hotSpotMaterials = HOT_SPOT_RADIANCE.map(
+        (radiance) => new THREE.MeshBasicMaterial({ color: new THREE.Color(radiance, radiance * 0.9, radiance * 0.75) }),
+    );
+    const square = new THREE.PlaneGeometry(1, 1);
+    for (let row = 0; row < HOT_SPOT_RADIANCE.length * 2; row++) {
+        for (let column = 0; column < hotSpotSizes.length * 3; column++) {
+            const size = hotSpotSizes[column % hotSpotSizes.length];
+            const index = row * 31 + column;
+            const spot = new THREE.Mesh(
+                row % 2 === 0 ? square : emitterGeometry,
+                hotSpotMaterials[Math.floor(row / 2)],
+            );
+            // 40 render px apart; golden-ratio sub-pixel offsets vary coverage.
+            spot.position.set(
+                (-300 + column * 40 + fract(index * 0.618034)) * renderPixel,
+                (120 - row * 70 + fract(index * 0.754878)) * renderPixel,
+                0,
+            );
+            spot.scale.set(size * renderPixel, size * renderPixel, 1);
+            hotSpotScene.add(spot);
+        }
+    }
+
     //* Resolution Chart (Q18) ============================================
     // The fine-line shading-change repro: a still camera square-on to a chart
     // whose finest bars and star centre sit beyond the render Nyquist. Their
@@ -792,6 +843,7 @@ export function createBenchScene(): BenchScene {
         wireRoomScene,
         sparseWireScene,
         emitterScene,
+        hotSpotScene,
         chartScene,
         reactiveScene,
         autoReactiveObjects: [overlapPanel, diffOnlyPanel],

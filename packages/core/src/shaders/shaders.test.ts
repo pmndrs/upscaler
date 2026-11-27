@@ -134,7 +134,8 @@ const BASELINE_FINGERPRINTS: Record<string, string> = {
     // 2026-10-05: pre-exposure read guarded with max(…, 1e-4) like RCAS/blit,
     // so a fixed/external exposure of 0 no longer blacks out accumulation.
     // 2026-11-20: reset read from the exposure texel's resolved .a too.
-    accumulate: '3594f274',
+    // 2026-11-27: Catmull-Rom history colour bounded by its 2x2 texels (#118).
+    accumulate: 'de5cba82',
     // 2026-10-08: 1/16-stop adaptation dead-band, so the jitter-phase wobble of
     // the metered log-average no longer re-conditions history on still scenes.
     // 2026-11-11: the 1024 metering taps split across the 64 lanes, then a
@@ -416,6 +417,20 @@ describe('alpha passthrough is unconditional', () => {
         expect(ACCUMULATE_SHADER).toContain(
             'textureStore(historyOut, gid.xy, vec4f(result, newCount / C.maxAccumulation));',
         );
+    });
+
+    it('bounds the Catmull-Rom history colour by its 2x2 texels, not the age', () => {
+        // Issue #118: clamped from below only, the negative lobes overshot an
+        // HDR highlight near 1 in tonemap space into ~1000 / exposure while the
+        // camera moved. The age (.a) must keep its unclamped reprojection.
+        const body = ACCUMULATE_SHADER.slice(
+            ACCUMULATE_SHADER.indexOf('fn sampleHistoryCatmullRom'),
+            ACCUMULATE_SHADER.indexOf('fn clipToAABB'),
+        );
+        expect(body.match(/textureLoad\(historyIn, /g)).toHaveLength(4);
+        expect(body).toContain('let texel = vec2i(texPos1 - 0.5);');
+        expect(body).toContain('return vec4f(clamp(result.rgb, texelLo, texelHi), max(result.a, 0.0));');
+        expect(body).not.toContain('return max(result, vec4f(0.0));');
     });
 
     it('lets a zero-extent axis leave the variance clip unconstrained', () => {
