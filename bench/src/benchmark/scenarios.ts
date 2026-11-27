@@ -324,6 +324,41 @@ function q21(frame: number): BenchmarkFrameState {
     return { ...state(frame, position, Q21_TARGET), scene: 'deformers', deformTime };
 }
 
+/**
+ * Q30 (issue #102 finding 3): dense, depth-layered thin geometry (BenchScene
+ * 'dense': pillars, a railing, lattices, foliage-like card clusters) — a
+ * procedural stand-in for the Bistro / Sponza captures #102 scored. Converge,
+ * pan sideways, hold, orbit, hold. Segment bounds are exported for
+ * scripts/measure-disocclusion-truth.mjs. Q30, not Q21: the next ids are
+ * reserved for scenarios in flight on other branches.
+ */
+export const Q30_SEGMENTS = [
+    { name: 'still', start: 0, end: 59 },
+    { name: 'pan', start: 60, end: 179 },
+    { name: 'hold-1', start: 180, end: 239 },
+    { name: 'orbit', start: 240, end: 359 },
+    { name: 'hold-2', start: 360, end: 419 },
+] as const;
+const Q30_POSITION = [0, 2.2, 9] as const;
+const Q30_TARGET = [0, 1.8, -8] as const;
+/** World units/frame: ~3.6 render px/frame on the railing, ~1 on the far wall (960×540 render). */
+const Q30_PAN_STEP = 0.04;
+/** Yaw about the target, radians/frame (30° over the segment). */
+const Q30_ORBIT_STEP = (0.25 * Math.PI) / 180;
+
+function q30(frame: number): BenchmarkFrameState {
+    const ramp = (start: number, length: number) => Math.min(Math.max(frame - start + 1, 0), length);
+    const pan = Q30_PAN_STEP * ramp(60, 120);
+    const yaw = Q30_ORBIT_STEP * ramp(240, 120);
+    const target = [Q30_TARGET[0] + pan, Q30_TARGET[1], Q30_TARGET[2]] as const;
+    const ox = Q30_POSITION[0] - Q30_TARGET[0];
+    const oz = Q30_POSITION[2] - Q30_TARGET[2];
+    const cos = Math.cos(yaw);
+    const sin = Math.sin(yaw);
+    const position = [target[0] + ox * cos - oz * sin, Q30_POSITION[1], target[2] + ox * sin + oz * cos] as const;
+    return { ...state(frame, position, target), scene: 'dense' };
+}
+
 const SCENARIOS: Record<BenchmarkScenarioId, BenchmarkScenarioDefinition> = {
     Q0: {
         id: 'Q0',
@@ -713,6 +748,18 @@ const SCENARIOS: Record<BenchmarkScenarioId, BenchmarkScenarioDefinition> = {
         subruns: [],
         unsupported: null,
         frame: q21,
+    },
+    Q30: {
+        id: 'Q30',
+        name: 'dense-geometry-disocclusion',
+        // Capture-only: measure with scripts/measure-disocclusion-truth.mjs.
+        endFrame: 419,
+        captures: ['0', '59', '61', '120', '179', '241', '300', '359', '419'],
+        debugViews: ['final', 'motion-vectors', 'disocclusion', 'accumulation-age'],
+        rois: { full: [0, 0, 1, 1] },
+        subruns: [],
+        unsupported: null,
+        frame: q30,
     },
 };
 

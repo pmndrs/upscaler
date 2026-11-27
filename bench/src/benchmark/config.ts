@@ -50,6 +50,7 @@ const SCENARIOS = [
     'Q19',
     'Q20',
     'Q21',
+    'Q30',
 ] as const;
 
 function numberParam(params: URLSearchParams, name: string, fallback: number): number {

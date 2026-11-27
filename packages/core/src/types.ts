@@ -336,7 +336,17 @@ export interface TemporalGuides<TTexture = GPUTexture> {
     readonly dilatedDepth: TTexture;
     /** Previous frame's dilated linear view depth (r32float, nearest-sample only). */
     readonly previousDepth: TTexture;
-    /** Graded disocclusion at render res (rgba8unorm, `.r`): 0 stable → 1 fresh. */
+    /**
+     * Graded disocclusion at render res (rgba8unorm, `.r`): 0 stable → 1 fresh;
+     * 1 everywhere on a reset frame. The grade is a tolerance ratio
+     * (`1 − tolerance / separation` of the best tap), so thresholds between
+     * ~0.25 and ~0.75 behave alike; use 0.5 for a yes/no mask. It is computed
+     * from the dilated depth and motion, so the flagged band is the revealed
+     * strip shifted about one texel away from the occluder: thin (1–2 texel)
+     * reveal strips are mostly missed. The tolerance scales with the render
+     * viewport diagonal.
+     * See docs/temporal-guides.md → Reading `disocclusion`.
+     */
     readonly disocclusion: TTexture;
     /**
      * The merged reactive mask target at render res (rgba8unorm, `.r`).

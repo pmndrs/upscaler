@@ -63,7 +63,8 @@ declare type BenchmarkScenarioId =
     | 'Q18'
     | 'Q19'
     | 'Q20'
-    | 'Q21';
+    | 'Q21'
+    | 'Q30';
 declare type BenchmarkDebugView =
     | 'final'
     | 'motion-vectors'
@@ -260,7 +261,7 @@ declare interface BenchmarkFrameState {
     /** Q19: show the frontal backdrop wall behind the props. */
     backdrop?: boolean;
     /** Scene rendered as the upscaler input; defaults to the main torture scene. */
-    scene?: 'main' | 'cornell' | 'sparse-wires' | 'emitters' | 'hot-spots' | 'chart' | 'deformers';
+    scene?: 'main' | 'cornell' | 'sparse-wires' | 'emitters' | 'hot-spots' | 'chart' | 'deformers' | 'dense';
     /** Q21: the deformers' clock in seconds (wave phase, morph weight, control box); held = still. */
     deformTime?: number;
     /**

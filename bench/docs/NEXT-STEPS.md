@@ -2499,6 +2499,199 @@ node scripts/measure-reference-quality.mjs --scenario Q21 --ratio 2 --modes temp
 node scripts/capture-velocity-views.mjs --scenario Q21
 # bench/results/raw/velocity-views/Q21-2x/grid-f<frame>.png (rows: three, motion-vectors)
 node scripts/measure-motion-stability.mjs --scenario Q21 --judge display --warp error --velocity three --label vel-three
+## 25. The disocclusion guide against exact ground truth — MEASURED (2026-11-28, issue #102)
+
+**Question.** #102 (pmndrs/denoiser, measured on 0.2.0, before #67) scored the
+`disocclusion` guide against exact ground truth. The mask missed 14–21 % of the
+"wrong-surface" pixels (41 % behind thin occluders) and fired on objects moving in
+depth. On dense real geometry it had 38.6 % precision and up to 41 ‰ interior false
+alarms. Do findings 1–3 still hold after #67, and does the upscaler's own output
+ghost where the mask misses?
+
+**Meter (new): `scripts/measure-disocclusion-truth.mjs` + `bench/disocclusion-truth.html`
+(`bench/src/probes/disocclusionTruth.ts`).** The ground truth comes from the
+rasterizer, with no BVH. Every frame, still under that frame's jittered projection,
+the scene renders twice more with swapped materials:
+
+- an id + world-position buffer at render resolution: the exact point the input
+  sampled at each pixel;
+- the same buffer at 4× render resolution.
+
+A pixel's point moves to t−1 through its object's `matrixWorld` change and projects
+through t−1's jittered view-projection. It is **truly disoccluded** in either case:
+
+- it lands off-screen. Half a texel of margin absorbs the jitter delta at the border;
+- none of the 2×2 supersampled taps around it is sky, lies at or behind the point
+  along the t−1 eye ray (5·10⁻⁴ relative), or is the point's own surface (same id,
+  within two of that surface's sample spacings).
+
+Both frames use the jittered raster. The id buffer then holds exactly the surfaces the
+depth clip saw, and the t−1 buffer holds exactly what history was built from. The
+classes are #102's, over receivers only, with reset frames skipped:
+
+- **interior**: all 3×3 neighbours are receivers with the same truth;
+- **band**: the rest;
+- **wrong-surface (WS)**: disoccluded, on-screen, and no texel of the same object
+  (instance id included) in t−1's 3×3 around the true reprojection.
+
+The mask is read back exactly (rgba8unorm `.r`). `--error` also scores the rgba16float
+output against a 2×2-supersampled reference (conditioned luma, |Δc|) per class. Each
+class is split by whether the mask flagged the pixel (≥ 0.5). The render is 960×540
+(1920×1080 display, ratio 2), the size of #102's pooled table.
+
+**The truth validated.**
+
+- Q1 (still camera and scene): 0.5 px/frame of 518 k read as disoccluded. Q19's holds
+  read 2.4 and Q30's 26 (foliage cards). The self-check (P through its own frame's
+  projection) is ≤ 0.025 px.
+- `slide` (a quad sliding 4 render px/frame over a wall, still camera): **675 revealed
+  px/frame against 695 analytic** (4 px × 174 rows). The shortfall is the ≤ 1/4 px edge
+  precision of the 4× lookup.
+- At a 2× lookup, `slide` read 625 (a 1/2 px edge) and Q30's pan positives dropped by a
+  third. That is why 4× is the default.
+- A first form tested t−1 visibility against the plane of each tap's triangle
+  (`cross(dFdx, dFdy)`). It cannot see past a facet narrower than a tap, so the
+  id + distance test replaced it. The results below did not change materially.
+
+**Results, mask ≥ 0.5.** Recall and precision are over all receivers. Interior false
+alarms are in ‰ of interior negatives. `cross-frame` is the frozen pre-#67 identity
+`reconstruct-cross-frame-v1`, about what #102 measured.
+
+| scenario (window) | variant | positives/frame | recall % | precision % | WS missed % (WS/frame) | interior false ‰ | band recall / precision % |
+|---|---|---|---|---|---|---|---|
+| slide (validation) | production | 675 | 74.3 | 71.4 | 34.9 (491) | 0.04 | 50.5 / 49.4 |
+| Q3 object motion | production | 491 | 30.0 | 10.1 | 70.8 (221) | 2.88 | 22.8 / 27.5 |
+| Q3 | cross-frame | | 30.5 | 47.4 | 70.5 | 0.09 | 23.2 / 42.3 |
+| Q4 orbit, translate, orbit | production | 3608 | 41.3 | 33.5 | 87.6 (694) | 2.34 | 34.7 / 36.5 |
+| Q4 | cross-frame | | 41.3 | 54.6 | 87.5 | 0.11 | 34.8 / 48.7 |
+| Q19 camera segments | production | 5556 | 62.3 | 52.7 | 84.7 (863) | 1.78 | 51.0 / 49.7 |
+| Q19 camera segments | cross-frame | | 62.3 | 22.3 | 84.6 | **20.72** | 51.0 / 57.5 |
+| Q19 scene recede / approach | production | 2968 | 86.3 | 60.8 | 96.9 (36) | 1.10 | 83.1 / 64.9 |
+| Q19 scene recede / approach | cross-frame | | 86.3 | 70.7 | 96.9 | 0.21 | 83.1 / 67.8 |
+| Q30 pan (dense) | production | 10083 | 12.6 | 16.6 | **99.3** (1257) | 4.63 | 10.6 / 20.1 |
+| Q30 pan | cross-frame | | 12.6 | 34.6 | 99.2 | 0.66 | 10.7 / 33.4 |
+| Q30 orbit (dense) | production | 20505 | 21.5 | 30.3 | 78.4 (5722) | 7.16 | 16.9 / 31.4 |
+| Q30 orbit | cross-frame | | 21.5 | 49.3 | 78.4 | 0.43 | 16.9 / 42.9 |
+
+Off-screen reprojections (the border strip) are caught 96–100 % in every run.
+
+Thresholds: production reads within about one point across > 0, ≥ 0.25, ≥ 0.5 and
+≥ 0.75 everywhere (Q30 pan interior false alarms: 5.19 / 5.05 / 4.63 / 4.50 ‰). The
+cross-frame form does not:
+
+- under camera dolly its interior false alarms are 79.5 / 55.5 / 20.7 / 1.65 ‰;
+- under scene recede they are 76.3 / 12.7 / 0.21 / 0.17 ‰.
+
+Those are the graded false alarms of #102's finding 2 and its "> 0 adds 113 k" note.
+
+**Why the mask misses: a one-texel shift, not a threshold.** The class images
+(`<scenario>-<variant>-f<frame>.png`) are coloured white for caught, red for missed,
+magenta for missed WS and cyan for a false alarm. They show the same picture on every
+moving edge. On `slide`, one row reads `121 cyan, 122–124 white, 125 magenta, quad
+from 126`: the flagged band is the revealed strip moved one texel *away* from the
+occluder. Two things cause it:
+
+- The revealed pixel beside the occluder's current silhouette dilates to the
+  occluder's depth and motion. It is tested as the occluder, so it is missed.
+- The dilated ring scatters the occluder's depth one texel, plus the bilinear
+  footprint, past the strip's far end. That pixel is flagged although it was visible.
+
+WS pixels are by definition the strip's far end from the *old* edge. Those are the
+pixels beside the *current* silhouette, so the miss lands on them first. A strip w
+texels wide has about w − 1.2 WS texels and loses one of them (slide, w = 4: 35 %).
+Behind slow or thin occluders, and across dense geometry under a pan, strips are 1–2
+texels wide, and the WS miss rate goes to 85–99 %. On Q30's railing, each baluster has
+one red texel beside it and a cyan one past it. #102's 14–21 % came from faster
+test-bed motion, so wider strips; it is the same mechanism and the same verdict. #67
+did not change any of it: production and cross-frame have identical recall and WS
+misses in every row.
+
+**What #67 changed: interior false alarms moved, they did not vanish.**
+
+- Under camera dolly it removed them (20.7 → 1.8 ‰ at ≥ 0.5, 79 → 1.8 ‰ at > 0). That
+  was the #67 fix.
+- Under object motion, orbit and pan it *added* them: 0.09 → 2.9 ‰ (Q3), 0.11 → 2.3 ‰
+  (Q4), 0.4–0.7 → 4.6–7.2 ‰ (Q30).
+
+They are the outer edge of the scattered ring. A dilated silhouette pixel scatters the
+occluder's depth into a 2×2 bilinear footprint, so the false band is about 2 texels
+wide, and its outer texel falls outside the 3×3 "band" class. In Q3's class image, the
+knots and spheres carry a cyan ring all the way round.
+
+**Does the output ghost where the mask misses?** Output |Δc| against the 2×2
+reference: mean, with the share of pixels above 0.05 in brackets.
+
+| class | Q3 | Q19 camera | Q30 pan | Q30 orbit |
+|---|---|---|---|---|
+| interior, stable | 0.0099 (5.7 %) | 0.0126 (10.1 %) | 0.0025 (0.9 %) | 0.0027 (1.1 %) |
+| interior, stable, flagged (false alarm) | 0.0199 (13.4 %) | 0.0129 (9.6 %) | 0.0026 (0.2 %) | 0.0034 (0.4 %) |
+| band, stable | 0.0162 (6.7 %) | 0.0195 (12.0 %) | 0.0117 (4.9 %) | 0.0140 (6.1 %) |
+| WS, caught | 0.0166 (8.7 %) | 0.0224 (17.2 %) | 0.0134 (6.8 %) | 0.0078 (5.6 %) |
+| **WS, missed** | **0.0459 (29.9 %)** | **0.0352 (19.9 %)** | 0.0206 (5.8 %) | 0.0209 (7.9 %) |
+
+- Missed WS pixels carry 1.5–2.8× the error of caught ones and of stable band pixels.
+- On Q3 (coloured spheres over the grid floor, so high contrast between occluder and
+  revealed surface), 30 % of missed WS pixels are wrong by more than 0.05, against 9 %
+  when caught.
+- On Q30 (flat, similar greys) the mean rises but the > 0.05 share does not, so the
+  variance clip removes most of what history keeps there.
+- The classes are confounded with position: a missed WS pixel always sits beside the
+  current silhouette. Caught WS pixels, with a fresh one-sample history, read only
+  0.0166, so the 0.0459 is most likely kept foreground history, not edge
+  reconstruction. A perfect-mask A/B (feeding the truth as the guide) would settle it
+  and was not built.
+- False alarms cost little. Flagged interior pixels match unflagged ones on Q19 and
+  Q30. On Q3 they read 2×, but they sit in the ring around moving objects.
+
+**Verdicts.**
+
+- *Finding 1 (the shift, missed reveal strips):* **still real, and it matters for the
+  upscaler's own output**, not only for guide consumers. It comes from the dilation and
+  is independent of #67. The cost is largest on high-contrast moving occluders (Q3).
+- *Finding 2 (objects moving in depth):* **fixed by #67** for the way the upscaler
+  uses the grade. Graded false alarms under scene recede fell from 76 ‰ to 1.1 ‰ at
+  > 0. At ≥ 0.5 the old form was already quiet there (0.21 ‰).
+- *Finding 3 (over-flagging on dense geometry):* **real, but mostly a guide-consumer
+  issue.** Precision is 17–30 % on Q30 (#102: 38.6 % pooled on Bistro and Sponza).
+  Interior false alarms are 4.6–7.2 ‰ (#102: 10 ‰ pooled, 41 ‰ on `bistro-pan`). #67
+  raised them 7–15× on pan and orbit while removing the dolly ones. The upscaler's
+  output barely notices them on Q19 and Q30.
+
+**Cheap fixes (described, not built; measure before adopting).**
+
+1. *Scatter the undilated centre depth.* Reconstruct would keep the dilated motion for
+   the position but scatter the texel's own depth. The ring past the strip would then
+   carry background depth, which removes most of the band and interior false alarms at
+   no cost. It keeps landmine #11's rule (a), the same footprint.
+2. *Gate on the undilated depth.* Where the centre texel is farther than its dilated
+   depth by more than the tolerance (a background pixel beside a silhouette), also test
+   the centre depth against the taps. The occluder's scattered depth sits in front of
+   it, so the revealed pixel beside the silhouette is flagged. That needs the centre
+   depth in a reserved channel (`dilatedMotion.w`) and no extra loads. It fixes the WS
+   miss.
+
+Either fix changes the upscaler's own history rejection beside every moving
+silhouette. Gate them on Q19 (`measure-receding-disocclusion.mjs`, and
+`measure-motion-stability.mjs` for flicker) and on this meter's output-error split,
+not on mask precision alone. #102's suggestion, an optional undilated product for
+consumers, is fix 2 published as a second channel.
+
+**Not verified.**
+
+- No real Bistro or Sponza assets: Q30 is a procedural stand-in with flat materials.
+- Ratio 2 at a 960×540 render only. The tolerance's resolution scaling (finding 4) is
+  true by construction and was not re-measured here.
+- Rigid motion only. The truth reprojects through `matrixWorld`, so it would be wrong
+  on skinned or deforming meshes and on moving instances. None are in these scenes.
+- The output-error split is per frame. Ghosting that persists after a missed pixel
+  leaves the revealed class is not counted.
+
+**Regenerate.** About 6 minutes on an M-class GPU. It writes
+`bench/results/raw/disocclusion-truth/main/summary.json` plus the class images.
+
+```bash
+node scripts/measure-disocclusion-truth.mjs --validate --error Q3,Q19,Q30
+# truth precision check: the same with --gt-scale 2 --label scale2 (slide reads 625, not 675)
 ```
 
 ## Explicitly not planned (measured against)

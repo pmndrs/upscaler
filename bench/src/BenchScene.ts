@@ -2,6 +2,7 @@ import * as THREE from 'three/webgpu';
 import { normalLocal, positionLocal, sin, uniform } from 'three/tsl';
 
 import { CHART_DISTANCE, EMITTER_DISTANCE } from './benchmark/scenarios';
+import { createDenseScene } from './denseScene';
 
 /**
  * The bench scene — deliberately full of upscaler torture tests:
@@ -26,6 +27,8 @@ export interface BenchScene {
     chartScene: THREE.Scene;
     /** Q21: a `positionNode` wave, a morph-target blob and a rigid control box. */
     deformScene: THREE.Scene;
+    /** Q30: dense depth-layered thin geometry under a pan and an orbit (issue #102). */
+    denseScene: THREE.Scene;
     reactiveScene: THREE.Scene;
     /**
      * Q13 transparents the auto-generator must see: hidden while the
@@ -924,6 +927,7 @@ export function createBenchScene(): BenchScene {
         hotSpotScene,
         chartScene,
         deformScene,
+        denseScene: createDenseScene(),
         reactiveScene,
         autoReactiveObjects: [overlapPanel, diffOnlyPanel],
         update,

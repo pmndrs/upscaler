@@ -104,7 +104,7 @@ npm run release                # gate → `npm version` commit + annotated tag (
 # Agents: NEVER push a v* tag, run/dispatch the publish workflow, or pass
 # `npm run release -- --push` unless the maintainer explicitly asks.
 
-# How to run/read a benchmark, the Q0-Q20 scenario catalogue, and the device
+# How to run/read a benchmark, the Q0-Q20 (+Q30) scenario catalogue, and the device
 # setup: bench/docs/BENCHMARKING.md
 
 # Still-scene convergence meter (GPU, headless Chrome + CDP): consecutive +
@@ -180,6 +180,13 @@ node scripts/measure-history-overshoot.mjs --conditions 'auto;fixed'
 # still scene, rgba16float output vs a run at E1 throughout (an ideal
 # accumulator shows nothing). Pre-#99: --variant accumulate-uncorrected-conditioning-v1.
 node scripts/measure-exposure-step.mjs --scenario Q12 --steps '1>4;4>1;1>1.1'
+
+# Disocclusion guide vs exact ground truth (issue #102): rasterized truth
+# (ids + world positions + visible-surface planes under the same jittered
+# projection), #102's classes (interior / band / wrong-surface) per variant on
+# Q3/Q4/Q19/Q30 (Q30 = dense procedural geometry), plus the output's error vs a
+# 2x2 reference per class. --validate checks the truth itself (Q1 still, slide).
+node scripts/measure-disocclusion-truth.mjs --validate --error Q3,Q19,Q30
 
 # Sub-pixel emitter retention (issue #51): Q17 per-emitter output energy vs the
 # input's own coverage, flicker, lock/disocclusion/shading activity and a

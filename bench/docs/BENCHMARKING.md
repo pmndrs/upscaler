@@ -176,11 +176,11 @@ work did not change, the rest of the frame got cheaper.
 
 ---
 
-## Scenarios (Q0–Q21)
+## Scenarios (Q0–Q21, Q30)
 
 Scripted camera and scene animations, defined in
 `bench/src/benchmark/scenarios.ts`. Performance runs use the default; capture
-runs select Q0–Q11 (the E00 manifest's set) with `--scenarios`. Q12–Q21 are
+runs select Q0–Q11 (the E00 manifest's set) with `--scenarios`. Q12–Q21 and Q30 are
 capture-only through the `measure-*` scripts (`measure-convergence.mjs
 --scenario <id>` and the scripts named in their rows); `run-benchmark.mjs` drops
 them from `--scenarios` without an error.
@@ -209,6 +209,7 @@ them from `--scenarios` without an error.
 | Q19 | `receding-disocclusion` | Issue #67: converge, then dolly back / forward, orbit left / right, slide, and the scene receding / approaching under a still camera, each followed by a 60-frame hold; then a fast dolly (0.3 u/frame, #67's headline case) back and forward; a frontal textured wall stands behind the props. A camera-invariant depth clip keeps receding surfaces' history. Measure with `scripts/measure-receding-disocclusion.mjs --variants baseline,reconstruct-cross-frame-v1` (per-segment disocclusion and accumulation age, plus frame-to-frame flicker at `--stride 1`; the interior crop excludes the border strip entering view). Still scenes never disocclude under the scatter, so this, not Q1/Q12, separates depth-clip forms (`depth-clip-*` identities, NEXT-STEPS §15). Flicker under motion, per segment: `scripts/measure-motion-stability.mjs` (see "Under motion" below). |
 | Q20 | `emitter-pan-overshoot` | Issue #118: a dim textured wall (mean luminance ~0.1) with small HDR hot spots (radiance 11 and 16, 1–8 render px); converge still, pan at 0.37 render px/frame, hold, pan at 1.63, hold. Auto-exposure lifts the frame, so the spots condition near 1 in the invertible tonemap. Measure with `scripts/measure-history-overshoot.mjs` (exact rgba16float output readback; hot pixels = output luma above 4 × the still max, plus history texels at tonemapInvert's 0.999 cap). Must read 0 hot pixels in every segment (NEXT-STEPS §21). |
 | Q21 | `deformer-motion` | Deformed geometry three's `velocity` gets wrong: a checker-textured `positionNode` vertex wave, a morph-target blob and a rigid control box on a textured room. Segments: `still-held` (0–119, deformation held mid-stroke, camera still), `deform` (120–239, deformation animates), `orbit-deform` (240–359, 0.4°/frame orbit, still animating), `hold` (360–419). `?velocity=three|motion-vectors` (`--velocity` on `measure-reference-quality.mjs` / `measure-motion-stability.mjs`) picks the scene MRT's motion source; ROIs `wave`/`blob`/`control` sit at the still-camera pose. Debug-view grids: `scripts/capture-velocity-views.mjs` (NEXT-STEPS §24). |
+| Q30 | `dense-geometry-disocclusion` | Issue #102 finding 3: a procedural stand-in for the Bistro / Sponza captures we have no assets for — three rows of pillars, a railing with 0.3-unit balusters, two crossed lattices and ten clusters of 140 double-sided foliage cards, at depths from 1 to 30 units. Converge (0–59), pan sideways 0.04 u/frame (60–179: ~3.6 render px/frame on the railing at 960×540), hold, orbit 0.25°/frame about the target (240–359), hold. Seeded and static, so frames are deterministic. Measure with `scripts/measure-disocclusion-truth.mjs --scenarios Q30` (exact ground-truth precision / recall / interior false alarms of the disocclusion guide, NEXT-STEPS §25). Numbered Q30, not Q21: the ids after Q20 are taken by scenarios on other branches. |
 
 ---
 
