@@ -2215,19 +2215,26 @@ stability cost against pre-fix; the tap bound costs 0.06–0.31 dB and 1.3 % fli
 max 0.1148 both), Q12 0.0167 → 0.0167 (identical per pair). A converged still
 resample sits on a texel, where Catmull-Rom is exact and the bound is inactive.
 
-**Cost: not resolved in this environment.** ABBA (`run-benchmark --smoke`, ratio 2,
-600 samples/leg) from a worktree while other agents loaded the same GPU: accumulate
-read ~730–840 µs (several times its quiet-GPU cost) with an A/A floor of 60–300 µs.
-Order-swapped texel-vs-tap blocks (6 each way) put the texel bound at **+8 µs on
-~820 µs (~1 %), against a ~60 µs floor — below noise**; pre-fix vs either clamp was
-dominated by a leg-order bias. Metal also refused timer query sets mid-run ("Cannot
-allocate sample buffer"), so runs had to be single blocks. The four loads are
-cache-resident by construction; re-measure on a quiet GPU from the repo checkout
-(`--variant production --comparison accumulate-history-unclamped-v1`, then
-`--comparison accumulate-history-tap-clamp-v1`). If it ever reads material,
-`accumulate-history-tap-clamp-v1` is the zero-fetch fallback, at the quality cost
-above. Note that bench identity re-fetches its five taps for the bound (same
-coordinates as the sum, so the compiler can share them); time it, don't assume.
+**Cost: +17 µs on a 460 µs accumulate pass (+3.7 %; +2.5 % of the 671 µs compute
+sum).** Re-measured once the other agents had left the GPU: `run-benchmark --smoke`,
+ratio 2, five single-block ABBA runs with the leg order swapped between runs, still
+from a worktree (absolutes read several times the repo checkout's; only the A/B is
+valid). Accumulate medians: production 476.8–477.5 µs, `accumulate-history-unclamped-v1`
+460.1–460.6 µs, so the spread within a variant is under 1 µs and every run agrees on
+the sign. An earlier attempt under load read 730–840 µs with a 60–300 µs A/A floor and
+resolved nothing; Metal also refused timer query sets there ("Cannot allocate sample
+buffer").
+
+A cheaper form was tried and rejected: bound from above only, and load the 2×2 texels
+only where the result exceeds the brightest of the five taps (so the loads would be
+skipped wherever Catmull-Rom does not overshoot, which is every pixel of a still
+frame). It removes Q20's hot pixels as well (0 in every segment), but reads **+14.4 µs
+(474.1–474.8 µs)**: 2.5 µs saved for a branch and a one-sided bound, so most of the
+cost is not the four loads. `accumulate-history-tap-clamp-v1` remains the zero-fetch
+fallback, at the quality cost above; it was not re-timed on the quiet GPU (the loaded
+run put it ~8 µs under the texel bound, below that run's noise). Note that bench
+identity re-fetches its five taps for the bound (same coordinates as the sum, so the
+compiler can share them); time it, don't assume.
 
 Regenerate (each ~1–5 min; the dev server must answer on `--url` or is started):
 
