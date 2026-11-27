@@ -17,7 +17,7 @@ import { getGPUTexture } from './internal/threeWebGPU';
 import { getPipelineEvents, installRenderPipelineHooks } from './internal/renderPipelineHooks';
 import { RenderResolutionInputNode, materializeInput } from './internal/renderResolutionInput';
 import { getPassRenderResolution, getQualityModeRatio } from '@pmndrs/upscaler-core/math/resolution';
-import { QualityMode, type UpscalePath } from './types';
+import { QualityMode, type DepthMode, type UpscalePath } from './types';
 
 // three's node base + its builder/frame carry incomplete TS types and expect a
 // WebGPURenderer the public d.ts only types as `Renderer`, so setup()/
@@ -133,6 +133,14 @@ export interface UpscalerNodeOptions {
      * {@link upscale}. See `examples/13-guides-node`.
      */
     guides?: TemporalGuidesNode;
+    /**
+     * What the `depth` node holds — hardware depth (default, e.g.
+     * `pass.getTextureNode('depth')`) or a float texture of linear view
+     * distance in `.r` (`'linear'`, either sign — e.g. a view-Z MRT output).
+     * See {@link DepthMode}. Linked to a guides node, this node configures
+     * the shared upscaler, so give both the same value.
+     */
+    depthMode?: DepthMode;
 }
 
 /**
@@ -417,6 +425,7 @@ export class UpscalerNode extends Node<'vec4'> {
             renderHeight: Math.max(1, Math.floor(this._input.y)),
             path: this._options.path,
             jitter: this._jitterActive,
+            depthMode: this._options.depthMode,
         });
         this._configured = true;
         if (this._textureNode) {

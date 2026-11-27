@@ -31,7 +31,7 @@ import {
     RCAS_SHADER,
     RCAS_TONEMAP_SPACE_SHADER,
 } from './rcas';
-import { DEPTH_CLIP_SHADER, RECONSTRUCT_SHADER } from './reconstruct';
+import { DEPTH_CLIP_SHADER, RECONSTRUCT_LINEAR_SHADER, RECONSTRUCT_SHADER } from './reconstruct';
 import {
     DEPTH_CLIP_VARIANTS,
     RECONSTRUCT_CROSS_FRAME_SHADER,
@@ -46,6 +46,8 @@ const ALL_SHADERS: Record<string, string> = {
     easu: EASU_SHADER,
     rcas: RCAS_SHADER,
     reconstruct: RECONSTRUCT_SHADER,
+    // depthMode 'linear' (issue #97), generated from the production body.
+    reconstructLinear: RECONSTRUCT_LINEAR_SHADER,
     depthClip: DEPTH_CLIP_SHADER,
     // Frozen bench identity (reconstruct-cross-frame-v1), pre-#67 production.
     reconstructCrossFrame: RECONSTRUCT_CROSS_FRAME_SHADER,
@@ -66,6 +68,7 @@ const BASELINE_BINDING_COUNTS: Record<string, number> = {
     rcas: 5,
     // 6 since 2026-10-05: dilate + scatter, depth clip split out (issue #67).
     reconstruct: 6,
+    reconstructLinear: 6,
     // 7 since 2026-11-20: the GPU reset signal (issue #102).
     depthClip: 7,
     reconstructCrossFrame: 7,
@@ -103,6 +106,8 @@ const BASELINE_FINGERPRINTS: Record<string, string> = {
     // 2026-10-05: reconstructed-previous-depth scatter (issue #67) — the
     // depth clip moved to its own pass; the old fused form is frozen below.
     reconstruct: '193dec98',
+    // Added 2026-11-27: linear view-depth input (issue #97).
+    reconstructLinear: '6add6913',
     // 2026-11-20: a reset frame (FLAG_RESET or the GPU reset signal) writes
     // every pixel disoccluded (issue #102).
     depthClip: '4300b381',
@@ -680,6 +685,44 @@ describe('reconstructed previous depth (issue #67)', () => {
         // Off-screen pixels return early but must still empty their slot.
         expect(clear).toBeLessThan(body.indexOf('if (any(prevUV'));
         expect(DEPTH_CLIP_SHADER).toMatch(/EMPTY_DEPTH : u32 = 0x7f800000u/);
+    });
+});
+
+describe('linear view-depth reconstruct (issue #97)', () => {
+    const main = (source: string) => source.slice(source.indexOf('@group(0) @binding(1)'));
+
+    it('binds a float texture in place of the depth texture, nothing else', () => {
+        expect(RECONSTRUCT_LINEAR_SHADER).toContain('@group(0) @binding(1) var sceneDepth : texture_2d<f32>;');
+        expect(RECONSTRUCT_LINEAR_SHADER).not.toMatch(/texture_depth_2d/);
+        const declarations = (source: string) =>
+            [...source.matchAll(/@group\(0\) @binding\((\d+)\) var[^;]*;/g)].map((m) => m[0]).slice(2);
+        expect(declarations(RECONSTRUCT_LINEAR_SHADER)).toEqual(declarations(RECONSTRUCT_SHADER));
+    });
+
+    it('bypasses linearization and the hardware depth flags', () => {
+        expect(RECONSTRUCT_LINEAR_SHADER).not.toMatch(/linearizeDepth|FLAG_REVERSED_DEPTH\)|FLAG_PERSPECTIVE\)/);
+        expect(RECONSTRUCT_LINEAR_SHADER).toContain('let curDepth = bestDepth;');
+        expect(RECONSTRUCT_LINEAR_SHADER).toContain('let localRelief = max(farthestDepth - curDepth, 0.0);');
+        // Every scene-depth read goes through the sign/invalid-value guard.
+        expect(main(RECONSTRUCT_LINEAR_SHADER).match(/textureLoad\(sceneDepth/g)).toBeNull();
+        expect(RECONSTRUCT_LINEAR_SHADER.match(/loadViewDepth\((center|p)\)/g)).toHaveLength(2);
+    });
+
+    it('reads |.r| and maps zero/inf/NaN to far with bit tests', () => {
+        expect(RECONSTRUCT_LINEAR_SHADER).toContain('& 0x7fffffffu');
+        expect(RECONSTRUCT_LINEAR_SHADER).toMatch(/select\(C\.depthNearFar\.y, bitcast<f32>\(bits\), \(bits != 0u\) && \(bits < 0x7f800000u\)\)/);
+    });
+
+    it('is the production body apart from the substituted lines', () => {
+        // One source of truth: everything from the dilation's end on (relief,
+        // motion, scatter) is shared text, so a production fix reaches both.
+        const tail = (source: string) => source.slice(source.indexOf('    // The neighborhood'));
+        expect(tail(RECONSTRUCT_LINEAR_SHADER).replace('max(farthestDepth -', 'max(linearizeDepth(farthestDepth) -'))
+            .toBe(tail(RECONSTRUCT_SHADER));
+        // The dilation loop's comparisons are shared too.
+        const loop = (source: string) => source.slice(source.indexOf('    var farthestDepth'), source.indexOf('    let curDepth'));
+        expect(loop(RECONSTRUCT_LINEAR_SHADER).replace('loadViewDepth(p)', 'textureLoad(sceneDepth, p, 0)'))
+            .toBe(loop(RECONSTRUCT_SHADER));
     });
 });
 

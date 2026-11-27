@@ -127,6 +127,13 @@ const USAGE = `Usage: node scripts/measure-reference-quality.mjs [options]
   --export-png           write every measured frame (reference + each mode) as an
                          8-bit sRGB PNG sequence for offline perceptual metrics
   --keep-raw             keep the linear f32 reference frames (<out>/reference/*.f32)
+  --save-diagnostics     keep the presented reference (<out>/reference/*.presented.f32)
+                         and write each mode's presented output (<out>/raw/<mode>/*.f32)
+                         plus temporal's guides (<out>/raw/temporal/*.guides.f32: history
+                         age in frames, disocclusion, motion in render px, at display
+                         res) for scripts/analyze-reference-error.mjs
+  --reference-offset <k> score output frame N against the reference of frame N + k
+                         (default 0): an alignment check, the best score must be at 0
   --url <origin>         bench origin (default ${DEFAULT_BENCH_URL}); if nothing answers,
                          the bench dev server is started on that host + port (--strictPort)
   --port <n>             Chrome DevTools (CDP) port (default 9333)
@@ -140,7 +147,7 @@ const cli = parseCliOrExit(
     process.argv.slice(2),
     [
         'scenario', 'ratio', 'modes', 'frames', 'samples', 'scale', 'floor-samples', 'width', 'height', 'variant',
-        'settings', 'label', 'export-png', 'keep-raw', 'url', 'port', 'chrome', 'power-preference',
+        'settings', 'label', 'export-png', 'keep-raw', 'save-diagnostics', 'reference-offset', 'url', 'port', 'chrome', 'power-preference',
         'expected-vendor', 'without-timestamps',
     ],
     USAGE,
@@ -161,6 +168,8 @@ const settings = typeof cli.settings === 'string' ? JSON.parse(cli.settings) : {
 const label = String(cli.label ?? variant);
 const exportPng = cli['export-png'] === true;
 const keepRaw = cli['keep-raw'] === true;
+const saveDiagnostics = cli['save-diagnostics'] === true;
+const referenceOffset = Number(cli['reference-offset'] ?? 0);
 const port = parsePort(cli.port, '--port') ?? 9333;
 const server = resolveServerUrl(cli.url, DEFAULT_BENCH_URL);
 
@@ -173,6 +182,7 @@ for (const mode of modes) if (!MODES.includes(mode)) fail(`Unknown mode ${mode}.
 if (!Number.isInteger(scale) || scale < 1) fail('--scale must be a positive integer.');
 if (!Number.isInteger(samples) || samples < 1 || samples % (scale * scale) !== 0)
     fail(`--samples must be a positive multiple of scale² (${scale * scale}).`);
+if (!Number.isInteger(referenceOffset)) fail('--reference-offset must be an integer.');
 if (!Number.isInteger(floorSamples) || floorSamples < 0 || floorSamples % (scale * scale) !== 0)
     fail(`--floor-samples must be 0 or a multiple of scale² (${scale * scale}).`);
 const windowSpec = typeof cli.frames === 'string' ? cli.frames : DEFAULT_WINDOWS[scenario];
@@ -245,6 +255,44 @@ const PAGE_HELPER = /* js */ `
 
     let payload = new Uint8Array(0);
     let reference = null;
+
+    const halfTable = new Float32Array(65536);
+    for (let h = 0; h < 65536; h++) {
+        const sign = h & 0x8000 ? -1 : 1;
+        const exponent = (h >> 10) & 0x1f;
+        const fraction = h & 0x3ff;
+        halfTable[h] = exponent === 0 ? sign * 2 ** -14 * (fraction / 1024)
+            : exponent === 31 ? (fraction ? NaN : sign * Infinity) : sign * 2 ** (exponent - 15) * (1 + fraction / 1024);
+    }
+
+    // Reads an rgba16float / rgba8unorm three texture into four Float32Array channels.
+    async function readTexture(threeTexture) {
+        const texture = renderer.backend.get(threeTexture).texture;
+        const layout = { rgba16float: [8, 'h'], rgba8unorm: [4, 'u'] }[texture.format];
+        if (!layout) throw new Error('Unsupported guide format ' + texture.format);
+        const [bytesPerPixel, kind] = layout;
+        const w = texture.width;
+        const h = texture.height;
+        const bytesPerRow = Math.ceil((w * bytesPerPixel) / 256) * 256;
+        const buffer = device.createBuffer({ size: bytesPerRow * h, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+        const encoder = device.createCommandEncoder();
+        encoder.copyTextureToBuffer({ texture, mipLevel: 0 }, { buffer, bytesPerRow }, [w, h]);
+        device.queue.submit([encoder.finish()]);
+        await buffer.mapAsync(GPUMapMode.READ);
+        const mapped = buffer.getMappedRange();
+        const view = kind === 'h' ? new Uint16Array(mapped) : new Uint8Array(mapped);
+        const stride = bytesPerRow / (kind === 'h' ? 2 : 1);
+        const ch = [0, 1, 2, 3].map(() => new Float32Array(w * h));
+        for (let y = 0; y < h; y++)
+            for (let x = 0; x < w; x++)
+                for (let c = 0; c < 4; c++) {
+                    const raw = view[y * stride + x * 4 + c];
+                    ch[c][y * w + x] = kind === 'h' ? halfTable[raw] : raw / 255;
+                }
+        buffer.unmap();
+        buffer.destroy();
+        return { w, h, ch };
+    }
 
     function referenceTargets(scale) {
         const w = canvas.width;
@@ -372,6 +420,33 @@ const PAGE_HELPER = /* js */ `
             buffer.destroy();
             payload = new Uint8Array(rgb.buffer);
             return { width: w, height: h, bytes: payload.length };
+        },
+
+        // Temporal guides at display res, nearest-sampled from render res:
+        // [history age in frames, disocclusion 0..1, |motion| in render px/frame].
+        async readGuides() {
+            const upscaler = pipeline.resolver._upscaler;
+            const guides = upscaler.guides;
+            const history = await readTexture(guides.history);
+            const disocclusion = await readTexture(guides.disocclusion);
+            const motion = await readTexture(guides.dilatedMotion);
+            const w = history.w;
+            const h = history.h;
+            const out = new Float32Array(w * h * 3);
+            for (let y = 0; y < h; y++)
+                for (let x = 0; x < w; x++) {
+                    const rx = Math.min(disocclusion.w - 1, Math.floor((x * disocclusion.w) / w));
+                    const ry = Math.min(disocclusion.h - 1, Math.floor((y * disocclusion.h) / h));
+                    const r = ry * disocclusion.w + rx;
+                    const p = y * w + x;
+                    // history .a is age / maxAccumulation (0..1), despite the
+                    // TemporalGuides doc saying frames; report frames.
+                    out[p * 3] = history.ch[3][p] * upscaler.settings.maxAccumulation;
+                    out[p * 3 + 1] = disocclusion.ch[0][r];
+                    out[p * 3 + 2] = Math.hypot(motion.ch[0][r] * motion.w, motion.ch[1][r] * motion.h);
+                }
+            payload = new Uint8Array(out.buffer);
+            return { width: w, height: h, bytes: payload.length, maxAccumulation: upscaler.settings.maxAccumulation };
         },
 
         chunk(offset, length) {
@@ -511,6 +586,15 @@ function summarizeWindow(rows, roiNames) {
         temporalError: temporal.length ? mean(temporal.map((row) => row.temporal.error)) : null,
         churn: temporal.length ? mean(temporal.map((row) => row.temporal.churn)) : null,
         referenceChurn: temporal.length ? mean(temporal.map((row) => row.temporal.referenceChurn)) : null,
+        // Temporal only: young = history age under 4 frames, disoccluded = mask > 0.5.
+        guides: rows[0].guides
+            ? {
+                  youngShare: mean(rows.map((row) => row.guides.youngShare)),
+                  meanAge: mean(rows.map((row) => row.guides.meanAge)),
+                  disoccludedShare: mean(rows.map((row) => row.guides.disoccludedShare)),
+                  meanMotionPx: mean(rows.map((row) => row.guides.meanMotionPx)),
+              }
+            : null,
         rois: {},
     };
     for (const name of roiNames)
@@ -600,7 +684,8 @@ async function main() {
         const offsets = referenceOffsets(samples / (scale * scale)).map(([x, y]) => [x, y]);
         const referenceStarted = Date.now();
         const referenceNonFinite = {};
-        for (const frame of frames) {
+        for (const outputFrame of frames) {
+            const frame = outputFrame + referenceOffset;
             const result = await evaluate(
                 client,
                 `window.__referenceQuality.renderReference(${frame}, ${JSON.stringify(offsets)}, ${scale})`,
@@ -610,7 +695,7 @@ async function main() {
             if (keepRaw) await writeFile(join(referenceDirectory, `${frameName(frame)}.f32`), Buffer.from(linear.buffer));
             const presented = present(linear);
             await writeFile(join(referenceDirectory, `${frameName(frame)}.presented.f32`), Buffer.from(presented.buffer));
-            if (exportPng || windows.some((window) => window.start === frame))
+            if (exportPng || windows.some((window) => window.start === outputFrame))
                 await writeFile(
                     join(outputDirectory, exportPng ? 'png/reference' : '', `${exportPng ? '' : 'reference-'}${frameName(frame)}.png`),
                     encodePng(presented, displayWidth, displayHeight),
@@ -633,10 +718,10 @@ async function main() {
             const denseOffsets = referenceOffsets(floorSamples / (scale * scale));
             const result = await evaluate(
                 client,
-                `window.__referenceQuality.renderReference(${frames[0]}, ${JSON.stringify(denseOffsets)}, ${scale})`,
+                `window.__referenceQuality.renderReference(${frames[0] + referenceOffset}, ${JSON.stringify(denseOffsets)}, ${scale})`,
             );
             const dense = present(new Float32Array(await fetchPayload(client, result.bytes)));
-            const reference = await loadReference(frames[0]);
+            const reference = await loadReference(frames[0] + referenceOffset);
             floor = {
                 frame: frames[0],
                 samples: floorSamples,
@@ -673,7 +758,35 @@ async function main() {
                         if (!Number.isFinite(linear[i])) nonFinite++;
                     }
                     const output = present(linear);
-                    const reference = await loadReference(frame);
+                    const reference = await loadReference(frame + referenceOffset);
+                    if (saveDiagnostics) {
+                        await mkdir(join(outputDirectory, 'raw', mode), { recursive: true });
+                        await writeFile(join(outputDirectory, 'raw', mode, `${frameName(frame)}.f32`), Buffer.from(output.buffer));
+                    }
+                    let guideStats = null;
+                    if (mode === 'temporal') {
+                        const guideInfo = await evaluate(client, 'window.__referenceQuality.readGuides()');
+                        const guides = new Float32Array(await fetchPayload(client, guideInfo.bytes));
+                        if (saveDiagnostics)
+                            await writeFile(join(outputDirectory, 'raw', mode, `${frameName(frame)}.guides.f32`), Buffer.from(guides.buffer));
+                        let young = 0;
+                        let age = 0;
+                        let disoccluded = 0;
+                        let motion = 0;
+                        const pixels = guides.length / 3;
+                        for (let p = 0; p < pixels; p++) {
+                            if (guides[p * 3] < 4) young++;
+                            age += guides[p * 3];
+                            if (guides[p * 3 + 1] > 0.5) disoccluded++;
+                            motion += guides[p * 3 + 2];
+                        }
+                        guideStats = {
+                            youngShare: young / pixels,
+                            meanAge: age / pixels,
+                            disoccludedShare: disoccluded / pixels,
+                            meanMotionPx: motion / pixels,
+                        };
+                    }
                     if (exportPng)
                         await writeFile(join(outputDirectory, 'png', mode, `${frameName(frame)}.png`), encodePng(output, displayWidth, displayHeight));
                     else if (frame === window.start)
@@ -686,6 +799,7 @@ async function main() {
                         psnr: psnr(regionMean(squared, displayWidth, displayHeight, rois.full)),
                         ssim: regionMean(ssim, displayWidth, displayHeight, rois.full, SSIM_BORDER),
                         temporal: null,
+                        guides: guideStats,
                         rois: {},
                     };
                     let maps = null;
@@ -739,6 +853,7 @@ async function main() {
             ratio,
             settings,
             display: [displayWidth, displayHeight],
+            referenceOffset,
             reference: { samples, scale, passes: offsets.length, offsets, nonFinite: referenceNonFinite, seconds: referenceSeconds, floor },
             presentation: 'max(0) + three ACESFilmicToneMapping (exposure 1) + sRGB OETF; metrics on unquantized [0, 1] RGB',
             windows,
@@ -757,7 +872,7 @@ async function main() {
         await removeTempDirectory(profile, 'Chrome profile');
         await stopChild(viteServer);
         // The presented-reference cache only feeds the scoring above.
-        if (!keepRaw) await rm(referenceDirectory, { recursive: true, force: true });
+        if (!keepRaw && !saveDiagnostics) await rm(referenceDirectory, { recursive: true, force: true });
     }
 }
 

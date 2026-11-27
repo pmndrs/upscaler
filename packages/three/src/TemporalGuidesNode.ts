@@ -4,7 +4,7 @@ import { nodeObject, passTexture } from 'three/tsl';
 
 import { Upscaler } from './Upscaler';
 import { getGPUTexture } from './internal/threeWebGPU';
-import type { TemporalGuides } from './types';
+import type { DepthMode, TemporalGuides } from './types';
 
 // Same typing posture as UpscalerNode: three's node builder/frame carry
 // incomplete TS types, so the boundary takes `any` and casts.
@@ -31,6 +31,12 @@ export interface TemporalGuidesNodeOptions {
      * `GuideDispatchInputs.resetTexture`.
      */
     resetTexture?: TextureNodeLike;
+    /**
+     * What the `depth` node holds — hardware depth (default) or linear view
+     * distance (`'linear'`); see {@link DepthMode}. Linked to an upscale node,
+     * that node configures the shared upscaler, so pass the same value to both.
+     */
+    depthMode?: DepthMode;
 }
 
 /**
@@ -66,6 +72,7 @@ export class TemporalGuidesNode extends Node {
     private readonly _camera: CameraLike;
     private readonly _gpuTiming: boolean | undefined;
     private readonly _resetTexture: TextureNodeLike;
+    private readonly _depthMode: DepthMode | undefined;
 
     private _upscaler: Upscaler | null = null;
     // Linked = an UpscalerNode adopted our upscaler and owns configuration
@@ -90,6 +97,7 @@ export class TemporalGuidesNode extends Node {
         this._camera = camera;
         this._gpuTiming = options.gpuTiming;
         this._resetTexture = options.resetTexture ?? null;
+        this._depthMode = options.depthMode;
     }
 
     /** The underlying upscaler — inspect `.guides`, `.gpuTimings`, etc. */
@@ -217,6 +225,7 @@ export class TemporalGuidesNode extends Node {
             renderWidth: Math.max(1, Math.round(width)),
             renderHeight: Math.max(1, Math.round(height)),
             path: 'guides',
+            depthMode: this._depthMode,
         });
     }
 

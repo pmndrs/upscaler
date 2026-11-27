@@ -18,6 +18,7 @@ export {
     type JitterOffset,
     type RuntimeSettings,
     type TemporalGuides,
+    type DepthMode,
     type UpscalePath,
     type UpscalerConfig,
 } from './types';

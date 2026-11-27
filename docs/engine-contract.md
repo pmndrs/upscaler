@@ -86,7 +86,7 @@ multisampled input; it can't bind). All render-resolution inputs are exactly
 | Input | Format | Notes |
 | --- | --- | --- |
 | `color` | filterable float, `rgba16float` recommended | Linear, scene-referred; HDR is fine. Before tone mapping and output encoding. Alpha is carried through. |
-| `depth` | a depth format (`depth32float`, `depth24plus`, `depth24plus-stencil8`, …) | Bound as `texture_depth_2d`. A stencil format is fine: the core binds a depth-only view. |
+| `depth` | a depth format (`depth32float`, `depth24plus`, `depth24plus-stencil8`, …); with `depthMode: 'linear'`, a float color format (`r32float` recommended) | Hardware depth is bound as `texture_depth_2d`; a stencil format is fine, the core binds a depth-only view. Linear depth: see [Depth convention](#camera-framecamera). |
 | `velocity` | float, motion in `.xy` (`rg16float` / `rgba16float`) | See [Motion](#motion). |
 | `reactive` | float, `.r` in `[0, 1]` | Optional. 1 = trust this frame over history. |
 | `reactiveOpaqueColor` | as `color` | Optional. The opaque-only render; the core derives a reactive mask from its difference to `color`. |
@@ -111,11 +111,29 @@ Each dispatch takes the camera facts the passes need, as plain data:
 - **`perspective`**: `false` for orthographic. When it's omitted, the projection
   type is read from **`projection`** (the unjittered matrix, column-major: element
   15 is 0 for perspective and 1 for orthographic). One of the two is required.
-- **Depth convention.** WebGPU depth, in `[0, 1]`. Standard: 0 at near, 1 at far
-  (`depthCompare: 'less'`, cleared to 1). Reversed (`reversedDepth: true`): 1 at
-  near, 0 at far. Logarithmic depth, or depth written to a color texture, is not
-  supported. A different convention needs a new linearization path in core, not a
-  conversion in the adapter.
+- **Depth convention.** Chosen at `configure()` by `depthMode`:
+  - **`'hardware'`** (default): WebGPU depth, in `[0, 1]`. Standard: 0 at near, 1
+    at far (`depthCompare: 'less'`, cleared to 1). Reversed (`reversedDepth: true`):
+    1 at near, 0 at far. Logarithmic depth, or *device* depth written to a color
+    texture, is not supported. A different convention needs a new linearization
+    path in core, not a conversion in the adapter.
+  - **`'linear'`**: a float color texture (`r32float` recommended; any `float`
+    format binds) whose `.r` is the **view-space distance** in the camera's units,
+    for hosts that already hold it (a deferred G-buffer, a path tracer's hit
+    distance along the view axis, Babylon's linear view depth). Either sign works:
+    positive distance or the negative view Z of a right-handed view space (three's
+    `viewZ`, @pmndrs/denoiser), since only the magnitude is read. Zero, inf and NaN
+    read as `far`, which is also what a cleared hardware depth linearizes to: write
+    the background as `far`, or leave it 0. `perspective` and `reversedDepth` are
+    ignored; `near` / `far` are still required and finite. A half-float input
+    (`r16float`, `rgba16float`) binds but rounds depth to about 1e-3 relative,
+    enough to change the disocclusion guide along edges.
+    The mode swaps only the reconstruct pass's depth read; everything downstream
+    already works on linear depth.
+
+  A mismatched input throws at dispatch with a message naming the mode (a hardware
+  depth texture in linear mode, or an `r32float`/`r16float` in hardware mode)
+  instead of failing WebGPU validation.
 
 The non-temporal paths never read these values, but they must still be finite.
 
@@ -146,6 +164,26 @@ at any time during the frame.
 
 Re-render the inputs under this frame's jitter every frame. A buffer rendered with
 a different offset (or none) reprojects as if it had this one, and history smears.
+
+### Held frames
+
+A frame counts once it dispatches: `dispatch()`, `encode()`, `dispatchGuides()` or
+`encodeGuides()`. If a `beginFrame()` is never followed by one before the next
+`beginFrame()` (an on-demand app redrawing only what it composites after the
+upscaler, a pipeline still compiling, a driver that bails for a frame), the next
+`beginFrame()` steps the sequence back before advancing and returns the same phase
+again. So any number of held frames leave `jitterPhase`, `jitterPrevious`, the frame
+index and a pending reset exactly as they were, and the next real frame reprojects
+against the phase its history was rendered with (issue #92). Two consequences for a
+driver:
+
+- Between a held frame and the next `beginFrame()`, the getters still read the held
+  frame's (unconsumed) phase, which is the phase the next frame will use.
+- `resetHistory()` and `configure()` restart the sequence themselves; a held frame
+  before them rolls nothing back.
+
+No call is needed to hold a frame: there is no `endFrame()` in the core, and the
+order of the camera restore and the dispatch doesn't matter.
 
 ## Motion
 
@@ -240,7 +278,7 @@ object:
 | Lifecycle | `configure` / `dispatch` / `resetHistory` / `dispose`, `gpuTimings` | same, plus `prepare()` (async compile) |
 | Submission | `dispatch()` records and submits its own encoder; queue order | same; `encode*()` additionally records into a host encoder |
 | Motion | NDC delta, current − previous (three's `velocity`) | same (`motionScale` for other conventions) |
-| Depth | hardware depth or r32float device depth; `reversedDepth` | hardware depth only; `reversedDepth` |
+| Depth | hardware depth or r32float device depth; `reversedDepth` | hardware depth (`reversedDepth`), or linear view depth with `depthMode: 'linear'` (either sign, so `viewZ` passes as is) |
 | Camera | `FrameCamera` with `view`, `projection`, previous matrices, `jitter`, `near`, `far`, `reversedDepth` | reads `near`, `far`, `reversedDepth` and `perspective`, or derives it from `projection` |
 | Output | returned `GPUTexture`, owned by the denoiser | `output` getter, allocated through `TextureAllocator` |
 
