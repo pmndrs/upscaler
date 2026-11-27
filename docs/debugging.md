@@ -121,7 +121,7 @@ WebGPU:
 - **Packaged TSL guides:** `pnpm verify:packed-guides:gpu` builds and packs the
   library, then runs `examples/13-guides-node` against the packed artifact on a real
   GPU.
-- **Benchmarks:** how to run and read A/B timing runs, the Q0–Q19 scenario catalogue,
+- **Benchmarks:** how to run and read A/B timing runs, the Q0–Q20 scenario catalogue,
   and device setup are in [`bench/docs/BENCHMARKING.md`](../bench/docs/BENCHMARKING.md).
 
 Output from all of these lands under `bench/results/raw/`, which is gitignored.
