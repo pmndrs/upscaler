@@ -56,7 +56,7 @@ frame start ── last frame's products are readable (dilatedDepth still holds 
 | `dilatedMotion` | render | rgba16float, `.xy` | Closest-depth-dilated motion as a **UV delta**, y-flip applied: `prevUV = uv − motion` | after `dispatchGuides` |
 | `dilatedDepth` | render | r32float, nearest only | Dilated linear view depth (eye-Z), reversed depth already resolved | after `dispatchGuides` |
 | `previousDepth` | render | r32float, nearest only | The same, frame N−1 | after `dispatchGuides` (before it, `dilatedDepth` is frame N−1) |
-| `disocclusion` | render | rgba8unorm, `.r` | Graded `0` stable → `1` fresh history; `1` everywhere on a reset frame | after `dispatchGuides` |
+| `disocclusion` | render | rgba8unorm, `.r` | Graded `0` stable → `1` fresh history; `1` everywhere on a reset frame ([reading it](#reading-disocclusion)) | after `dispatchGuides` |
 | `reactive` | render | rgba8unorm, `.r` | Merged reactive mask target (see below) | late; `null` on `guides` |
 | `shadingChange` | ⌈render / 2⌉ | r32float, nearest only | `0..1` shading-change response per 2×2 block | late; `null` on `guides` |
 | `exposure` | 1×1 | rgba16float | `r` conditioning exposure, `g` metered average luma of the beauty input, `b` host pre-exposure, `a` 1 on a reset frame (`reset` or `resetTexture`), else 0 | late; `null` on `guides` |
@@ -89,6 +89,53 @@ Rules a consumer must follow:
   frame's jitter; read it from `upscaler.jitter` / `jitterPhase` (or an `upscale()`
   node's `jitterNode`) — see [Jitter](inputs-and-contracts.md#jitter). The `guides`
   path never jitters, so there it reads `(0, 0)`.
+
+## Reading `disocclusion`
+
+The grade answers one question for the upscaler: *should this pixel's reprojected
+history be trusted?* What it measures follows from the depth clip
+(`DEPTH_CLIP_SHADER` in `packages/core/src/shaders/reconstruct.ts`), and three of its
+properties matter to anyone using it as a yes/no mask.
+
+**It is a tolerance ratio, not a probability.** Each pixel looks at the four bilinear
+taps around its previous position in a *reconstructed previous depth*: this frame's
+dilated depths, scattered to where they were last frame. A tap that is at or behind
+the pixel's own depth means nothing covered the point, so the confidence is 1. A tap
+nearer by a separation `s` means an occluder moved off the point, and the confidence is
+`tolerance / s`, clamped to 1. The best tap wins, and the grade is
+`1 − max(confidence)`. So:
+
+- `0` means some tap is within tolerance of this surface.
+- `0.25`, `0.5` and `0.75` mean the nearest tap is 1.33×, 2× and 4× the tolerance in
+  front of it.
+- `1` means the previous position is off-screen, or the frame is a reset.
+
+A genuine reveal has its occluder many tolerances in front, so it reads close to 1.
+Thresholds between about 0.25 and 0.75 select nearly the same pixels. Use **0.5** for a
+yes/no mask. Any value above 0 also picks up quantization-level grades on ordinary
+surfaces. The upscaler itself uses the grade continuously: it scales history weight
+and accumulation age by `1 − disocclusion`.
+
+**It hugs the foreground side of a silhouette by design.** The test runs on the
+*dilated* depth and motion, which take the nearest depth in each pixel's 3×3 and that
+texel's motion. That is right for upscaling, because thin foreground edges must drag
+their own motion and not smear background history. But a background pixel within one
+texel of a moving silhouette takes the foreground's depth and motion, and so it is
+tested as foreground. The flagged band therefore sits up to one render texel onto the
+occluder's side, and part of the freshly revealed strip beside it reads as stable.
+Behind thin occluders, a large share of that strip is missed. A consumer that needs the
+exact reveal strip, for example a denoiser that must not keep history from another
+surface, should run its own per-tap test on undilated depth. Issue
+[#102](https://github.com/pmndrs/upscaler/issues/102) has the measurements.
+
+**The tolerance scales with the render viewport diagonal.** The tolerance is
+`max(1.37e-5 · |renderSize / 2| · depth, relief)`. `|renderSize / 2|` is half the
+render-resolution diagonal, and `relief` is the 3×3 depth range, which keeps sloped
+surfaces from reading as separated. At 960×540 the quantization term is about 0.75 %
+of view depth, and at 1920×1080 it is about 1.5 %. The same scene therefore yields a
+looser mask, with fewer flags, at a higher render resolution. That matches the FSR2
+reference constant. Account for it if you compare masks across resolutions or quality
+modes.
 
 ## Raw split frame
 
