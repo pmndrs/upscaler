@@ -1,6 +1,6 @@
 {
     "name": "@pmndrs/upscaler",
-    "version": "0.5.0",
+    "version": "0.6.0",
     "description": "AMD FidelityFX Super Resolution (FSR1 spatial + FSR2/3-style temporal upscaling) for three.js WebGPURenderer, implemented as raw WGSL compute passes",
     "author": "Dennis Smolek <dennis@smolek.dev>",
     "license": "MIT",
