@@ -116,10 +116,52 @@ export const ACCUMULATE_TAP_CLAMP_HISTORY_SHADER = replaceHistoryDeRing(
     return vec4f(clamp(result.rgb, tapLo, tapHi), max(result.a, 0.0));`,
 );
 
+/** Production's history exposure delta (issue #99), from its first load to its rescale. */
+const HISTORY_EXPOSURE_DELTA = /* wgsl */ `    let framePrev = textureLoad(exposurePrevTex, vec2i(0), 0);
+    var historyRatio = 1.0;
+    if (framePrev.b > 1.0e-4 && frameInfo.b > 1.0e-4) { historyRatio = frameInfo.b / framePrev.b; }
+    if ((!hasFlag(FLAG_AUTO_EXPOSURE) || hasFlag(FLAG_EXTERNAL_EXPOSURE)) && framePrev.r > 1.0e-4) {
+        historyRatio = historyRatio * (exposure / framePrev.r);
+    }
+    if (abs(historyRatio - 1.0) > 1.0e-3) {
+        history = vec4f(tonemapInvertible(tonemapInvert(history.rgb) * historyRatio), history.a);
+    }`;
+
+/**
+ * Frozen pre-#99 history correction: host pre-exposure only, so a fixed or
+ * app-supplied conditioning-exposure step decodes old history at the new
+ * exposure (a 15–160 % one-frame pop on bench Q12/Q20). The A/B reference for
+ * scripts/measure-exposure-step.mjs (bench/docs/NEXT-STEPS.md §23).
+ */
+export const ACCUMULATE_UNCORRECTED_CONDITIONING_SHADER = replaceOnce(
+    ACCUMULATE_SHADER,
+    HISTORY_EXPOSURE_DELTA,
+    /* wgsl */ `    let hostPrev = textureLoad(exposurePrevTex, vec2i(0), 0).b;
+    var hostRatio = 1.0;
+    if (hostPrev > 1.0e-4 && frameInfo.b > 1.0e-4) { hostRatio = frameInfo.b / hostPrev; }
+    if (abs(hostRatio - 1.0) > 1.0e-3) {
+        history = vec4f(tonemapInvertible(tonemapInvert(history.rgb) * hostRatio), history.a);
+    }`,
+);
+
+/**
+ * Rejected #99 form: the conditioning-exposure correction under auto-exposure
+ * too. Auto-exposure tracks the scene's brightness, so the uncorrected decode
+ * moves old history toward the new lighting; correcting it measured Q15 drift
+ * lag +55 % and Q9 +10 % (bench/docs/NEXT-STEPS.md §23).
+ */
+export const ACCUMULATE_CONDITIONING_CORRECTION_SHADER = replaceOnce(
+    ACCUMULATE_SHADER,
+    '(!hasFlag(FLAG_AUTO_EXPOSURE) || hasFlag(FLAG_EXTERNAL_EXPOSURE)) && framePrev.r > 1.0e-4',
+    'framePrev.r > 1.0e-4',
+);
+
 /** The registered candidates, by bench identity. */
 export const ACCUMULATE_VARIANTS = {
     'accumulate-history-unclamped-v1': ACCUMULATE_UNCLAMPED_HISTORY_SHADER,
     'accumulate-history-tap-clamp-v1': ACCUMULATE_TAP_CLAMP_HISTORY_SHADER,
+    'accumulate-conditioning-correction-v1': ACCUMULATE_CONDITIONING_CORRECTION_SHADER,
+    'accumulate-uncorrected-conditioning-v1': ACCUMULATE_UNCORRECTED_CONDITIONING_SHADER,
     'accumulate-motion-cap2-v1': buildMotionCapAccumulateShader({ cap: 2, lo: 0.5, hi: 1.5 }),
     'accumulate-motion-cap4-v1': buildMotionCapAccumulateShader({ cap: 4, lo: 0.5, hi: 1.5 }),
     // Ramp on the still-scene relax's own fade (STILL_MOTION_LO/HI), so the
