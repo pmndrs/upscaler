@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { UpscalerCore, everyTexelGate, everyTexelSupported, optionalPassTransition, type OptionalPass } from './UpscalerCore';
+import {
+    UpscalerCore, depthInputError, everyTexelGate, everyTexelSupported, optionalPassTransition, type OptionalPass,
+} from './UpscalerCore';
 import { FLAG_PERSPECTIVE, FLAG_RESET, FLAG_REVERSED_DEPTH, FLAG_SHADING_CHANGE, FLAG_SHADING_PRIME } from './shaders/common';
 import { DebugView } from './types';
 import type { CoreTexture, CoreTextureDescriptor } from './textures';
@@ -464,5 +466,89 @@ describe('UpscalerCore without an engine', () => {
         expect(core.beginFrame()).toBeNull();
         core.configure({ displayWidth: 64, displayHeight: 32, path: 'spatial' });
         expect(core.beginFrame()).toBeNull();
+    });
+
+    describe('linear view-depth input (issue #97)', () => {
+        const camera = { near: 0.1, far: 100, perspective: true };
+        const pipelineLabels = (device: ReturnType<typeof mockDevice>['device']) =>
+            device.createComputePipelineAsync.mock.calls.map(([d]) => d?.label);
+        const withFormat = (texture: GPUTexture, format: GPUTextureFormat) =>
+            ({ ...texture, format }) as unknown as GPUTexture;
+
+        it('compiles only the hardware reconstruct by default', async () => {
+            const { device } = mockDevice();
+            const core = new UpscalerCore({ device: device as unknown as GPUDevice });
+            core.configure({ displayWidth: 64, displayHeight: 32, customUpscaleRatio: 2 });
+            await core.prepare();
+            expect(pipelineLabels(device)).toContain('upscale-reconstruct');
+            expect(pipelineLabels(device)).not.toContain('upscale-reconstruct-linear');
+        });
+
+        it.each(['temporal', 'guides'] as const)(
+            'swaps in the linear reconstruct on the %s path, on the early constants',
+            async (path) => {
+                const { device, passes, gpu } = mockDevice();
+                const core = new UpscalerCore({ device: device as unknown as GPUDevice });
+                core.configure({ displayWidth: 64, displayHeight: 32, customUpscaleRatio: 2, path, depthMode: 'linear' });
+                await core.prepare();
+                expect(core.isReady).toBe(true);
+                expect(pipelineLabels(device)).toContain('upscale-reconstruct-linear');
+                expect(pipelineLabels(device)).not.toContain('upscale-reconstruct');
+
+                device.createBindGroup.mockClear();
+                core.dispatchGuides({ depth: withFormat(gpu('depth'), 'r32float'), velocity: gpu('velocity') }, camera);
+                const groups = device.createBindGroup.mock.calls.map(([d]) => d as {
+                    label: string; entries: Array<{ resource: { buffer?: { label?: string } } }>;
+                });
+                expect(groups.map((g) => g.label)).toEqual(['upscale-reconstruct-linear', 'upscale-depth-clip']);
+                expect(groups.every((g) => g.entries[0].resource.buffer?.label === 'upscale-constants-early')).toBe(true);
+                // The timer/pass label is unchanged: timings stay comparable across modes.
+                expect(passes.map((p) => p.label)).toContain('upscale-reconstruct');
+            },
+        );
+
+        it('re-selects the reconstruct on reconfigure', async () => {
+            const { device } = mockDevice();
+            const core = new UpscalerCore({ device: device as unknown as GPUDevice });
+            core.configure({ displayWidth: 64, displayHeight: 32, customUpscaleRatio: 2, depthMode: 'linear' });
+            await core.prepare();
+            core.configure({ displayWidth: 64, displayHeight: 32, customUpscaleRatio: 2 });
+            await core.prepare();
+            expect(core.isReady).toBe(true);
+            expect(pipelineLabels(device)).toEqual(expect.arrayContaining(['upscale-reconstruct', 'upscale-reconstruct-linear']));
+        });
+
+        it('rejects an unknown mode and the hardware-only bench identities', () => {
+            const { device } = mockDevice();
+            const core = new UpscalerCore({ device: device as unknown as GPUDevice });
+            expect(() => core.configure({ displayWidth: 64, displayHeight: 32, depthMode: 'view' as never }))
+                .toThrow(/unknown depthMode 'view'/);
+            const bench = new UpscalerCore({
+                device: device as unknown as GPUDevice,
+                _crossFrameReconstruct: { shader: '', cameraCompensated: false },
+            } as ConstructorParameters<typeof UpscalerCore>[0]);
+            expect(() => bench.configure({ displayWidth: 64, displayHeight: 32, depthMode: 'linear' }))
+                .toThrow(/hardware depth only/);
+        });
+
+        it('names a depth input that does not fit the mode', async () => {
+            expect(depthInputError('r32float', 'linear')).toBeNull();
+            expect(depthInputError('rgba16float', 'linear')).toBeNull();
+            expect(depthInputError('r16float', 'linear')).toBeNull();
+            expect(depthInputError('depth32float', 'linear')).toMatch(/needs depthMode 'hardware'/);
+            expect(depthInputError('depth24plus-stencil8', 'linear')).toMatch(/needs depthMode 'hardware'/);
+            expect(depthInputError('r32uint', 'linear')).toMatch(/float color texture/);
+            expect(depthInputError('rgba8unorm', 'linear')).toMatch(/float color texture/);
+            expect(depthInputError('depth32float', 'hardware')).toBeNull();
+            expect(depthInputError('depth24plus-stencil8', 'hardware')).toBeNull();
+            expect(depthInputError('r32float', 'hardware')).toMatch(/needs depthMode: 'linear'/);
+
+            const { device, gpu } = mockDevice();
+            const core = new UpscalerCore({ device: device as unknown as GPUDevice });
+            core.configure({ displayWidth: 64, displayHeight: 32, customUpscaleRatio: 2, path: 'guides', depthMode: 'linear' });
+            await core.prepare();
+            expect(() => core.dispatchGuides({ depth: withFormat(gpu('depth'), 'depth32float'), velocity: gpu('velocity') }, camera))
+                .toThrow(/needs depthMode 'hardware'/);
+        });
     });
 });

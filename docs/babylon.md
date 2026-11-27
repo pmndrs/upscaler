@@ -109,7 +109,13 @@ packs motion into `[0, 1]` with a cube-root curve, so it can't be fed in as is.
 from `minZ` to `maxZ`, or reversed under `engine.useReverseDepthBuffer`, which
 the adapter reads. Bind the geometry renderer's depth texture (`depth32float`,
 or a depth-stencil format) directly. The view-depth color textures aren't
-depth textures and won't bind.
+depth textures and won't bind in the default `depthMode: 'hardware'`. With
+`depthMode: 'linear'` in `configure()`, a float texture holding view-space Z in
+`.r` (the un-normalized view depth, not `geometryNormViewDepthTexture`'s 0–1
+value) binds instead and skips linearization ([engine
+contract](engine-contract.md#camera-framecamera)). That path is GPU-verified on
+the raw-WebGPU probe, not yet on Babylon: hardware depth stays the verified
+Babylon input.
 
 **Submission.** Each dispatch calls `engine.flushFramebuffer()` first. That
 submits everything Babylon has recorded so far, which includes the input renders,

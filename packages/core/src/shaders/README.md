@@ -7,6 +7,7 @@ Every pass is a WGSL compute module assembled from shared chunks (`common.ts` + 
 - **Coordinate space** — texel coordinates and UVs are top-left origin. Motion vectors arrive from three's `velocity` node as NDC deltas (`current − previous`) and are converted to UV deltas with `motionScale = (0.5, −0.5)`; reprojection is `prevUV = uv − motion`.
 - **Jitter** — applied via `camera.setViewOffset`, so a render texel at index `i` holds scene content from unjittered position `i + jitter`. The accumulate pass measures kernel distances against `srcPos = uv·renderSize − 0.5 − jitter`.
 - **Depth** — supports three's standard and reversed WebGPU depth conventions (flag bit + `linearizeDepth`, derived from `Matrix4.makePerspective`). Comparisons happen on positive view-space distances.
+  `depthMode: 'linear'` (issue #97) takes view distance directly: `RECONSTRUCT_LINEAR_SHADER` is generated from the production reconstruct body by exact-count substitutions (`texture_depth_2d` → `texture_2d<f32>`, every scene-depth load → `loadViewDepth`, `reversed` → `false`, `linearizeDepth(x)` → `x`; any miss throws at module load), so the hardware shader text is untouched and a fix to the shared body reaches both. `loadViewDepth` drops the sign bit (positive distance and negative view Z both work) and maps zero/inf/NaN to `far` with bit tests, which a fast-math compiler can't fold away. It is the only pass that reads scene depth; dilated depth, the scatter and the depth clip are already linear. No `FLAG_*` bit or UBO field: binding 1's type differs between modes, so the mode must select a pipeline anyway, and an edit to the shared chunk would re-fingerprint every shader. The `atomicMin` bit ordering holds because the scatter keeps `max(depth, 0)`.
 - **Color and exposure domains** — the local temporal pipeline multiplies input by the
   selected local conditioning exposure (auto, fixed, or external), then accumulates in
   _invertible-tonemap space_ (`c / (1 + max(c))`). RCAS sharpens that conditioned history
@@ -381,7 +382,8 @@ rather than as disconnected accumulation constants.
 - **Current status:** Adapted port with a legitimate three.js integration tradeoff.
 - **Local implementation:** Expects render-resolution, jitter-free NDC velocity in
   current-minus-previous form, applies `motionScale = (0.5, -0.5)`, and derives finite
-  camera plus standard/reversed-depth behavior from three.
+  camera plus standard/reversed-depth behavior from three. Hosts with linear view
+  depth pass it directly (`depthMode: 'linear'`, see Conventions → Depth).
 - **FSR 3.1.5 behavior:** Supports configurable motion scale, render- or
   display-resolution vectors, jitter cancellation, infinite depth, and dynamic render
   size.
