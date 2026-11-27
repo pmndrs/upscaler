@@ -147,6 +147,26 @@ at any time during the frame.
 Re-render the inputs under this frame's jitter every frame. A buffer rendered with
 a different offset (or none) reprojects as if it had this one, and history smears.
 
+### Held frames
+
+A frame counts once it dispatches: `dispatch()`, `encode()`, `dispatchGuides()` or
+`encodeGuides()`. If a `beginFrame()` is never followed by one before the next
+`beginFrame()` (an on-demand app redrawing only what it composites after the
+upscaler, a pipeline still compiling, a driver that bails for a frame), the next
+`beginFrame()` steps the sequence back before advancing and returns the same phase
+again. So any number of held frames leave `jitterPhase`, `jitterPrevious`, the frame
+index and a pending reset exactly as they were, and the next real frame reprojects
+against the phase its history was rendered with (issue #92). Two consequences for a
+driver:
+
+- Between a held frame and the next `beginFrame()`, the getters still read the held
+  frame's (unconsumed) phase, which is the phase the next frame will use.
+- `resetHistory()` and `configure()` restart the sequence themselves; a held frame
+  before them rolls nothing back.
+
+No call is needed to hold a frame: there is no `endFrame()` in the core, and the
+order of the camera restore and the dispatch doesn't matter.
+
 ## Motion
 
 `velocity.xy` is the screen-space motion of each pixel's surface since the previous

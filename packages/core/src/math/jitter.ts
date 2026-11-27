@@ -61,6 +61,14 @@ export class JitterSequence {
         this._index = (this._index + 1) % this._sequence.length;
     }
 
+    /**
+     * Steps back one phase, undoing an {@link advance} whose frame never
+     * dispatched.
+     */
+    retreat(): void {
+        this._index = (this._index + this._sequence.length - 1) % this._sequence.length;
+    }
+
     /** Restarts the sequence (e.g. after a history reset). */
     reset(): void {
         this._index = 0;

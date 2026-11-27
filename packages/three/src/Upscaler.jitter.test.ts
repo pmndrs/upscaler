@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { PerspectiveCamera } from 'three';
+import { DataTexture, PerspectiveCamera } from 'three';
+import { texture } from 'three/tsl';
 import type { WebGPURenderer } from 'three/webgpu';
 
 import { Upscaler } from './Upscaler';
+import { upscale } from './UpscalerNode';
 import { generateJitterSequence } from '@pmndrs/upscaler-core/math/halton';
 import type { UpscalePath } from './types';
 
@@ -61,6 +63,19 @@ async function configured(path: UpscalePath = 'temporal', jitter = true) {
     return { upscaler, writes };
 }
 
+// One dispatched frame in the imperative order (begin → render → end →
+// dispatch). The mock can't encode passes, but dispatch() has staged its
+// constants — and counted the frame — before it throws.
+function realFrame(upscaler: Upscaler, cam: PerspectiveCamera): void {
+    upscaler.beginFrame(cam);
+    upscaler.endFrame(cam);
+    try {
+        upscaler.dispatch({ color: {}, depth: {}, velocity: {} } as never, cam);
+    } catch {
+        // Encoding needs a real device.
+    }
+}
+
 const camera = () => {
     const c = new PerspectiveCamera(50, 16 / 9, 0.1, 100);
     c.updateMatrixWorld();
@@ -84,14 +99,13 @@ describe('Upscaler jitter accessors', async () => {
         const sequence = generateJitterSequence(upscaler.jitterPhaseCount);
         let previous = sequence[0];
         for (let frame = 1; frame <= upscaler.jitterPhaseCount; frame++) {
-            upscaler.beginFrame(cam);
+            realFrame(upscaler, cam);
             // beginFrame advances before applying: phase 1 first, 0 closes the cycle.
             expect(upscaler.jitterPhase).toBe(frame % upscaler.jitterPhaseCount);
             const [x, y] = sequence[upscaler.jitterPhase];
             expect(upscaler.jitter).toEqual({ x, y });
             expect(upscaler.jitterPrevious).toEqual({ x: previous[0], y: previous[1] });
             previous = [x, y];
-            upscaler.endFrame(cam);
         }
     });
 
@@ -148,10 +162,7 @@ describe('Upscaler jitter accessors', async () => {
     it('restarts the phase on resetHistory()', async () => {
         const { upscaler } = await configured();
         const cam = camera();
-        for (let i = 0; i < 5; i++) {
-            upscaler.beginFrame(cam);
-            upscaler.endFrame(cam);
-        }
+        for (let i = 0; i < 5; i++) realFrame(upscaler, cam);
         expect(upscaler.jitterPhase).toBe(5);
         upscaler.resetHistory();
         upscaler.beginFrame(cam);
@@ -172,6 +183,83 @@ describe('Upscaler jitter accessors', async () => {
         expect(upscaler.jitterPhase).toBe(0);
         expect(cam.view).toBeNull();
         upscaler.endFrame(cam);
+    });
+
+    // Issue #92: an on-demand app's overlay-only redraw begins and ends a
+    // frame (the TSL node's pipeline hooks fire) without dispatching.
+    it('reuses a held frame\'s phase and restores the camera after it', async () => {
+        const { upscaler } = await configured();
+        const cam = camera();
+        cam.setViewOffset(2560, 720, 1280, 0, 1280, 720);
+        for (let i = 0; i < 3; i++) realFrame(upscaler, cam);
+        const sequence = generateJitterSequence(upscaler.jitterPhaseCount);
+        for (let held = 0; held < 4; held++) {
+            upscaler.beginFrame(cam);
+            expect(upscaler.jitterPhase).toBe(4);
+            expect(upscaler.jitterPrevious).toEqual({ x: sequence[3][0], y: sequence[3][1] });
+            upscaler.endFrame(cam);
+            expect(cam.view).toMatchObject({ offsetX: 1280, offsetY: 0, width: 1280, height: 720 });
+        }
+        realFrame(upscaler, cam);
+        expect(upscaler.jitterPhase).toBe(4);
+        expect(upscaler.jitterPrevious).toEqual({ x: sequence[3][0], y: sequence[3][1] });
+        realFrame(upscaler, cam);
+        expect(upscaler.jitterPhase).toBe(5);
+    });
+
+    it('refreshes the unjittered projection on the frame after a hold', async () => {
+        const { upscaler } = await configured();
+        const cam = camera();
+        realFrame(upscaler, cam);
+        upscaler.beginFrame(cam); // held
+        upscaler.endFrame(cam);
+        cam.fov = 70;
+        upscaler.beginFrame(cam);
+        const unjittered = cam.clone();
+        unjittered.clearViewOffset();
+        unjittered.updateProjectionMatrix();
+        expect(upscaler.unjitteredProjectionMatrix.elements).toEqual(unjittered.projectionMatrix.elements);
+        upscaler.endFrame(cam);
+    });
+
+    // The TSL node path: RenderPipeline.render() fires the node's before/after
+    // hooks every render; a held render skips updateBefore (no dispatch).
+    it('keeps the node\'s pipeline hooks gapless across held renders', async () => {
+        const { upscaler } = await configured();
+        const cam = camera();
+        const node = upscale(texture(new DataTexture()), texture(new DataTexture()), texture(new DataTexture()), cam);
+        const internals = node as unknown as {
+            _upscaler: Upscaler;
+            _configured: boolean;
+            _pipelineHooks: { before(): void; after(): void };
+        };
+        internals._upscaler = upscaler;
+        internals._configured = true;
+        const render = (dispatch: boolean) => {
+            internals._pipelineHooks.before();
+            expect(node.jitterNode.value.toArray()).toEqual([upscaler.jitter.x, upscaler.jitter.y]);
+            if (dispatch) {
+                try {
+                    upscaler.dispatch({ color: {}, depth: {}, velocity: {} } as never, cam);
+                } catch {
+                    // Encoding needs a real device.
+                }
+            }
+            internals._pipelineHooks.after();
+            expect(cam.view).toBeNull();
+        };
+        const phases: number[] = [];
+        const previous: number[] = [];
+        const sequence = generateJitterSequence(upscaler.jitterPhaseCount);
+        const plan = [true, true, false, false, false, true, false, true, true];
+        for (const dispatch of plan) {
+            render(dispatch);
+            if (!dispatch) continue;
+            phases.push(upscaler.jitterPhase);
+            previous.push(sequence.findIndex(([x, y]) => x === upscaler.jitterPrevious.x && y === upscaler.jitterPrevious.y));
+        }
+        expect(phases).toEqual([1, 2, 3, 4, 5]);
+        expect(previous).toEqual([0, 1, 2, 3, 4]);
     });
 
     it('returns stable objects', async () => {

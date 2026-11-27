@@ -285,6 +285,12 @@ export class UpscalerCore<THandle = GPUTexture> {
     // Stable objects behind the public jitter getters (no per-read allocation).
     private readonly _jitterOut = { x: 0, y: 0 };
     private readonly _jitterPreviousOut = { x: 0, y: 0 };
+    // True from a beginFrame() that advanced the sequence until that frame's
+    // first dispatch. A frame that begins and never dispatches (an on-demand
+    // app redrawing only overlays composited after the upscaler, issue #92)
+    // is un-advanced by the next beginFrame(), so `jitterPrevious` stays the
+    // phase the history was rendered with and the cycle has no gaps.
+    private _frameUndispatched = false;
     private _frameIndex = 0;
     private _pendingReset = true;
     private _warnedMsaa = false;
@@ -721,7 +727,9 @@ export class UpscalerCore<THandle = GPUTexture> {
     /**
      * The previous frame's jitter, same convention as {@link jitter}: the
      * offset reprojection compensates against. On the first frame after a
-     * reset history is discarded, so nothing uses it there.
+     * reset history is discarded, so nothing uses it there. A frame that
+     * began but never dispatched doesn't count: the next `beginFrame()`
+     * reuses its phase.
      */
     get jitterPrevious(): JitterOffset {
         return this._readJitter(this._jitterPreviousOut, true);
@@ -838,6 +846,8 @@ export class UpscalerCore<THandle = GPUTexture> {
     resetHistory(): void {
         this._pendingReset = true;
         this._jitter.reset();
+        // The reset defines the sequence position; nothing left to roll back.
+        this._frameUndispatched = false;
     }
 
     //* Frame Lifecycle
@@ -849,12 +859,22 @@ export class UpscalerCore<THandle = GPUTexture> {
      * paths, or when jitter is disabled (see the `jitter` config flag — the
      * temporal path still reprojects and accumulates, it just doesn't add the
      * sub-pixel offset).
+     *
+     * A frame counts once it dispatches ({@link dispatch}, {@link encode},
+     * {@link dispatchGuides} or {@link encodeGuides}). If the previous
+     * `beginFrame()` never reached one — a held frame that redraws only what
+     * is composited after the upscaler — this call reuses that frame's phase
+     * instead of advancing past it, so held frames leave {@link jitterPhase},
+     * {@link jitterPrevious} and the frame-end bookkeeping as if they had
+     * never begun (docs/engine-contract.md#held-frames).
      * @returns This frame's jitter (the {@link jitter} object), or `null` when
      * there is nothing to apply
      */
     beginFrame(): JitterOffset | null {
         if (!this._jittering) return null;
+        if (this._frameUndispatched) this._jitter.retreat();
         this._jitter.advance();
+        this._frameUndispatched = true;
         return this.jitter;
     }
 
@@ -906,6 +926,7 @@ export class UpscalerCore<THandle = GPUTexture> {
         if (!this._output || !this._outputGPU) {
             throw new Error('@pmndrs/upscaler: configure() must run before dispatch().');
         }
+        this._frameUndispatched = false;
 
         // Only the temporal path encodes the guides stage.
         if (this._path === 'temporal') this._writeConstants(this._constantsEarly, inputs, camera);
@@ -997,6 +1018,7 @@ export class UpscalerCore<THandle = GPUTexture> {
                 '@pmndrs/upscaler: dispatchGuides() already ran this frame — finish with dispatchUpscale().',
             );
         }
+        this._frameUndispatched = false;
         this._writeConstants(this._constantsEarly, inputs, camera);
     }
 
