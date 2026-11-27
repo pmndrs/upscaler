@@ -1,5 +1,5 @@
 import { Vector2, type Texture } from 'three';
-import { NodeUpdateType, TSL, TempNode, type UniformNode, type WebGPURenderer } from 'three/webgpu';
+import { Node, NodeUpdateType, TSL, type UniformNode, type WebGPURenderer } from 'three/webgpu';
 import {
     convertToTexture,
     mix,
@@ -156,7 +156,7 @@ export interface UpscalerNodeOptions {
  * render pipeline applies the renderer's configured tone mapping and output
  * color-space transform; it can also feed later linear post-processing.
  */
-export class UpscalerNode extends TempNode<'vec4'> {
+export class UpscalerNode extends Node<'vec4'> {
     readonly isFSR3Node = true;
 
     private readonly _color: TextureNodeLike;

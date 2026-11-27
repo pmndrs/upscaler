@@ -87,9 +87,10 @@ let marchMRT: ReturnType<typeof mrt>;
 
 /**
  * Builds the raymarch material's color, depth and velocity nodes for a quality
- * preset. All three read one march result — a TempNode shared by the three
- * outputs, so the generated fragment shader calls `fractal_march` once
- * (checked against the WGSL three emits).
+ * preset. All three read one march result — a node shared by the three
+ * outputs (three caches a node used more than once in a temporary), so the
+ * generated fragment shader calls `fractal_march` once
+ * (checked against the WGSL three r187 emits: one definition, one call).
  * @param quality - Key into {@link QUALITY_PRESETS}
  */
 function buildMarchMaterial(quality: string): void {

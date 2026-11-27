@@ -49,7 +49,7 @@ before filing. `three#N` = mrdoob/three.js; `#N` = this repo.
 
 ## Status of our own follow-ups from this survey
 
-- `TempNode` is deprecated in r187 (three#34607), and `UpscalerNode`/`TemporalGuidesNode` extend it. Tracked in #23.
+- `TempNode` is deprecated in r187 (three#34607): `UpscalerNode`/`TemporalGuidesNode` now extend `Node` (#23).
 - `Upscaler.endFrame` clobbering an app-set `camera.view` offset: fixed in #28.
 - The spatial EASU→RCAS path had the HDR limiter flaw from item 5: fixed in #30.
 - `getDevice` could use the documented `backend.device`. Only `getGPUTexture` truly depends on internals (item 6).

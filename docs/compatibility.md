@@ -4,9 +4,8 @@
 
 | three | Status |
 | --- | --- |
-| **r186+** | **Supported.** Developed and GPU-verified on r186.1. |
-| r184, r185 | **Deprecated.** They still work. The TSL nodes warn once and fall back to the pre-r186 render-pipeline hooks; that fallback will be removed. |
-| r187 | Not yet released. Known changes are tracked in [#23](https://github.com/pmndrs/upscaler/issues/23). |
+| **r186+** | **Supported.** Developed and GPU-verified on r187.0; r186.1 re-verified on the same build. |
+| r184, r185 | **Deprecated.** They still work (r184.0 re-verified with the r187 build). The TSL nodes warn once and fall back to the pre-r186 render-pipeline hooks; that fallback will be removed. |
 | < r184 | Unsupported (the peer dependency is `three >= 0.184.0`). |
 
 **Why the line is at r186.** three r186 removed `RenderPipeline.context`, the slot
@@ -18,13 +17,24 @@ The events are feature-detected at runtime, so the same build still runs on r184
 through the old slot. The imperative surfaces (`Upscaler`, `UpscalePass`) don't use
 render-pipeline hooks and aren't affected.
 
+**r187 notes** ([#23](https://github.com/pmndrs/upscaler/issues/23)). `TempNode` is
+deprecated and warns on every construction, so `UpscalerNode` and `TemporalGuidesNode`
+now extend `Node` (r187's `Node` caches a node used more than once, as `TempNode`
+did; on r184–r186 the node's output is inlined per use instead, which is harmless).
+`VelocityNode` now copies its projection into a per-camera uniform once per
+`NodeFrame` frame; the upscaler's unjittered-projection override still applies, and
+motion vectors stay jitter-free (still-camera Motion Vectors view constant across
+jitter phases). TRAA/TAAU now build their inputs before claiming the view offset, but
+`traa()` wraps its input in an RTT, so `traa(upscaleScene(…))` still has TRAA claim
+first and `upscale()` warns and runs unjittered, as on r186.
+
 **What a three upgrade can break.** The upscaler dispatches raw WebGPU on three's
 device, so it depends on two private internals: `renderer.backend.device` (the
 `GPUDevice`) and `renderer.backend.get(texture).texture` (the `GPUTexture` behind a
 three texture). They are isolated in
 [`packages/three/src/internal/threeWebGPU.ts`](../packages/three/src/internal/threeWebGPU.ts), which throws loudly
 if their shape changes, rather than limping along. They were verified on r184 and
-re-verified on r186.1.
+re-verified on r186.1 and r187.0.
 
 ## Babylon.js versions
 
