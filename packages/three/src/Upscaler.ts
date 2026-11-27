@@ -340,6 +340,9 @@ export class Upscaler {
      * that offset exactly. No-op on non-temporal paths, or when jitter is
      * disabled (see the `jitter` config flag — the temporal path still
      * reprojects and accumulates, it just doesn't add the sub-pixel offset).
+     * A frame that begins but never dispatches (a held, overlay-only redraw)
+     * doesn't consume a phase: the next `beginFrame()` reuses it, so
+     * `jitterPrevious` stays the phase the history was rendered with.
      * @param camera - The scene camera (perspective or orthographic)
      */
     beginFrame(camera: JitterableCamera): void {
