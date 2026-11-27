@@ -83,7 +83,7 @@ const USAGE = `Usage: node scripts/measure-motion-stability.mjs [options]
                          (motion from depth). The judge is always the node, and its
                          position-stage patch also reaches three's velocity in the
                          probe, so three vs motion-vectors is NOT an A/B on deformers
-                         (Q21; NEXT-STEPS §22) — use measure-reference-quality.mjs there.
+                         (Q21; NEXT-STEPS §24) — use measure-reference-quality.mjs there.
   --heat [frames]        save heat maps (comma-separated frames; bare = the middle
                          of each motion segment)
   --end <frame>          stop early (smoke runs); default the scenario's end

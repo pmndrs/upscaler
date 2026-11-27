@@ -89,7 +89,7 @@ three's `velocity` is exact for camera and rigid object motion, but it reports
 reads the wrong motion. The upscaler then fetches history from the wrong place, which
 smears and boils the deformed surface — on a still camera too. Measured on bench Q21
 (a `positionNode` wave and a morph-target blob, ratio 2; bench/docs/NEXT-STEPS.md
-§22): on the **held**, motionless deformers three's velocity cost 5.4 dB (wave) and
+§24): on the **held**, motionless deformers three's velocity cost 5.4 dB (wave) and
 5.8 dB (blob) PSNR against a supersampled reference and made them flicker (temporal
 error 3.9–4.2 /255 per frame against 0.14 with exact motion); rigid objects were
 unaffected (identical PSNR).

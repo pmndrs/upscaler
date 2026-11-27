@@ -4,7 +4,7 @@
  * in capture mode with `?velocity=three|motion-vectors`, one capture per
  * (source, frame, view), a canvas screenshot each, plus a side-by-side grid
  * per frame (top row three's `velocity`, bottom row @pmndrs/motion-vectors'
- * node). Built for Q21 (bench/docs/NEXT-STEPS.md §22); views must be declared
+ * node). Built for Q21 (bench/docs/NEXT-STEPS.md §24); views must be declared
  * by the scenario.
  *
  * Usage:

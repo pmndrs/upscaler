@@ -297,7 +297,7 @@ function q20(frame: number): BenchmarkFrameState {
  * box). The deformation is held (non-zero, still) while history converges,
  * animates under a still camera, keeps animating under an orbit, then holds
  * with the camera still again. Run with `?velocity=three|motion-vectors` to
- * A/B the motion source (bench/docs/NEXT-STEPS.md §22).
+ * A/B the motion source (bench/docs/NEXT-STEPS.md §24).
  */
 export const Q21_SEGMENTS = [
     { name: 'still-held', start: 0, end: 119 },

@@ -65,7 +65,7 @@ import { SingleVariantRegistry } from '../benchmark/variants';
  * position stage, and three's `velocity` in the same MRT reads the patched
  * stage too: on Q21's deformers `engine` measured the same as `node` (≤ 4e-6
  * warp error per frame), so this probe can't A/B the two there — Q21's A/B is
- * the main bench's `?velocity=` (bench/docs/NEXT-STEPS.md §22).
+ * the main bench's `?velocity=` (bench/docs/NEXT-STEPS.md §24).
  */
 
 // `reference`: the 2×2-supersampled render (see **reference** above) as the

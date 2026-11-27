@@ -2251,7 +2251,7 @@ node scripts/run-benchmark.mjs --smoke --ratios 2 --blocks 4 \
 # per-frame records: bench/results/raw/history-overshoot/<label>-2x/summary.json
 ```
 
-## 22. Deformed geometry: caller-supplied velocity + `@pmndrs/motion-vectors` — DONE (2026-11-28)
+## 24. Deformed geometry: caller-supplied velocity + `@pmndrs/motion-vectors` — DONE (2026-11-28)
 
 **Question.** three's `velocity` reports deformation (`positionNode`, morph targets,
 `displacementMap`) as motion; `@pmndrs/motion-vectors`' own lab measures 3.2 px
